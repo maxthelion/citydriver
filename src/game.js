@@ -30,6 +30,7 @@ export class Game {
     this.cameraMode = 0;
     this.generating = false;
     this.generationId = 0;
+    this.modes = [];
 
     this.keys = {};
     window.addEventListener('keydown', (e) => {
@@ -55,6 +56,10 @@ export class Game {
     initMaterials();
     initGeometries();
     this.init();
+  }
+
+  registerMode(mode) {
+    this.modes.push(mode);
   }
 
   init() {
@@ -99,6 +104,8 @@ export class Game {
     this.generating = true;
     const myId = ++this.generationId;
     const loading = document.getElementById('loading');
+
+    for (const mode of this.modes) mode.cleanup(this);
 
     if (this.cityGroup) {
       this.scene.remove(this.cityGroup);
@@ -209,6 +216,7 @@ export class Game {
     }
 
     this.drawMinimap();
+    for (const mode of this.modes) mode.cityGenerated(this);
     this.generating = false;
   }
 
@@ -420,6 +428,7 @@ export class Game {
     ctx.closePath();
     ctx.fill();
     ctx.restore();
+    for (const mode of this.modes) mode.drawMinimap(this.minimapCtx, this);
   }
 
   onResize() {
@@ -432,6 +441,7 @@ export class Game {
     requestAnimationFrame(() => this.animate());
     const dt = Math.min(this.clock.getDelta(), 0.05);
     this.updateCar(dt);
+    for (const mode of this.modes) mode.update(dt, this);
     this.updateCamera(dt);
     this.updateMinimap();
     this.renderer.render(this.scene, this.camera);

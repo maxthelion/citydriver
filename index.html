@@ -126,7 +126,9 @@ canvas { display: block; }
 
 <script type="module">
 import { Game } from './src/game.js';
-new Game();
+import { TreasureHunt } from './src/modes/TreasureHunt.js';
+const game = new Game();
+game.registerMode(new TreasureHunt());
 </script>
 </body>
 </html>

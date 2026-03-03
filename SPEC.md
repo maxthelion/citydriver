@@ -132,6 +132,34 @@ The minimap is drawn once when the city generates (static base layer) then the c
 
 Clicking "Regenerate City" creates an entirely new city with a new random seed. The old city is cleaned up (geometries disposed) and replaced. If a regeneration is triggered while one is in progress, the old one is cancelled.
 
+### 12. Game Modes
+
+The game supports pluggable **game modes** that layer behavior onto the core driving simulation without modifying existing logic. Modes are self-contained modules that register with the game and receive lifecycle callbacks.
+
+**Plugin architecture**:
+- `game.modes` — array of active mode instances
+- `game.registerMode(mode)` — adds a mode to the array
+- Modes extend a `GameMode` base class with four lifecycle hooks:
+  1. **`cleanup(game)`** — called before old city is removed during regeneration. Modes should remove their 3D objects, HUD elements, and reset state.
+  2. **`cityGenerated(game)`** — called after a new city is fully built and the minimap is drawn. Modes should initialize targets, spawn 3D markers, and set up for the new city.
+  3. **`update(dt, game)`** — called each frame after car physics. Modes should check game logic (pickup detection, timers, etc.).
+  4. **`drawMinimap(ctx, game)`** — called at the end of minimap rendering. Modes can draw overlays (markers, paths) on the minimap canvas.
+
+**Design constraints**:
+- Modes must be self-contained: they own their 3D objects, HUD DOM elements, and state. The core game.js only calls the four hooks.
+- Modes access the game via the `game` parameter (scene, cityData, car position, minimap context) but do not modify core game state.
+- Multiple modes can be active simultaneously (hooks are called in registration order).
+- The async city generation means modes registered after `new Game()` are in place before `cityGenerated` fires.
+
+**Treasure Hunt mode** (first mode):
+- Picks a target location on the road network (verified: on road, not inside building, minimum distance from car)
+- 3D marker: gold pillar + spinning diamond + pulsing base ring
+- Minimap overlay: gold diamond at target + dashed line from car to target
+- Timer-based scoring with streak bonuses
+- Self-manages its HUD (timer, score, streak display)
+
+Mode files live in `src/modes/`. Each mode is a single file (plus any pure-logic helpers like `targetPicker.js`).
+
 ---
 
 ## Performance Requirements
