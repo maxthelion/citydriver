@@ -88,6 +88,8 @@ Each district has 2 building templates — functions that take parameters and re
 
 Parameter ranges are district-specific: downtown buildings are 8-25 floors on 8-16 unit footprints; suburban houses are 1-2 floors on 8-12 unit footprints; etc.
 
+**Critical constraint — pitched roof geometry**: Pitched roofs (suburban houses, terraced rows) must be constructed using **direct vertex geometry** (`BufferGeometry` with explicit vertex positions and index arrays), not by rotating `PlaneGeometry` meshes. Euler rotation composition (e.g. `rotation.y = PI/2` then `rotation.x = angle`) produces incorrect orientations because Euler angles are order-dependent and do not compose intuitively for angled surfaces. Additionally, roof materials must use `THREE.DoubleSide` to ensure both slope faces are visible — getting triangle winding correct for both slopes of a symmetric roof is error-prone, and DoubleSide eliminates the problem. The same applies to sawtooth roofs on industrial buildings.
+
 #### Block Layout Patterns
 
 - **Scatter** (downtown, highrise, industrial): Random placement within block, overlap detection

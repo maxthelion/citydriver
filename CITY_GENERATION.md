@@ -62,7 +62,7 @@ All templates build from the same primitives (keeping geometry count low):
 - **Window grid** — rows × columns of emissive planes on a facade
 - **Awning** — a sloped plane or wedge below windows on ground floor
 - **Roof cap** — flat slab slightly wider than the body
-- **Pitched roof** — triangular prism on top
+- **Pitched roof** — two slope quads from eave to ridge + two triangular gable ends, constructed with direct `BufferGeometry` vertex positions (not rotated PlaneGeometry — Euler rotation composition produces incorrect angles). Material must be `DoubleSide` to ensure both slopes render. Same approach for sawtooth roofs.
 - **Rooftop accessory** — AC unit, water tower, antenna, satellite dish (random selection)
 - **Balcony** — small protruding box per window on residential buildings
 - **Signage** — colored plane on ground-floor facade (shops)
