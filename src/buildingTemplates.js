@@ -146,6 +146,30 @@ export function makeRooftopAccessory(type, bw, bd, bh) {
   return group;
 }
 
+/**
+ * Create an awning quad using direct vertex geometry.
+ * A flat sloped surface extending outward from a wall.
+ * x0,x1 = left/right extent; yBack,yFront = height at wall/tip;
+ * zBack,zFront = wall position / outer edge.
+ */
+export function makeAwningQuad(x0, x1, yBack, yFront, zBack, zFront, mat) {
+  const verts = new Float32Array([
+    x0, yBack,  zBack,   // 0: top-left at wall
+    x1, yBack,  zBack,   // 1: top-right at wall
+    x0, yFront, zFront,  // 2: bottom-left at tip
+    x1, yFront, zFront,  // 3: bottom-right at tip
+  ]);
+  const idx = [0, 2, 1, 1, 2, 3];
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const clonedMat = mat.clone();
+  clonedMat.side = THREE.DoubleSide;
+  const mesh = new THREE.Mesh(geo, clonedMat);
+  return mesh;
+}
+
 // ============================================================
 // DOWNTOWN OFFICE TEMPLATES
 // ============================================================
@@ -344,14 +368,14 @@ function shopRow(b) {
   shop.position.set(0, shopH / 2 + 0.3, b.d / 2 + 0.06);
   group.add(shop);
 
-  // Awning above shopfront
-  const awningW = b.w * 0.85;
-  const awningGeo = new THREE.PlaneGeometry(awningW, 1.8);
+  // Awning above shopfront — direct vertex geometry (sloped quad extending from wall)
   const awningMat = materials.awning[b.accentColorIdx % materials.awning.length];
-  const awning = new THREE.Mesh(awningGeo, awningMat);
-  awning.position.set(0, b.floorHeight + 0.2, b.d / 2 + 0.9);
-  awning.rotation.x = -0.3;
-  group.add(awning);
+  const aw = b.w * 0.85;
+  const aDepth = 1.5;
+  const aDrop = 0.4;
+  const aTop = b.floorHeight + 0.2;
+  const aWall = b.d / 2 + 0.02;
+  group.add(makeAwningQuad(-aw/2, aw/2, aTop, aTop - aDrop, aWall, aWall + aDepth, awningMat));
 
   // Upper floor windows
   if (b.floors > 1) {
@@ -376,21 +400,31 @@ function cornerShop(b) {
   body.receiveShadow = true;
   group.add(body);
 
-  // Awnings on two faces
+  // Awnings on two faces — direct vertex geometry
   const awningMat = materials.awning[b.accentColorIdx % materials.awning.length];
-  for (const [axis, sign, w] of [['z', 1, b.w], ['x', 1, b.d]]) {
-    const awningGeo = new THREE.PlaneGeometry(w * 0.85, 1.8);
-    const awning = new THREE.Mesh(awningGeo, awningMat);
-    if (axis === 'z') {
-      awning.position.set(0, b.floorHeight + 0.2, b.d / 2 + 0.9);
-      awning.rotation.x = -0.3;
-    } else {
-      awning.position.set(b.w / 2 + 0.9, b.floorHeight + 0.2, 0);
-      awning.rotation.x = -0.3;
-      awning.rotation.y = -Math.PI / 2;
-    }
-    group.add(awning);
-  }
+  const aDepth = 1.5;
+  const aDrop = 0.4;
+  const aTop = b.floorHeight + 0.2;
+  // +Z face awning
+  const aw1 = b.w * 0.85;
+  group.add(makeAwningQuad(-aw1/2, aw1/2, aTop, aTop - aDrop, b.d/2 + 0.02, b.d/2 + aDepth, awningMat));
+  // +X face awning (swap x/z axes)
+  const aw2 = b.d * 0.85;
+  const xWall = b.w / 2 + 0.02;
+  const xVerts = new Float32Array([
+    xWall,           aTop,        -aw2/2,
+    xWall,           aTop,         aw2/2,
+    xWall + aDepth,  aTop - aDrop, -aw2/2,
+    xWall + aDepth,  aTop - aDrop,  aw2/2,
+  ]);
+  const xIdx = [0, 2, 1, 1, 2, 3];
+  const xGeo = new THREE.BufferGeometry();
+  xGeo.setAttribute('position', new THREE.Float32BufferAttribute(xVerts, 3));
+  xGeo.setIndex(xIdx);
+  xGeo.computeVertexNormals();
+  const xMat = awningMat.clone();
+  xMat.side = THREE.DoubleSide;
+  group.add(new THREE.Mesh(xGeo, xMat));
 
   // Shopfronts on two faces
   const shopMat = materials.shopfront[b.accentColorIdx % materials.shopfront.length];
