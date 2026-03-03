@@ -25,18 +25,18 @@ describe('Building grounding', () => {
     expect(buildings.length).toBeGreaterThan(0);
   });
 
-  it('every building base is at or below terrain at all 4 corners', () => {
+  it('building base is at the highest corner so the door is accessible', () => {
     for (const b of buildings) {
-      // buildBuilding sets group.position.y = min of 5 sample points
-      const groundY = Math.min(
+      // buildBuilding sets group.position.y = max of 5 sample points
+      const samples = [
         sampleHeightmap(b.x, b.z),
         sampleHeightmap(b.x - b.w / 2, b.z - b.d / 2),
         sampleHeightmap(b.x + b.w / 2, b.z - b.d / 2),
         sampleHeightmap(b.x - b.w / 2, b.z + b.d / 2),
         sampleHeightmap(b.x + b.w / 2, b.z + b.d / 2),
-      );
+      ];
+      const groundY = Math.max(...samples);
 
-      // Check that groundY is at or below all 4 corners
       const corners = [
         [b.x - b.w / 2, b.z - b.d / 2],
         [b.x + b.w / 2, b.z - b.d / 2],
@@ -44,17 +44,15 @@ describe('Building grounding', () => {
         [b.x + b.w / 2, b.z + b.d / 2],
       ];
 
+      // groundY should be >= all corners (it's the max)
       for (const [cx, cz] of corners) {
         const cornerTerrain = sampleHeightmap(cx, cz);
-        // groundY should be <= cornerTerrain (it's the min of all 5 points)
-        expect(groundY).toBeLessThanOrEqual(cornerTerrain + 0.01);
+        expect(groundY).toBeGreaterThanOrEqual(cornerTerrain - 0.01);
       }
 
-      // No building base should be more than EXTRA_DEPTH + 0.5 below terrain at any corner
-      for (const [cx, cz] of corners) {
-        const cornerTerrain = sampleHeightmap(cx, cz);
-        expect(cornerTerrain - groundY).toBeLessThan(BUILDING_EXTRA_DEPTH + 10);
-      }
+      // The extra depth must cover the slope: groundY - lowest corner < EXTRA_DEPTH
+      const minCorner = Math.min(...corners.map(([cx, cz]) => sampleHeightmap(cx, cz)));
+      expect(groundY - minCorner).toBeLessThan(BUILDING_EXTRA_DEPTH);
     }
   });
 });

@@ -109,7 +109,7 @@ Additional fields for district buildings: `district`, `templateId`, `floors`, `f
 
 #### Grounding & Overlaps
 
-- **Grounding**: Each building samples the heightmap at its center and four corners, takes the minimum, and places its base there. An extra ~2 units of depth is added below ground level so the building is buried into slopes rather than floating.
+- **Grounding**: Each building samples the heightmap at its center and four corners, takes the **maximum** height, and places its base (y=0 of the group) there. This ensures the ground floor and door are accessible at the highest terrain point. An extra depth of ~8 units is added below ground level on every building body so that the lower corners of the footprint are buried into the slope rather than leaving a visible gap. The extra depth must exceed the maximum height difference between the highest and lowest corners of any building footprint.
 - **No overlaps**: Buildings must not overlap each other. All layout methods check against the global building list with 1-unit margin.
 
 ### 5. Parks
@@ -290,9 +290,9 @@ All tests use a **fixed seed** for deterministic results.
 - Catches: triangle winding bugs where roads in one direction are back-face culled (invisible from above)
 
 **4. Building grounding**
-- For every building, verify its base Y position is at or below `sampleHeightmap()` at all 4 footprint corners
-- No building base corner should be more than `EXTRA_DEPTH + 0.5` above terrain
-- Catches: floating buildings
+- For every building, verify its base Y position equals the maximum of `sampleHeightmap()` at the center and 4 footprint corners (so the door is accessible at the highest ground point)
+- The height difference between the highest and lowest corners must be less than `BUILDING_EXTRA_DEPTH` (so the building never floats above terrain at any corner)
+- Catches: floating buildings, sunken doors
 
 **5. Park objects on ground**
 - Every tree trunk base Y ≈ `sampleHeightmap(x, z)` within 0.5

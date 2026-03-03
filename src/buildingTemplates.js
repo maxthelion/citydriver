@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { materials, sharedGeo } from './materials.js';
 
-const EXTRA_DEPTH = 2;
+const EXTRA_DEPTH = 8;
 
 // ============================================================
 // GEOMETRY HELPERS

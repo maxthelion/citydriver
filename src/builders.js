@@ -130,12 +130,14 @@ export function buildIntersection(ix, iz) {
   return mesh;
 }
 
-export const BUILDING_EXTRA_DEPTH = 2;
+export const BUILDING_EXTRA_DEPTH = 8;
 
 export function buildBuilding(b) {
   const group = new THREE.Group();
 
-  const groundY = Math.min(
+  // Use the MAX height so the door/base sits at the highest ground point.
+  // The extra depth buries the low side into the slope.
+  const groundY = Math.max(
     sampleHeightmap(b.x, b.z),
     sampleHeightmap(b.x - b.w / 2, b.z - b.d / 2),
     sampleHeightmap(b.x + b.w / 2, b.z - b.d / 2),
