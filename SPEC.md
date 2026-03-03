@@ -56,16 +56,59 @@ A center line (yellow) runs along each road.
 
 **Critical constraint — triangle winding order**: Road meshes are constructed with two vertices per cross-section (left edge and right edge), connected into triangles. The triangle winding must produce **upward-facing normals** so the road surface is visible from above. When constructing a triangle strip from left/right vertex pairs, the cross product of the along-road edge and the across-road edge must yield a positive Y component. If roads run in different axis directions (some along X, some along Z), the left/right vertex assignment must be consistent so that all road triangles face upward. A common bug is that roads running in one direction render correctly while roads in the perpendicular direction are back-face culled (invisible). Verify with a test that all road mesh vertex normals have `normal.y > 0`.
 
-### 4. Buildings
+### 4. Districts & Buildings
 
-Buildings are box-shaped with these properties:
-- **Height distribution**: Taller near city center, shorter at edges (simulating a downtown core)
-- **Density**: More buildings per block near center, fewer at edges
-- **Types**: Residential (brown tones, short), commercial (blue-gray, medium), skyscraper (dark, tall)
-- **Windows**: Taller buildings have rows of emissive window panels on their facades
-- **Rooftop details**: Skyscrapers get antennas and AC units
+City blocks are classified into **district types** based on distance from center and noise-based clustering. Each district determines the character of its buildings through templates with parametric variation.
+
+#### District Types
+
+| District | Location tendency | Character |
+|---|---|---|
+| **Downtown office** | City center (dist < 0.2) | Tall glass/steel towers, lobbies, window grids, antennas |
+| **Highrise residential** | Inner ring (dist < 0.5) | Apartment blocks, balconies, rooftop railings, water towers |
+| **Shopping street** | Mid ring, along roads | Low-rise (2-3 floors), shop fronts, awnings, signage |
+| **Market** | Scattered clusters | Open stalls with canopy poles, market halls |
+| **Suburban houses** | Outer ring (dist > 0.5) | Small houses with pitched roofs, terraced rows |
+| **Park** | Noise-based clusters | Green space, trees, benches (see §5) |
+| **Industrial** | Edge/corner areas | Warehouses, factories, sawtooth roofs, smokestacks |
+
+#### District Assignment
+
+1. Compute `distFromCenter` (0 at center, 1 at edge) for each block
+2. Sample district noise (separate Perlin layer) at block position for clustering
+3. Weighted random selection by distance band:
+   - `< 0.2`: downtown office (80%), highrise residential (20%)
+   - `< 0.5`: highrise residential (40%), shopping street (30%), park (30%)
+   - `< 0.8`: shopping street (25%), suburban houses (40%), park (20%), market (15%)
+   - `≥ 0.8`: suburban houses (50%), industrial (30%), park (20%)
+
+#### Building Templates
+
+Each district has 2 building templates — functions that take parameters and return a `THREE.Group`. A template is randomly selected per building. Templates share construction primitives (window grids, awnings, pitched roofs, rooftop accessories, balconies, doors).
+
+Parameter ranges are district-specific: downtown buildings are 8-25 floors on 8-16 unit footprints; suburban houses are 1-2 floors on 8-12 unit footprints; etc.
+
+#### Block Layout Patterns
+
+- **Scatter** (downtown, highrise, industrial): Random placement within block, overlap detection
+- **Edge-fill** (shopping streets): Buildings placed along block perimeter facing roads, edge-to-edge
+- **Grid** (markets): Regular grid of small structures with paths between
+- **Single-plot** (suburban): Block subdivided into ~20×20 plots, one house per plot
+
+#### Doors
+
+Every building has a **door** — a PlaneGeometry (1.2×2.2 units) placed on one facade at ground level. The door face is selected based on which direction faces the nearest road. Doors are required on all buildings to enable future interior systems. They are offset 0.06 units from the building wall to prevent z-fighting.
+
+#### Building Data Contract
+
+Every building object must have at minimum: `{ x, z, w, h, d }` (position and footprint dimensions). These fields are used by car collision, minimap rendering, target picker, and tests.
+
+Additional fields for district buildings: `district`, `templateId`, `floors`, `floorHeight`, `colorIdx`, `accentColorIdx`, `doorFace` (0-3), `seed`.
+
+#### Grounding & Overlaps
+
 - **Grounding**: Each building samples the heightmap at its center and four corners, takes the minimum, and places its base there. An extra ~2 units of depth is added below ground level so the building is buried into slopes rather than floating.
-- **No overlaps**: Buildings must not overlap each other. Use collision detection during placement.
+- **No overlaps**: Buildings must not overlap each other. All layout methods check against the global building list with 1-unit margin.
 
 ### 5. Parks
 
@@ -268,6 +311,22 @@ All tests use a **fixed seed** for deterministic results.
 - For each building, verify its footprint center falls within a block boundary, not on a road corridor
 - Catches: buildings placed in the middle of roads
 
+**9. District classification validity**
+- Every block has a valid district type from the 7 defined types
+- City contains at least 3 different district types (variety check)
+- Center blocks (distFromCenter < 0.2) are downtown or highrise
+- Catches: district assignment algorithm bugs
+
+**10. Building compatibility contract**
+- All buildings have `x, z, w, d` as positive numbers
+- All buildings have `district`, `floors`, `doorFace` metadata
+- Catches: missing fields that break car collision, minimap, or target picker
+
+**11. Building doors**
+- Every built building mesh group contains at least one door geometry
+- Door is positioned near ground level (center Y ≈ 1.1)
+- Catches: missing doors, mispositioned doors
+
 ### Test Architecture
 
 The game code must be split into importable ES modules so tests can import the pure logic:
@@ -283,18 +342,23 @@ Tests import these modules directly. No browser or WebGL context is needed.
 ## Project Structure (Suggested)
 
 ```
-index.html          — HTML shell with CSS, imports game entry point
+index.html              — HTML shell with CSS, imports game entry point
 src/
-  noise.js          — PerlinNoise class
-  heightmap.js      — Constants, generateHeightmap(), sampleHeightmap()
-  city.js           — CityGenerator class (pure data, no meshes)
-  builders.js       — Mesh construction functions (roads, buildings, parks, terrain)
-  materials.js      — Shared materials and geometries
-  car.js            — Car mesh and optionally car physics
-  game.js           — Game class (scene, renderer, game loop, UI, camera)
-package.json        — type: "module", devDeps: three, vitest
+  noise.js              — PerlinNoise class
+  heightmap.js          — Constants, generateHeightmap(), sampleHeightmap()
+  city.js               — CityGenerator class (district classification, layout methods)
+  builders.js           — Mesh construction (roads, buildings, parks, terrain)
+  buildingTemplates.js  — District building templates and shared primitives
+  materials.js          — Shared materials, district palettes, and geometries
+  car.js                — Car mesh and optionally car physics
+  game.js               — Game class (scene, renderer, game loop, UI, camera)
+  modes/
+    GameMode.js         — Base class for game modes
+    TreasureHunt.js     — Treasure hunt mode
+    targetPicker.js     — Road location picker for modes
+package.json            — type: "module", devDeps: three, vitest
 test/
-  *.test.js         — Test files
+  *.test.js             — Test files
 ```
 
 Implementors should feel free to use whatever module structure, class hierarchy, or abstractions best suit their approach. The key invariants are the heightmap consistency, the test coverage, and the visual/gameplay requirements above.

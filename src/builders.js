@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { sampleHeightmap, TERRAIN_SIZE, TERRAIN_SEGMENTS, ROAD_WIDTH, CELL_SIZE, GRID_COUNT } from './heightmap.js';
 import { materials, sharedGeo } from './materials.js';
+import { DISTRICT_TEMPLATES, addDoor } from './buildingTemplates.js';
 
 export function createTerrain(heightmapData) {
   const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGMENTS, TERRAIN_SEGMENTS);
@@ -142,39 +143,51 @@ export function buildBuilding(b) {
     sampleHeightmap(b.x + b.w / 2, b.z + b.d / 2),
   );
 
-  const mat = materials.building[b.type][b.colorIdx % materials.building[b.type].length];
+  if (b.district && DISTRICT_TEMPLATES[b.district]) {
+    const templates = DISTRICT_TEMPLATES[b.district];
+    const templateFn = templates[b.templateId % templates.length];
+    const buildingGroup = templateFn(b);
+    group.add(buildingGroup);
+  } else {
+    // Legacy fallback for old building data
+    const mat = materials.building[b.type][b.colorIdx % materials.building[b.type].length];
+    const geo = new THREE.BoxGeometry(b.w, b.h + BUILDING_EXTRA_DEPTH, b.d);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(0, (b.h + BUILDING_EXTRA_DEPTH) / 2 - BUILDING_EXTRA_DEPTH, 0);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
 
-  const geo = new THREE.BoxGeometry(b.w, b.h + BUILDING_EXTRA_DEPTH, b.d);
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(0, (b.h + BUILDING_EXTRA_DEPTH) / 2 - BUILDING_EXTRA_DEPTH, 0);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  group.add(mesh);
-
-  if (b.h > 10) {
-    const floors = Math.floor(b.h / 4);
-    const windowsPerFloor = Math.max(1, Math.floor(b.w / 5));
-    for (let f = 0; f < floors; f++) {
-      for (let w = 0; w < windowsPerFloor; w++) {
-        const wy = f * 4 + 3;
-        const wx = (w - (windowsPerFloor - 1) / 2) * 4.5;
-        for (const side of [1, -1]) {
-          const winMesh = new THREE.Mesh(sharedGeo.windowPane, materials.window);
-          winMesh.position.set(wx, wy, side * (b.d / 2 + 0.05));
-          if (side === -1) winMesh.rotation.y = Math.PI;
-          group.add(winMesh);
+    if (b.h > 10) {
+      const floors = Math.floor(b.h / 4);
+      const windowsPerFloor = Math.max(1, Math.floor(b.w / 5));
+      for (let f = 0; f < floors; f++) {
+        for (let w = 0; w < windowsPerFloor; w++) {
+          const wy = f * 4 + 3;
+          const wx = (w - (windowsPerFloor - 1) / 2) * 4.5;
+          for (const side of [1, -1]) {
+            const winMesh = new THREE.Mesh(sharedGeo.windowPane, materials.window);
+            winMesh.position.set(wx, wy, side * (b.d / 2 + 0.05));
+            if (side === -1) winMesh.rotation.y = Math.PI;
+            group.add(winMesh);
+          }
         }
       }
     }
-  }
 
-  if (b.type === 'skyscraper' && b.h > 30) {
-    const antenna = new THREE.Mesh(sharedGeo.antenna, materials.antenna);
-    antenna.position.set(0, b.h + 4, 0);
-    group.add(antenna);
-    const ac = new THREE.Mesh(sharedGeo.ac, materials.ac);
-    ac.position.set(b.w * 0.2, b.h + 1, b.d * 0.2);
-    group.add(ac);
+    if (b.type === 'skyscraper' && b.h > 30) {
+      const antenna = new THREE.Mesh(sharedGeo.antenna, materials.antenna);
+      antenna.position.set(0, b.h + 4, 0);
+      group.add(antenna);
+      const ac = new THREE.Mesh(sharedGeo.ac, materials.ac);
+      ac.position.set(b.w * 0.2, b.h + 1, b.d * 0.2);
+      group.add(ac);
+    }
+
+    // Add door to legacy buildings too
+    if (b.doorFace == null) b.doorFace = 0;
+    if (b.seed == null) b.seed = 0;
+    addDoor(group, b);
   }
 
   group.position.set(b.x, groundY, b.z);
