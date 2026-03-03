@@ -66,7 +66,9 @@ export function makeWindowGrid(width, floors, floorHeight, faceSign, axis, offse
  */
 export function makePitchedRoof(width, depth, peakHeight, roofColorIdx) {
   const group = new THREE.Group();
-  const mat = materials.roof[roofColorIdx % materials.roof.length];
+  const baseMat = materials.roof[roofColorIdx % materials.roof.length];
+  const mat = baseMat.clone();
+  mat.side = THREE.DoubleSide;
   const hw = width / 2;
   const hd = depth / 2;
 
