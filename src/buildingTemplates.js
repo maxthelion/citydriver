@@ -62,36 +62,53 @@ export function makeWindowGrid(width, floors, floorHeight, faceSign, axis, offse
 }
 
 /**
- * Create a pitched roof (two slope planes + gable ends).
+ * Create a pitched roof (two slope faces + gable ends) using direct vertex geometry.
  */
 export function makePitchedRoof(width, depth, peakHeight, roofColorIdx) {
   const group = new THREE.Group();
   const mat = materials.roof[roofColorIdx % materials.roof.length];
-  const halfW = width / 2;
-  const slopeLen = Math.sqrt(halfW * halfW + peakHeight * peakHeight);
+  const hw = width / 2;
+  const hd = depth / 2;
 
-  for (const side of [1, -1]) {
-    const plane = new THREE.PlaneGeometry(depth, slopeLen);
-    const mesh = new THREE.Mesh(plane, mat);
-    mesh.rotation.y = Math.PI / 2;
-    mesh.rotation.x = side * Math.atan2(halfW, peakHeight);
-    mesh.position.set(side * halfW / 2, peakHeight / 2, 0);
+  // Roof slope faces: two quads from eave to ridge
+  // Left slope: (-hw,0,-hd), (-hw,0,hd), (0,peak,-hd), (0,peak,hd)
+  // Right slope: (hw,0,-hd), (hw,0,hd), (0,peak,-hd), (0,peak,hd)
+  for (const side of [-1, 1]) {
+    const verts = new Float32Array([
+      side * hw, 0, -hd,
+      side * hw, 0,  hd,
+      0, peakHeight, -hd,
+      0, peakHeight,  hd,
+    ]);
+    const idx = side === -1
+      ? [0, 2, 1, 1, 2, 3]   // left slope faces outward
+      : [0, 1, 2, 1, 3, 2];  // right slope faces outward
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     group.add(mesh);
   }
 
-  const triShape = new THREE.Shape();
-  triShape.moveTo(-halfW, 0);
-  triShape.lineTo(0, peakHeight);
-  triShape.lineTo(halfW, 0);
-  triShape.closePath();
-  const triGeo = new THREE.ShapeGeometry(triShape);
-  for (const side of [1, -1]) {
-    const gable = new THREE.Mesh(triGeo, mat);
-    gable.position.set(0, 0, side * depth / 2);
-    if (side === -1) gable.rotation.y = Math.PI;
-    group.add(gable);
+  // Gable ends (triangular faces at front and back)
+  for (const side of [-1, 1]) {
+    const verts = new Float32Array([
+      -hw, 0, side * hd,
+       hw, 0, side * hd,
+       0, peakHeight, side * hd,
+    ]);
+    const idx = side === 1 ? [0, 1, 2] : [0, 2, 1]; // face outward
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    group.add(mesh);
   }
+
   return group;
 }
 
@@ -584,20 +601,35 @@ function factory(b) {
   body.receiveShadow = true;
   group.add(body);
 
-  // Sawtooth roof: repeating triangular sections
+  // Sawtooth roof: repeating triangular prisms using direct vertex geometry
   const sawteethCount = Math.max(2, Math.floor(b.w / 6));
   const toothW = b.w / sawteethCount;
   const toothH = 2;
+  const hd = b.d / 2;
   for (let i = 0; i < sawteethCount; i++) {
     const tx = (i - (sawteethCount - 1) / 2) * toothW;
-    const toothShape = new THREE.Shape();
-    toothShape.moveTo(-toothW / 2, 0);
-    toothShape.lineTo(-toothW / 2, toothH);
-    toothShape.lineTo(toothW / 2, 0);
-    toothShape.closePath();
-    const toothGeo = new THREE.ExtrudeGeometry(toothShape, { depth: b.d, bevelEnabled: false });
-    const tooth = new THREE.Mesh(toothGeo, mat);
-    tooth.position.set(tx, b.h, -b.d / 2);
+    const x0 = tx - toothW / 2;
+    const x1 = tx + toothW / 2;
+    // Vertical face (left) + slope face (right) + two triangle ends
+    const verts = new Float32Array([
+      x0, b.h, -hd,          // 0: bottom-left-back
+      x0, b.h, hd,           // 1: bottom-left-front
+      x0, b.h + toothH, -hd, // 2: top-left-back
+      x0, b.h + toothH, hd,  // 3: top-left-front
+      x1, b.h, -hd,          // 4: bottom-right-back
+      x1, b.h, hd,           // 5: bottom-right-front
+    ]);
+    const idx = [
+      0, 2, 1, 1, 2, 3, // vertical left face
+      2, 4, 3, 3, 4, 5, // slope face
+      0, 4, 2,          // back triangle
+      1, 3, 5,          // front triangle
+    ];
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const tooth = new THREE.Mesh(geo, mat);
     group.add(tooth);
   }
 
