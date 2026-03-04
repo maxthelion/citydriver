@@ -7,12 +7,11 @@ export class SeededRandom {
    * @param {number} seed - Integer seed value
    */
   constructor(seed) {
-    this._state = seed | 0; // coerce to 32-bit integer
+    this._state = seed | 0;
   }
 
   /**
    * Returns a float in [0, 1) using the mulberry32 algorithm.
-   * @returns {number}
    */
   next() {
     this._state |= 0;
@@ -24,9 +23,6 @@ export class SeededRandom {
 
   /**
    * Returns a float in [min, max).
-   * @param {number} min
-   * @param {number} max
-   * @returns {number}
    */
   range(min, max) {
     return min + this.next() * (max - min);
@@ -34,9 +30,6 @@ export class SeededRandom {
 
   /**
    * Returns an integer in [min, max] inclusive.
-   * @param {number} min
-   * @param {number} max
-   * @returns {number}
    */
   int(min, max) {
     min = Math.ceil(min);
@@ -46,8 +39,6 @@ export class SeededRandom {
 
   /**
    * Returns a random element from the array.
-   * @param {Array} array
-   * @returns {*}
    */
   pick(array) {
     return array[this.int(0, array.length - 1)];
@@ -55,8 +46,6 @@ export class SeededRandom {
 
   /**
    * In-place Fisher-Yates shuffle. Returns the array for chaining.
-   * @param {Array} array
-   * @returns {Array}
    */
   shuffle(array) {
     for (let i = array.length - 1; i > 0; i--) {
@@ -71,17 +60,23 @@ export class SeededRandom {
   /**
    * Creates a new independent SeededRandom derived from the current state
    * and a string label. The parent's state is NOT advanced.
-   * @param {string} label
-   * @returns {SeededRandom}
    */
   fork(label) {
-    // Hash the label string into a 32-bit integer
     let labelHash = 0;
     for (let i = 0; i < label.length; i++) {
       labelHash = ((labelHash << 5) - labelHash + label.charCodeAt(i)) | 0;
     }
-    // Combine current state with label hash to produce a new seed
     const newSeed = (this._state ^ labelHash) | 0;
     return new SeededRandom(newSeed);
+  }
+
+  /**
+   * Returns a Gaussian-distributed value (mean 0, stddev 1).
+   * Uses Box-Muller transform.
+   */
+  gaussian() {
+    const u1 = this.next();
+    const u2 = this.next();
+    return Math.sqrt(-2 * Math.log(u1 || 1e-10)) * Math.cos(2 * Math.PI * u2);
   }
 }

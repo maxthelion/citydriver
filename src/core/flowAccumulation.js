@@ -1,38 +1,20 @@
 /**
- * Flow accumulation and drainage network extraction.
- *
- * Standard GIS hydrological algorithms that derive a river network from a
- * heightmap.  Pipeline:
- *   1. fillSinks()        — remove depressions so water always reaches an edge
- *   2. flowDirections()   — D8 steepest-descent direction for every cell
- *   3. flowAccumulation() — count upstream contributing cells
- *   4. extractStreams()    — trace stream segments into a drainage tree
- *
- * Depends on a Heightmap with: .width, .height, .get(gx,gz), .set(gx,gz,v)
+ * D8 flow routing and drainage network extraction.
+ * Adapted to work with Grid2D.
  */
 
-// ---------------------------------------------------------------------------
-// Direction encoding (D8)
-//   0=E  1=SE  2=S  3=SW  4=W  5=NW  6=N  7=NE
-// ---------------------------------------------------------------------------
+// D8 direction encoding: 0=E 1=SE 2=S 3=SW 4=W 5=NW 6=N 7=NE
 const DX = [1, 1, 0, -1, -1, -1, 0, 1];
 const DZ = [0, 1, 1, 1, 0, -1, -1, -1];
 const DIST = [1, Math.SQRT2, 1, Math.SQRT2, 1, Math.SQRT2, 1, Math.SQRT2];
-
-// Sentinel for cells that drain off the edge (or have no downhill neighbor).
 const NO_DIR = -1;
 
-// ---------------------------------------------------------------------------
-// MinHeap — lightweight priority queue keyed by a numeric priority.
-// ---------------------------------------------------------------------------
-class MinHeap {
-  constructor() {
-    this._data = [];  // [{priority, value}]
-  }
+export { DX, DZ, DIST, NO_DIR };
 
-  get size() {
-    return this._data.length;
-  }
+// Min-heap for priority flood
+class MinHeap {
+  constructor() { this._data = []; }
+  get size() { return this._data.length; }
 
   push(priority, value) {
     this._data.push({ priority, value });
@@ -75,43 +57,29 @@ class MinHeap {
   }
 }
 
-// ---------------------------------------------------------------------------
-// fillSinks
-// ---------------------------------------------------------------------------
-
 /**
- * Fill sinks (depressions) in the heightmap so water can always flow to an
- * edge.  Uses a priority-flood algorithm (variant of Planchon-Darboux).
- * Modifies heightmap in place.  Only raises cells, never lowers them.
- * Edge cells are never modified (they drain off-map).
+ * Fill sinks in a Grid2D elevation so water can always flow to an edge.
+ * Modifies the grid in place.
  */
-export function fillSinks(heightmap) {
-  const W = heightmap.width;
-  const H = heightmap.height;
+export function fillSinks(elevation) {
+  const W = elevation.width;
+  const H = elevation.height;
   const total = W * H;
-
-  // Tiny increment added when raising cells so that filled flats have a
-  // slight gradient toward their pour point.  This lets D8 route flow
-  // across filled areas without needing a separate flat-resolution pass.
-  // We use the smallest float32 increment that is reliably distinguishable
-  // at typical terrain elevations (order 1-100).
   const EPS = 1e-5;
 
   const processed = new Uint8Array(total);
   const heap = new MinHeap();
 
-  // Seed the heap with all edge cells.
   for (let gz = 0; gz < H; gz++) {
     for (let gx = 0; gx < W; gx++) {
       if (gx === 0 || gx === W - 1 || gz === 0 || gz === H - 1) {
         const idx = gz * W + gx;
         processed[idx] = 1;
-        heap.push(heightmap.get(gx, gz), idx);
+        heap.push(elevation.get(gx, gz), idx);
       }
     }
   }
 
-  // Process cells lowest-first.
   while (heap.size > 0) {
     const { priority: elev, value: idx } = heap.pop();
     const cx = idx % W;
@@ -126,13 +94,11 @@ export function fillSinks(heightmap) {
       if (processed[nIdx]) continue;
       processed[nIdx] = 1;
 
-      let nElev = heightmap.get(nx, nz);
+      let nElev = elevation.get(nx, nz);
       if (nElev <= elev) {
-        // Raise the neighbor so it can drain through us.
-        // Add EPS to avoid perfect flats in the filled region.
         const raised = elev + EPS;
         if (nElev < raised) {
-          heightmap.set(nx, nz, raised);
+          elevation.set(nx, nz, raised);
           nElev = raised;
         }
       }
@@ -141,39 +107,27 @@ export function fillSinks(heightmap) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// flowDirections
-// ---------------------------------------------------------------------------
-
 /**
- * Compute D8 flow direction for each cell.
- * Each cell flows to its lowest neighbor (steepest downhill gradient).
- * Edge cells that have no lower neighbor flow off-map (direction = -1).
- *
- * Returns a flat Int8Array of size width*height.
- * Values 0-7 encode direction per the D8 convention; -1 = off-edge / flat.
- *
- * IMPORTANT: call fillSinks first, otherwise interior cells may have no
- * valid flow direction.
+ * Compute D8 flow directions for a Grid2D.
+ * Returns an Int8Array of size width*height.
  */
-export function flowDirections(heightmap) {
-  const W = heightmap.width;
-  const H = heightmap.height;
+export function flowDirections(elevation) {
+  const W = elevation.width;
+  const H = elevation.height;
   const dirs = new Int8Array(W * H);
 
   for (let gz = 0; gz < H; gz++) {
     for (let gx = 0; gx < W; gx++) {
-      const elev = heightmap.get(gx, gz);
+      const elev = elevation.get(gx, gz);
       let bestDir = NO_DIR;
-      let bestGrad = 0; // steepest gradient seen so far
+      let bestGrad = 0;
 
       for (let d = 0; d < 8; d++) {
         const nx = gx + DX[d];
         const nz = gz + DZ[d];
         if (nx < 0 || nx >= W || nz < 0 || nz >= H) continue;
 
-        const nElev = heightmap.get(nx, nz);
-        const drop = elev - nElev;
+        const drop = elev - elevation.get(nx, nz);
         if (drop <= 0) continue;
 
         const grad = drop / DIST[d];
@@ -190,43 +144,30 @@ export function flowDirections(heightmap) {
   return dirs;
 }
 
-// ---------------------------------------------------------------------------
-// flowAccumulation
-// ---------------------------------------------------------------------------
-
 /**
- * Compute flow accumulation: for each cell, count how many upstream cells
- * drain through it (including itself).
- *
- * Uses a topological sort by elevation (highest first).  Each cell's
- * accumulation is passed downstream.
- *
- * Returns a Float32Array of size width*height.  Minimum value is 1.
+ * Compute flow accumulation from elevation and flow directions.
+ * Returns a Float32Array of size width*height.
  */
-export function flowAccumulation(heightmap, directions) {
-  const W = heightmap.width;
-  const H = heightmap.height;
+export function flowAccumulation(elevation, directions) {
+  const W = elevation.width;
+  const H = elevation.height;
   const total = W * H;
 
-  // Build an array of indices sorted by elevation (highest first).
   const indices = new Uint32Array(total);
   for (let i = 0; i < total; i++) indices[i] = i;
 
-  // Extract elevations into a contiguous array for fast sorting.
   const elevations = new Float32Array(total);
   for (let gz = 0; gz < H; gz++) {
     for (let gx = 0; gx < W; gx++) {
-      elevations[gz * W + gx] = heightmap.get(gx, gz);
+      elevations[gz * W + gx] = elevation.get(gx, gz);
     }
   }
 
   indices.sort((a, b) => elevations[b] - elevations[a]);
 
-  // Initialize every cell's accumulation to 1 (itself).
   const acc = new Float32Array(total);
   for (let i = 0; i < total; i++) acc[i] = 1;
 
-  // Process highest first — push accumulation downstream.
   for (let k = 0; k < total; k++) {
     const idx = indices[k];
     const dir = directions[idx];
@@ -244,34 +185,22 @@ export function flowAccumulation(heightmap, directions) {
   return acc;
 }
 
-// ---------------------------------------------------------------------------
-// extractStreams
-// ---------------------------------------------------------------------------
-
 /**
- * Extract stream/river network from flow accumulation data.
- *
- * @param {Float32Array} accumulation — from flowAccumulation()
- * @param {Int8Array} directions — from flowDirections()
- * @param {object} heightmap — heightmap with get(gx,gz)
- * @param {object} thresholds — { stream, river, majorRiver } cell counts
- * @param {number} [seaLevel=-Infinity] — sea level for headwater filtering
- * @returns {object[]} Array of root DrainageNode objects (one per outlet).
+ * Extract stream segments from flow accumulation data.
  */
-export function extractStreams(accumulation, directions, heightmap, thresholds = { stream: 50, river: 500, majorRiver: 5000 }, seaLevel = -Infinity) {
-  const W = heightmap.width;
-  const H = heightmap.height;
+export function extractStreams(accumulation, directions, elevation, thresholds = { stream: 50, river: 500, majorRiver: 5000 }) {
+  const W = elevation.width;
+  const H = elevation.height;
   const total = W * H;
   const streamThreshold = thresholds.stream;
 
-  // ---- 1. Identify stream cells ----
   const isStream = new Uint8Array(total);
   for (let i = 0; i < total; i++) {
     if (accumulation[i] >= streamThreshold) isStream[i] = 1;
   }
 
-  // ---- 2. Count how many upstream stream-cell neighbors flow INTO each cell ----
-  const upstreamStreamCount = new Uint8Array(total);
+  // Count upstream stream-cell neighbors flowing into each cell
+  const upstreamCount = new Uint8Array(total);
   for (let gz = 0; gz < H; gz++) {
     for (let gx = 0; gx < W; gx++) {
       const idx = gz * W + gx;
@@ -281,109 +210,41 @@ export function extractStreams(accumulation, directions, heightmap, thresholds =
       const nx = gx + DX[dir];
       const nz = gz + DZ[dir];
       if (nx < 0 || nx >= W || nz < 0 || nz >= H) continue;
-      const nIdx = nz * W + nx;
-      if (isStream[nIdx]) {
-        upstreamStreamCount[nIdx]++;
-      }
+      if (isStream[nz * W + nx]) upstreamCount[nz * W + nx]++;
     }
   }
 
-  // ---- 3. Identify headwater cells ----
-  // A headwater is a stream cell with zero upstream stream-cell contributors.
-  const rawHeadwaters = [];
+  // Find headwaters (stream cells with no upstream stream contributors)
+  const headwaters = [];
   for (let gz = 0; gz < H; gz++) {
     for (let gx = 0; gx < W; gx++) {
       const idx = gz * W + gx;
-      if (isStream[idx] && upstreamStreamCount[idx] === 0) {
-        rawHeadwaters.push({ gx, gz });
+      if (isStream[idx] && upstreamCount[idx] === 0) {
+        headwaters.push({ gx, gz });
       }
     }
   }
-
-  // Filter headwaters: only keep those at plausible source locations.
-  // A headwater is valid if it satisfies at least one of:
-  //   1. Elevation ≥ 50th percentile of the heightmap
-  //   2. Within 1 cell of the map edge
-  //   3. Adjacent (±1) to a cell below seaLevel
-  // Build elevation array from heightmap (works with both real Heightmap and test mocks)
-  let data = heightmap._data;
-  if (!data) {
-    data = new Float32Array(total);
-    for (let gz = 0; gz < H; gz++) {
-      for (let gx = 0; gx < W; gx++) {
-        data[gz * W + gx] = heightmap.get(gx, gz);
-      }
-    }
-  }
-  const sorted = Float32Array.from(data).sort();
-  const medianElev = sorted[Math.floor(sorted.length / 2)];
-
-  const headwaters = rawHeadwaters.filter(({ gx, gz }) => {
-    // Condition 1: high elevation
-    if (heightmap.get(gx, gz) >= medianElev) return true;
-
-    // Condition 2: near map edge
-    if (gx <= 1 || gx >= W - 2 || gz <= 1 || gz >= H - 2) return true;
-
-    // Condition 3: adjacent to a cell below seaLevel
-    for (let dz = -1; dz <= 1; dz++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        if (dx === 0 && dz === 0) continue;
-        const nx = gx + dx;
-        const nz = gz + dz;
-        if (nx >= 0 && nx < W && nz >= 0 && nz < H) {
-          if (heightmap.get(nx, nz) < seaLevel) return true;
-        }
-      }
-    }
-
-    return false;
-  });
-
-  // ---- 4. Trace from each headwater downstream, building segments ----
-  // A segment ends when:
-  //   - we reach a confluence (a cell that has 2+ upstream stream neighbors), OR
-  //   - we step off the stream network / reach edge / hit -1 direction
-  //
-  // We build segments in a first pass, then assemble into a tree.
-
-  // Map from cell index to the segment that *ends* at that cell's mouth.
-  // Multiple segments may share a mouth (confluence).  We track which
-  // segments feed into a given cell so we can parent them later.
-
-  const segmentOf = new Int32Array(total).fill(-1); // cell -> segment id that OWNS this cell
-  const segments = []; // [{cells, mouthIdx, rank, flowVolume}]
-
-  // To build the tree we need to know, for each confluence cell, which
-  // segments flow INTO it.  We'll record that after tracing.
 
   const visited = new Uint8Array(total);
+  const segments = [];
+  const segmentOf = new Int32Array(total).fill(-1);
 
-  for (const hw of headwaters) {
-    let gx = hw.gx;
-    let gz = hw.gz;
-    let cells = [];
+  function traceSegment(startGx, startGz) {
+    let gx = startGx;
+    let gz = startGz;
+    const cells = [];
 
     while (true) {
       const idx = gz * W + gx;
-      if (!isStream[idx]) break; // left the stream network
-      if (visited[idx]) break;   // already part of another trace
-
-      // If this cell is a confluence AND we already have cells in this
-      // segment, end the current segment before this cell (the confluence
-      // will be the start of a new segment assembled later).
-      if (upstreamStreamCount[idx] >= 2 && cells.length > 0) {
-        break;
-      }
+      if (!isStream[idx] || visited[idx]) break;
+      if (upstreamCount[idx] >= 2 && cells.length > 0) break;
 
       visited[idx] = 1;
       cells.push({
         gx, gz,
-        elevation: heightmap.get(gx, gz),
+        elevation: elevation.get(gx, gz),
         accumulation: accumulation[idx],
       });
-
-      segmentOf[idx] = segments.length; // preliminary; fixed after push
 
       const dir = directions[idx];
       if (dir === NO_DIR) break;
@@ -396,105 +257,50 @@ export function extractStreams(accumulation, directions, heightmap, thresholds =
       gz = nz;
     }
 
-    if (cells.length === 0) continue;
+    if (cells.length === 0) return;
 
     const segId = segments.length;
     for (const c of cells) segmentOf[c.gz * W + c.gx] = segId;
 
     const maxAcc = cells[cells.length - 1].accumulation;
     const rank = maxAcc >= thresholds.majorRiver ? 'majorRiver'
-      : maxAcc >= thresholds.river ? 'river'
-        : 'stream';
+      : maxAcc >= thresholds.river ? 'river' : 'stream';
 
-    segments.push({
+    const seg = {
       cells,
       flowVolume: maxAcc,
       rank,
       children: [],
       mouth: { gx: cells[cells.length - 1].gx, gz: cells[cells.length - 1].gz },
-      _mouthDownstream: null, // index of the cell our mouth flows into
-    });
+      _mouthDownstream: null,
+    };
 
-    // Determine the downstream cell from our mouth.
     const mouthCell = cells[cells.length - 1];
     const mouthDir = directions[mouthCell.gz * W + mouthCell.gx];
     if (mouthDir !== NO_DIR) {
       const dnx = mouthCell.gx + DX[mouthDir];
       const dnz = mouthCell.gz + DZ[mouthDir];
       if (dnx >= 0 && dnx < W && dnz >= 0 && dnz < H) {
-        segments[segId]._mouthDownstream = dnz * W + dnx;
+        seg._mouthDownstream = dnz * W + dnx;
       }
     }
+
+    segments.push(seg);
   }
 
-  // ---- 5. Now trace confluence-to-confluence (or confluence-to-outlet) segments ----
-  // Confluences are stream cells with upstreamStreamCount >= 2 that haven't
-  // been fully traced yet.
+  // Trace from headwaters
+  for (const hw of headwaters) traceSegment(hw.gx, hw.gz);
+
+  // Trace confluence-to-confluence segments
   for (let gz = 0; gz < H; gz++) {
     for (let gx = 0; gx < W; gx++) {
       const idx = gz * W + gx;
       if (!isStream[idx] || visited[idx]) continue;
-      if (upstreamStreamCount[idx] < 2) continue;
-
-      // Start a new segment at this confluence.
-      let cx = gx;
-      let cz = gz;
-      let cells = [];
-
-      while (true) {
-        const cIdx = cz * W + cx;
-        if (!isStream[cIdx]) break;
-        if (visited[cIdx]) break;
-        if (upstreamStreamCount[cIdx] >= 2 && cells.length > 0) break;
-
-        visited[cIdx] = 1;
-        cells.push({
-          gx: cx, gz: cz,
-          elevation: heightmap.get(cx, cz),
-          accumulation: accumulation[cIdx],
-        });
-
-        const dir = directions[cIdx];
-        if (dir === NO_DIR) break;
-        const nx = cx + DX[dir];
-        const nz = cz + DZ[dir];
-        if (nx < 0 || nx >= W || nz < 0 || nz >= H) break;
-        cx = nx;
-        cz = nz;
-      }
-
-      if (cells.length === 0) continue;
-
-      const segId = segments.length;
-      for (const c of cells) segmentOf[c.gz * W + c.gx] = segId;
-
-      const maxAcc = cells[cells.length - 1].accumulation;
-      const rank = maxAcc >= thresholds.majorRiver ? 'majorRiver'
-        : maxAcc >= thresholds.river ? 'river'
-          : 'stream';
-
-      segments.push({
-        cells,
-        flowVolume: maxAcc,
-        rank,
-        children: [],
-        mouth: { gx: cells[cells.length - 1].gx, gz: cells[cells.length - 1].gz },
-        _mouthDownstream: null,
-      });
-
-      const mouthCell = cells[cells.length - 1];
-      const mouthDir = directions[mouthCell.gz * W + mouthCell.gx];
-      if (mouthDir !== NO_DIR) {
-        const dnx = mouthCell.gx + DX[mouthDir];
-        const dnz = mouthCell.gz + DZ[mouthDir];
-        if (dnx >= 0 && dnx < W && dnz >= 0 && dnz < H) {
-          segments[segId]._mouthDownstream = dnz * W + dnx;
-        }
-      }
+      if (upstreamCount[idx] >= 2) traceSegment(gx, gz);
     }
   }
 
-  // ---- 6. Assemble tree: connect child segments to parent segments ----
+  // Assemble tree
   const roots = [];
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
@@ -506,34 +312,19 @@ export function extractStreams(accumulation, directions, heightmap, thresholds =
     }
   }
 
-  // Clean up internal bookkeeping properties.
-  for (const seg of segments) {
-    delete seg._mouthDownstream;
-  }
+  for (const seg of segments) delete seg._mouthDownstream;
 
   return roots;
 }
 
-// ---------------------------------------------------------------------------
-// findConfluences
-// ---------------------------------------------------------------------------
-
 /**
- * Find confluences — points where two or more significant streams meet.
- * These are prime settlement locations.
- *
- * @param {Float32Array} accumulation
- * @param {Int8Array} directions
- * @param {object} heightmap
- * @param {number} threshold — minimum accumulation for a stream cell
- * @returns {object[]} Array of {gx, gz, flowVolume, tributaryCount}
+ * Find confluence points.
  */
-export function findConfluences(accumulation, directions, heightmap, threshold = 50) {
-  const W = heightmap.width;
-  const H = heightmap.height;
+export function findConfluences(accumulation, directions, elevation, threshold = 50) {
+  const W = elevation.width;
+  const H = elevation.height;
   const total = W * H;
 
-  // For each cell, count how many stream-cell neighbors flow INTO it.
   const incomingStream = new Uint8Array(total);
   for (let gz = 0; gz < H; gz++) {
     for (let gx = 0; gx < W; gx++) {
@@ -544,9 +335,8 @@ export function findConfluences(accumulation, directions, heightmap, threshold =
       const nx = gx + DX[dir];
       const nz = gz + DZ[dir];
       if (nx < 0 || nx >= W || nz < 0 || nz >= H) continue;
-      const nIdx = nz * W + nx;
-      if (accumulation[nIdx] >= threshold) {
-        incomingStream[nIdx]++;
+      if (accumulation[nz * W + nx] >= threshold) {
+        incomingStream[nz * W + nx]++;
       }
     }
   }
@@ -556,11 +346,7 @@ export function findConfluences(accumulation, directions, heightmap, threshold =
     for (let gx = 0; gx < W; gx++) {
       const idx = gz * W + gx;
       if (incomingStream[idx] >= 2) {
-        results.push({
-          gx, gz,
-          flowVolume: accumulation[idx],
-          tributaryCount: incomingStream[idx],
-        });
+        results.push({ gx, gz, flowVolume: accumulation[idx], tributaryCount: incomingStream[idx] });
       }
     }
   }
@@ -568,71 +354,93 @@ export function findConfluences(accumulation, directions, heightmap, threshold =
   return results;
 }
 
-// ---------------------------------------------------------------------------
-// findNarrowCrossings
-// ---------------------------------------------------------------------------
-
 /**
- * Find the narrowest river crossing points for a given stream.
- * Looks for where the river valley is narrowest (terrain rises steeply
- * on both sides perpendicular to the flow direction).
+ * Smooth river paths by adding sinusoidal perpendicular displacement on gentle terrain.
+ * Produces natural meanders while leaving steep gorge sections straight.
  *
- * @param {object[]} streamCells — array of {gx, gz} along a stream
- * @param {object} heightmap
- * @returns {object[]} [{gx, gz, valleyWidth}] sorted by valleyWidth ascending
+ * @param {Array} rivers - River segment tree (from extractStreams)
+ * @param {import('./Grid2D.js').Grid2D} elevation - Terrain elevation
+ * @param {number} width - Grid width
+ * @param {number} height - Grid height
  */
-export function findNarrowCrossings(streamCells, heightmap) {
-  if (streamCells.length < 3) return [];
+export function smoothRiverPaths(rivers, elevation, width, height) {
+  const occupied = new Set();
 
-  const W = heightmap.width;
-  const H = heightmap.height;
-  const results = [];
+  function cellKey(gx, gz) { return gz * width + gx; }
 
-  for (let i = 1; i < streamCells.length - 1; i++) {
-    const prev = streamCells[i - 1];
-    const curr = streamCells[i];
-    const next = streamCells[i + 1];
+  // Mark all existing river cells as occupied
+  function markOccupied(seg) {
+    for (const c of seg.cells) occupied.add(cellKey(c.gx, c.gz));
+    for (const child of (seg.children || [])) markOccupied(child);
+  }
+  for (const root of rivers) markOccupied(root);
 
-    // Flow direction vector
-    const fdx = next.gx - prev.gx;
-    const fdz = next.gz - prev.gz;
-    const fLen = Math.sqrt(fdx * fdx + fdz * fdz);
-    if (fLen === 0) continue;
-
-    // Perpendicular direction (rotate 90 degrees)
-    const pdx = -fdz / fLen;
-    const pdz = fdx / fLen;
-
-    const baseElev = heightmap.get(curr.gx, curr.gz);
-
-    // Walk perpendicular in both directions until terrain rises significantly
-    // or we hit the edge.  "Valley" width is the distance between the two
-    // points where the terrain first rises by >= riseThreshold above the
-    // stream bed.
-    const riseThreshold = 2.0; // elevation units above stream bed
-    const maxProbe = 20;       // max cells to probe in each direction
-
-    let leftDist = maxProbe;
-    let rightDist = maxProbe;
-
-    for (let step = 1; step <= maxProbe; step++) {
-      const sx = Math.round(curr.gx + pdx * step);
-      const sz = Math.round(curr.gz + pdz * step);
-      if (sx < 0 || sx >= W || sz < 0 || sz >= H) { leftDist = step; break; }
-      if (heightmap.get(sx, sz) - baseElev >= riseThreshold) { leftDist = step; break; }
+  function processSegment(seg) {
+    const cells = seg.cells;
+    if (cells.length < 4) {
+      for (const child of (seg.children || [])) processSegment(child);
+      return;
     }
 
-    for (let step = 1; step <= maxProbe; step++) {
-      const sx = Math.round(curr.gx - pdx * step);
-      const sz = Math.round(curr.gz - pdz * step);
-      if (sx < 0 || sx >= W || sz < 0 || sz >= H) { rightDist = step; break; }
-      if (heightmap.get(sx, sz) - baseElev >= riseThreshold) { rightDist = step; break; }
+    // Wavelength scales with accumulation (bigger rivers = wider meanders)
+    const maxAcc = cells[cells.length - 1].accumulation;
+    const wavelength = Math.max(6, Math.min(20, Math.sqrt(maxAcc) / 3));
+    const maxDisp = 1.5;
+
+    for (let i = 1; i < cells.length - 1; i++) {
+      const prev = cells[i - 1];
+      const curr = cells[i];
+      const next = cells[i + 1];
+
+      // Compute local slope
+      const elevDiff = Math.abs(prev.elevation - next.elevation);
+      const dist = Math.sqrt((next.gx - prev.gx) ** 2 + (next.gz - prev.gz) ** 2) || 1;
+      const slope = elevDiff / dist;
+
+      // Skip steep terrain (gorge behavior)
+      if (slope > 0.15) continue;
+
+      // Flow direction vector
+      const dx = next.gx - prev.gx;
+      const dz = next.gz - prev.gz;
+      const len = Math.sqrt(dx * dx + dz * dz) || 1;
+
+      // Perpendicular direction
+      const perpX = -dz / len;
+      const perpZ = dx / len;
+
+      // Sinusoidal displacement
+      const phase = (i / wavelength) * Math.PI * 2;
+      const displacement = Math.sin(phase) * maxDisp * (1 - slope / 0.15);
+
+      const newGx = Math.round(curr.gx + perpX * displacement);
+      const newGz = Math.round(curr.gz + perpZ * displacement);
+
+      // Bounds check
+      if (newGx < 0 || newGx >= width || newGz < 0 || newGz >= height) continue;
+
+      // Skip if target cell already occupied by another segment
+      const key = cellKey(newGx, newGz);
+      if (occupied.has(key) && (newGx !== curr.gx || newGz !== curr.gz)) continue;
+
+      // Update occupied tracking
+      occupied.delete(cellKey(curr.gx, curr.gz));
+      occupied.add(key);
+
+      curr.gx = newGx;
+      curr.gz = newGz;
+      curr.elevation = elevation.get(newGx, newGz);
     }
 
-    const valleyWidth = leftDist + rightDist;
-    results.push({ gx: curr.gx, gz: curr.gz, valleyWidth });
+    // Enforce monotonically decreasing elevation after displacement
+    for (let i = 1; i < cells.length; i++) {
+      if (cells[i].elevation > cells[i - 1].elevation) {
+        cells[i].elevation = cells[i - 1].elevation - 0.01;
+      }
+    }
+
+    for (const child of (seg.children || [])) processSegment(child);
   }
 
-  results.sort((a, b) => a.valleyWidth - b.valleyWidth);
-  return results;
+  for (const root of rivers) processSegment(root);
 }

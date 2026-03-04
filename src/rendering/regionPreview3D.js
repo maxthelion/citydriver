@@ -1,275 +1,299 @@
 import * as THREE from 'three';
-import { MaterialRegistry } from './materials.js';
-import { buildTerrainMesh } from './terrainMesh.js';
-import { buildWaterMesh } from './waterMesh.js';
+import { getRiverMaterial } from './materials.js';
 
 /**
- * Create a 3D preview renderer for the region selection screen.
- * Shows terrain, water, rivers, and settlement markers with an auto-rotating camera.
- *
- * @param {HTMLElement} container - DOM element to mount the canvas into
- * @returns {{ update: (region: object) => void, highlight: (settlement: object|null) => void, dispose: () => void }}
+ * Build a 3D terrain mesh from a LayerStack for region preview.
  */
-export function createRegionPreview3D(container) {
-  const materials = new MaterialRegistry();
+export function buildRegionTerrain(layers) {
+  const elevation = layers.getGrid('elevation');
+  const landCover = layers.getGrid('landCover');
+  const params = layers.getData('params');
+  const seaLevel = params?.seaLevel ?? 0;
 
-  // --- Renderer ---
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  container.appendChild(renderer.domElement);
+  const w = elevation.width;
+  const h = elevation.height;
+  const cs = elevation.cellSize;
 
-  // --- Scene ---
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87CEEB);
-  // Fog scaled for regional terrain (~51k world units)
-  scene.fog = new THREE.Fog(0x87CEEB, 40000, 120000);
+  const geometry = new THREE.PlaneGeometry(
+    w * cs, h * cs,
+    w - 1, h - 1,
+  );
+  geometry.rotateX(-Math.PI / 2);
 
-  // --- Camera ---
-  // Near plane as large as possible for depth precision; far plane for orbit distance
-  const camera = new THREE.PerspectiveCamera(50, 1, 500, 200000);
+  const positions = geometry.attributes.position.array;
+  const colors = new Float32Array(positions.length);
 
-  // --- Lighting (matches game.js pattern, scaled for region) ---
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-  const sun = new THREE.DirectionalLight(0xffeedd, 0.8);
-  sun.position.set(20000, 30000, 15000);
-  scene.add(sun);
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      const idx = gz * w + gx;
+      const elev = elevation.get(gx, gz);
 
-  // --- State ---
-  let animFrameId = null;
-  let orbitAngle = 0;
-  let orbitCenter = new THREE.Vector3();
-  let orbitRadius = 100;
-  let disposed = false;
+      // Set Y position (height)
+      positions[idx * 3 + 1] = elev;
 
-  // Track meshes for cleanup
-  let currentMeshes = [];
-  let settlementMarkers = [];
-  let highlightRing = null;
+      // Set color based on land cover
+      const cover = landCover ? landCover.get(gx, gz) : -1;
+      let r, g, b;
 
-  function clearScene() {
-    for (const mesh of currentMeshes) {
-      scene.remove(mesh);
-      if (mesh.geometry) mesh.geometry.dispose();
-      // Dispose materials owned by this mesh (not shared registry materials)
-      if (mesh._ownsMaterial && mesh.material) mesh.material.dispose();
-    }
-    currentMeshes = [];
-    settlementMarkers = [];
-    if (highlightRing) {
-      scene.remove(highlightRing);
-      if (highlightRing.geometry) highlightRing.geometry.dispose();
-      if (highlightRing.material) highlightRing.material.dispose();
-      highlightRing = null;
-    }
-  }
-
-  /**
-   * Update the 3D preview with new region data.
-   * @param {object} region - RegionData from generateRegion
-   */
-  function update(region) {
-    clearScene();
-
-    const { heightmap, seaLevel, drainage, settlements } = region;
-    const worldW = heightmap.worldWidth;
-    const worldH = heightmap.worldHeight;
-
-    // Terrain mesh
-    const terrain = buildTerrainMesh(heightmap, seaLevel, materials);
-    scene.add(terrain);
-    currentMeshes.push(terrain);
-
-    // Water mesh — offset slightly below sea level to avoid z-fighting with terrain
-    const water = buildWaterMesh(heightmap, seaLevel - 3, materials);
-    scene.add(water);
-    currentMeshes.push(water);
-
-    // River dots on terrain
-    if (drainage && drainage.accumulation) {
-      const riverMesh = buildRiverMesh(heightmap, seaLevel, drainage, region.params);
-      if (riverMesh) {
-        scene.add(riverMesh);
-        currentMeshes.push(riverMesh);
+      if (elev < seaLevel) {
+        // Water
+        const depth = Math.min(1, (seaLevel - elev) / 30);
+        r = 0.1 - depth * 0.05;
+        g = 0.3 - depth * 0.1;
+        b = 0.6 + depth * 0.2;
+      } else {
+        switch (cover) {
+          case 1: // Farmland
+            r = 0.55; g = 0.65; b = 0.2;
+            break;
+          case 2: // Forest
+            r = 0.15; g = 0.4; b = 0.1;
+            break;
+          case 3: // Moorland
+            r = 0.45; g = 0.4; b = 0.3;
+            break;
+          case 4: // Marsh
+            r = 0.3; g = 0.45; b = 0.3;
+            break;
+          case 5: // Settlement
+            r = 0.6; g = 0.5; b = 0.4;
+            break;
+          case 6: // Open woodland
+            r = 0.3; g = 0.5; b = 0.15;
+            break;
+          case 7: // Bare rock
+            r = 0.55; g = 0.52; b = 0.48;
+            break;
+          case 8: // Scrubland
+            r = 0.5; g = 0.48; b = 0.25;
+            break;
+          default: // Generic green
+            r = 0.3; g = 0.5; b = 0.2;
+        }
       }
-    }
 
-    // Settlement markers
-    if (settlements && settlements.length > 0) {
-      for (const s of settlements) {
-        const marker = buildSettlementMarker(s, heightmap);
-        scene.add(marker);
-        currentMeshes.push(marker);
-        settlementMarkers.push({ settlement: s, mesh: marker });
-      }
-    }
-
-    // Configure orbit camera
-    orbitCenter.set(worldW / 2, seaLevel, worldH / 2);
-    orbitRadius = Math.max(worldW, worldH) * 0.9;
-  }
-
-  /**
-   * Highlight a selected settlement with a cyan ring.
-   * @param {object|null} settlement
-   */
-  function highlight(settlement) {
-    // Remove old highlight
-    if (highlightRing) {
-      scene.remove(highlightRing);
-      if (highlightRing.geometry) highlightRing.geometry.dispose();
-      if (highlightRing.material) highlightRing.material.dispose();
-      highlightRing = null;
-    }
-
-    // Reset all marker emissive
-    for (const { mesh } of settlementMarkers) {
-      if (mesh.material && mesh.material.emissive) {
-        mesh.material.emissive.setHex(0x000000);
-      }
-    }
-
-    if (!settlement) return;
-
-    // Find matching marker and set emissive
-    for (const { settlement: s, mesh } of settlementMarkers) {
-      if (s === settlement && mesh.material && mesh.material.emissive) {
-        mesh.material.emissive.setHex(0x226666);
-      }
-    }
-
-    // Add a ring above the settlement
-    const ringGeo = new THREE.RingGeometry(500, 600, 32);
-    ringGeo.rotateX(-Math.PI / 2);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0x00ffff,
-      transparent: true,
-      opacity: 0.6,
-      side: THREE.DoubleSide,
-    });
-    highlightRing = new THREE.Mesh(ringGeo, ringMat);
-    highlightRing.position.set(settlement.x, (settlement.elevation || 0) + 100, settlement.z);
-    scene.add(highlightRing);
-  }
-
-  // --- Animation loop ---
-  function animate() {
-    if (disposed) return;
-    animFrameId = requestAnimationFrame(animate);
-
-    orbitAngle += 0.003; // ~0.1 rad/s at 60fps
-
-    const elevAngle = Math.PI / 4; // 45 degrees
-    camera.position.set(
-      orbitCenter.x + orbitRadius * Math.cos(orbitAngle) * Math.cos(elevAngle),
-      orbitCenter.y + orbitRadius * Math.sin(elevAngle),
-      orbitCenter.z + orbitRadius * Math.sin(orbitAngle) * Math.cos(elevAngle),
-    );
-    camera.lookAt(orbitCenter);
-
-    // Animate highlight ring
-    if (highlightRing) {
-      highlightRing.rotation.y += 0.01;
-    }
-
-    // Resize renderer to match container
-    const w = container.clientWidth;
-    const h = container.clientHeight;
-    if (renderer.domElement.width !== w || renderer.domElement.height !== h) {
-      renderer.setSize(w, h);
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-    }
-
-    renderer.render(scene, camera);
-  }
-
-  animate();
-
-  function dispose() {
-    disposed = true;
-    if (animFrameId) cancelAnimationFrame(animFrameId);
-    clearScene();
-    renderer.dispose();
-    materials.dispose();
-    if (renderer.domElement.parentNode) {
-      renderer.domElement.parentNode.removeChild(renderer.domElement);
+      colors[idx * 3] = r;
+      colors[idx * 3 + 1] = g;
+      colors[idx * 3 + 2] = b;
     }
   }
 
-  return { update, highlight, dispose };
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+
+  const material = new THREE.MeshLambertMaterial({ vertexColors: true });
+  return new THREE.Mesh(geometry, material);
 }
 
 /**
- * Build river geometry as blue points/dots on terrain surface.
+ * Build water plane at sea level.
  */
-function buildRiverMesh(heightmap, seaLevel, drainage, params) {
-  const { accumulation } = drainage;
-  const W = heightmap.width;
-  const H = heightmap.height;
-  const cellSize = heightmap.cellSize;
-  const riverThreshold = (params && params.riverThreshold) || 1000;
+export function buildWaterPlane(layers) {
+  const params = layers.getData('params');
+  const elevation = layers.getGrid('elevation');
+  const seaLevel = params?.seaLevel ?? 0;
+  const size = Math.max(elevation.width, elevation.height) * elevation.cellSize;
 
-  // Collect river positions
-  const positions = [];
-  for (let gz = 0; gz < H; gz++) {
-    for (let gx = 0; gx < W; gx++) {
-      const acc = accumulation[gz * W + gx];
-      if (acc < riverThreshold) continue;
-      const elev = heightmap.get(gx, gz);
-      if (elev < seaLevel) continue;
+  const geometry = new THREE.PlaneGeometry(size, size);
+  geometry.rotateX(-Math.PI / 2);
 
-      positions.push(gx * cellSize, elev + 2, gz * cellSize);
-    }
-  }
-
-  if (positions.length === 0) return null;
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-
-  const mat = new THREE.PointsMaterial({
-    color: 0x3388cc,
-    size: cellSize * 1.5,
-    sizeAttenuation: true,
+  const material = new THREE.MeshLambertMaterial({
+    color: 0x2255aa,
+    transparent: true,
+    opacity: 0.7,
   });
 
-  const points = new THREE.Points(geo, mat);
-  points._ownsMaterial = true;
-  return points;
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.y = seaLevel;
+
+  return mesh;
 }
 
 /**
- * Build a colored cylinder marker for a settlement.
+ * Build settlement markers as small colored spheres.
  */
-function buildSettlementMarker(settlement, heightmap) {
-  let radius, height, color;
+export function buildSettlementMarkers(layers) {
+  const settlements = layers.getData('settlements');
+  const elevation = layers.getGrid('elevation');
+  if (!settlements || !elevation) return new THREE.Group();
 
-  switch (settlement.rank) {
-    case 'city':
-      radius = 400;
-      height = 800;
-      color = 0xdd3333;
-      break;
-    case 'town':
-      radius = 250;
-      height = 500;
-      color = 0xee8833;
-      break;
-    case 'village':
-    default:
-      radius = 150;
-      height = 300;
-      color = 0xddcc33;
-      break;
+  const group = new THREE.Group();
+  const cs = elevation.cellSize;
+
+  for (const s of settlements) {
+    const h = elevation.get(s.gx, s.gz);
+    const color = s.tier === 1 ? 0xff0000 : s.tier === 2 ? 0xff8800 : 0xffff00;
+    const size = s.tier === 1 ? 80 : s.tier === 2 ? 50 : 30;
+
+    const geom = new THREE.SphereGeometry(size, 8, 6);
+    const mat = new THREE.MeshLambertMaterial({ color });
+    const marker = new THREE.Mesh(geom, mat);
+
+    marker.position.set(
+      s.gx * cs - elevation.width * cs / 2,
+      h + size,
+      s.gz * cs - elevation.height * cs / 2,
+    );
+    marker.userData = { settlement: s };
+    group.add(marker);
   }
 
-  const geo = new THREE.CylinderGeometry(radius, radius, height, 12);
-  const mat = new THREE.MeshLambertMaterial({ color });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh._ownsMaterial = true;
+  return group;
+}
 
-  const elev = settlement.elevation || heightmap.sample(settlement.x, settlement.z);
-  mesh.position.set(settlement.x, elev + height / 2, settlement.z);
+/**
+ * Build road lines from regional road data.
+ */
+export function buildRegionRoads(layers) {
+  const roads = layers.getData('roads');
+  const elevation = layers.getGrid('elevation');
+  if (!roads || !elevation) return new THREE.Group();
 
-  return mesh;
+  const group = new THREE.Group();
+  const cs = elevation.cellSize;
+  const halfW = elevation.width * cs / 2;
+  const halfH = elevation.height * cs / 2;
+
+  for (const road of roads) {
+    if (!road.path || road.path.length < 2) continue;
+
+    const color = road.hierarchy === 'arterial' ? 0xccaa66 : 0x998855;
+    const points = road.path.map(p => {
+      const elev = elevation.get(p.gx, p.gz);
+      return new THREE.Vector3(
+        p.gx * cs - halfW,
+        elev + 2,
+        p.gz * cs - halfH,
+      );
+    });
+
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({ color });
+    group.add(new THREE.Line(geometry, material));
+  }
+
+  return group;
+}
+
+/**
+ * Chaikin's corner-cutting: smooths a polyline of {x, z, accumulation} points.
+ */
+function smoothPolyline(points, iterations = 3) {
+  let result = points;
+  for (let iter = 0; iter < iterations; iter++) {
+    const next = [result[0]];
+    for (let i = 0; i < result.length - 1; i++) {
+      const a = result[i];
+      const b = result[i + 1];
+      next.push({
+        x: a.x * 0.75 + b.x * 0.25,
+        z: a.z * 0.75 + b.z * 0.25,
+        accumulation: a.accumulation * 0.75 + b.accumulation * 0.25,
+      });
+      next.push({
+        x: a.x * 0.25 + b.x * 0.75,
+        z: a.z * 0.25 + b.z * 0.75,
+        accumulation: a.accumulation * 0.25 + b.accumulation * 0.75,
+      });
+    }
+    next.push(result[result.length - 1]);
+    result = next;
+  }
+  return result;
+}
+
+/**
+ * Build smooth river ribbon meshes for region 3D preview.
+ * Width proportional to sqrt(accumulation).
+ */
+export function buildRegionRiverMeshes(layers) {
+  const rivers = layers.getData('rivers');
+  const elevation = layers.getGrid('elevation');
+  if (!rivers || !elevation) return new THREE.Group();
+
+  const cs = elevation.cellSize;
+  const halfW = elevation.width * cs / 2;
+  const halfH = elevation.height * cs / 2;
+
+  const vertices = [];
+  const indices = [];
+
+  function processSegment(seg, confluencePoint) {
+    if (!seg.cells || seg.cells.length < 2) {
+      for (const child of (seg.children || [])) processSegment(child, confluencePoint);
+      return;
+    }
+
+    // Convert cells to world coords
+    const worldPoints = seg.cells.map(cell => ({
+      x: cell.gx * cs - halfW,
+      z: cell.gz * cs - halfH,
+      accumulation: cell.accumulation,
+    }));
+
+    // Extend to parent's confluence point to close gaps
+    if (confluencePoint && worldPoints.length > 0) {
+      worldPoints.push(confluencePoint);
+    }
+
+    if (worldPoints.length >= 2) {
+      const smooth = smoothPolyline(worldPoints, 3);
+      const baseVertex = vertices.length / 3;
+
+      for (let i = 0; i < smooth.length; i++) {
+        const p = smooth[i];
+        const sampleGx = (p.x + halfW) / cs;
+        const sampleGz = (p.z + halfH) / cs;
+        const y = elevation.sample(sampleGx, sampleGz) + 1;
+
+        const halfWidth = Math.max(3, Math.min(50, Math.sqrt(p.accumulation) / 4));
+
+        let dx, dz;
+        if (i < smooth.length - 1) {
+          dx = smooth[i + 1].x - p.x;
+          dz = smooth[i + 1].z - p.z;
+        } else {
+          dx = p.x - smooth[i - 1].x;
+          dz = p.z - smooth[i - 1].z;
+        }
+
+        const len = Math.sqrt(dx * dx + dz * dz) || 1;
+        const perpX = -dz / len;
+        const perpZ = dx / len;
+
+        vertices.push(
+          p.x + perpX * halfWidth, y, p.z + perpZ * halfWidth,
+          p.x - perpX * halfWidth, y, p.z - perpZ * halfWidth,
+        );
+
+        if (i > 0) {
+          const base = baseVertex + (i - 1) * 2;
+          indices.push(base, base + 1, base + 2);
+          indices.push(base + 1, base + 3, base + 2);
+        }
+      }
+    }
+
+    // Children join at this segment's first cell (headwater = confluence)
+    const firstCell = seg.cells[0];
+    const joinPoint = {
+      x: firstCell.gx * cs - halfW,
+      z: firstCell.gz * cs - halfH,
+      accumulation: firstCell.accumulation,
+    };
+    for (const child of (seg.children || [])) processSegment(child, joinPoint);
+  }
+
+  for (const root of rivers) processSegment(root);
+
+  if (vertices.length < 6) return new THREE.Group();
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  geom.setIndex(indices);
+  geom.computeVertexNormals();
+
+  const group = new THREE.Group();
+  group.add(new THREE.Mesh(geom, getRiverMaterial()));
+  return group;
 }

@@ -1,179 +1,77 @@
 import * as THREE from 'three';
-
-const ROAD_LIFT = 0.15; // height above terrain to prevent z-fighting
-
-/**
- * Resample a polyline so that consecutive points are spaced roughly `spacing` apart.
- * Always includes the first and last original point.
- * @param {{x: number, z: number}[]} points
- * @param {number} spacing
- * @returns {{x: number, z: number}[]}
- */
-function resamplePolyline(points, spacing) {
-  if (points.length < 2) return [...points];
-
-  const result = [points[0]];
-  let accumDist = 0;
-  let prevPt = points[0];
-
-  for (let i = 1; i < points.length; i++) {
-    const dx = points[i].x - prevPt.x;
-    const dz = points[i].z - prevPt.z;
-    const segLen = Math.sqrt(dx * dx + dz * dz);
-
-    if (segLen < 1e-6) continue;
-
-    let remaining = segLen;
-    let fromX = prevPt.x;
-    let fromZ = prevPt.z;
-    const dirX = dx / segLen;
-    const dirZ = dz / segLen;
-
-    while (accumDist + remaining >= spacing) {
-      const step = spacing - accumDist;
-      fromX += dirX * step;
-      fromZ += dirZ * step;
-      result.push({ x: fromX, z: fromZ });
-      remaining -= step;
-      accumDist = 0;
-    }
-
-    accumDist += remaining;
-    prevPt = points[i];
-  }
-
-  // Always include the last point
-  const last = points[points.length - 1];
-  const lastResult = result[result.length - 1];
-  if (Math.abs(last.x - lastResult.x) > 1e-6 || Math.abs(last.z - lastResult.z) > 1e-6) {
-    result.push(last);
-  }
-
-  return result;
-}
+import { getRoadMaterial } from './materials.js';
 
 /**
- * Build road meshes from road edge data.
- * Each road is a triangle strip following the terrain.
+ * Build 3D road ribbons from the PlanarGraph.
+ * Roads are colored by hierarchy: arterial (dark), collector (medium), local (light).
  *
- * @param {Array} edges - Road edges with points and width
- * @param {import('../core/heightmap.js').Heightmap} heightmap
- * @param {import('./materials.js').MaterialRegistry} materials
- * @param {number} [seaLevel=0] - vertices below this are clamped up
- * @returns {THREE.Group} containing all road meshes
+ * @param {import('../core/PlanarGraph.js').PlanarGraph} graph
+ * @param {import('../core/Grid2D.js').Grid2D} elevation
+ * @returns {THREE.Group}
  */
-export function buildRoadMeshes(edges, heightmap, materials, seaLevel = 0) {
+export function buildRoadMeshes(graph, elevation) {
   const group = new THREE.Group();
-  group.name = 'roads';
+  const cs = elevation ? elevation.cellSize : 10;
 
-  for (const edge of edges) {
-    if (!edge.points || edge.points.length < 2) continue;
+  // Collect geometry per hierarchy level for fewer draw calls
+  const buckets = new Map(); // hierarchy -> { vertices, indices }
 
-    const sampled = resamplePolyline(edge.points, 4);
-    if (sampled.length < 2) continue;
+  for (const [edgeId, edge] of graph.edges) {
+    const polyline = graph.edgePolyline(edgeId);
+    if (polyline.length < 2) continue;
 
-    const halfWidth = (edge.width || 8) / 2;
+    const hierarchy = edge.attrs?.hierarchy || edge.hierarchy || 'local';
+    const halfWidth = (edge.width || 6) / 2;
 
-    // Build cross-section vertices: left and right at each sample point
-    const leftVerts = [];
-    const rightVerts = [];
+    if (!buckets.has(hierarchy)) {
+      buckets.set(hierarchy, { vertices: [], indices: [] });
+    }
+    const bucket = buckets.get(hierarchy);
+    const baseVertex = bucket.vertices.length / 3;
 
-    for (let i = 0; i < sampled.length; i++) {
-      const pt = sampled[i];
+    for (let i = 0; i < polyline.length; i++) {
+      const p = polyline[i];
+      const y = elevation ? elevation.sample(p.x / cs, p.z / cs) + 0.5 : 0.5;
 
-      // Compute tangent direction
-      let tx, tz;
-      if (i === 0) {
-        tx = sampled[1].x - sampled[0].x;
-        tz = sampled[1].z - sampled[0].z;
-      } else if (i === sampled.length - 1) {
-        tx = sampled[i].x - sampled[i - 1].x;
-        tz = sampled[i].z - sampled[i - 1].z;
+      let dx, dz;
+      if (i < polyline.length - 1) {
+        dx = polyline[i + 1].x - p.x;
+        dz = polyline[i + 1].z - p.z;
       } else {
-        tx = sampled[i + 1].x - sampled[i - 1].x;
-        tz = sampled[i + 1].z - sampled[i - 1].z;
+        dx = p.x - polyline[i - 1].x;
+        dz = p.z - polyline[i - 1].z;
       }
 
-      // Normalize tangent
-      const tLen = Math.sqrt(tx * tx + tz * tz);
-      if (tLen < 1e-6) continue;
-      tx /= tLen;
-      tz /= tLen;
+      const len = Math.sqrt(dx * dx + dz * dz) || 1;
+      const perpX = -dz / len;
+      const perpZ = dx / len;
 
-      // Perpendicular (rotate tangent 90 degrees): (-tz, tx)
-      const px = -tz;
-      const pz = tx;
+      bucket.vertices.push(
+        p.x + perpX * halfWidth, y, p.z + perpZ * halfWidth,
+        p.x - perpX * halfWidth, y, p.z - perpZ * halfWidth,
+      );
 
-      const lx = pt.x + px * halfWidth;
-      const lz = pt.z + pz * halfWidth;
-      const ly = Math.max(heightmap.sample(lx, lz), seaLevel) + ROAD_LIFT;
-
-      const rx = pt.x - px * halfWidth;
-      const rz = pt.z - pz * halfWidth;
-      const ry = Math.max(heightmap.sample(rx, rz), seaLevel) + ROAD_LIFT;
-
-      leftVerts.push({ x: lx, y: ly, z: lz });
-      rightVerts.push({ x: rx, y: ry, z: rz });
-    }
-
-    if (leftVerts.length < 2) continue;
-
-    // Build triangle strip geometry
-    const numSegments = leftVerts.length - 1;
-    const positions = new Float32Array(numSegments * 6 * 3); // 2 triangles * 3 verts * 3 coords
-    let vi = 0;
-
-    for (let i = 0; i < numSegments; i++) {
-      const l0 = leftVerts[i];
-      const l1 = leftVerts[i + 1];
-      const r0 = rightVerts[i];
-      const r1 = rightVerts[i + 1];
-
-      // Triangle 1: l0, l1, r0
-      // Triangle 2: r0, l1, r1
-      // Check winding by computing normal of triangle 1
-      // edge1 = l1 - l0, edge2 = r0 - l0
-      const e1x = l1.x - l0.x, e1y = l1.y - l0.y, e1z = l1.z - l0.z;
-      const e2x = r0.x - l0.x, e2y = r0.y - l0.y, e2z = r0.z - l0.z;
-      const ny = e1z * e2x - e1x * e2z; // y component of cross product (e1 x e2)
-
-      if (ny > 0) {
-        // Normal points up: l0, l1, r0 is correct
-        positions[vi++] = l0.x; positions[vi++] = l0.y; positions[vi++] = l0.z;
-        positions[vi++] = l1.x; positions[vi++] = l1.y; positions[vi++] = l1.z;
-        positions[vi++] = r0.x; positions[vi++] = r0.y; positions[vi++] = r0.z;
-
-        positions[vi++] = r0.x; positions[vi++] = r0.y; positions[vi++] = r0.z;
-        positions[vi++] = l1.x; positions[vi++] = l1.y; positions[vi++] = l1.z;
-        positions[vi++] = r1.x; positions[vi++] = r1.y; positions[vi++] = r1.z;
-      } else {
-        // Normal points down: reverse winding
-        positions[vi++] = l0.x; positions[vi++] = l0.y; positions[vi++] = l0.z;
-        positions[vi++] = r0.x; positions[vi++] = r0.y; positions[vi++] = r0.z;
-        positions[vi++] = l1.x; positions[vi++] = l1.y; positions[vi++] = l1.z;
-
-        positions[vi++] = r0.x; positions[vi++] = r0.y; positions[vi++] = r0.z;
-        positions[vi++] = r1.x; positions[vi++] = r1.y; positions[vi++] = r1.z;
-        positions[vi++] = l1.x; positions[vi++] = l1.y; positions[vi++] = l1.z;
+      if (i > 0) {
+        const base = baseVertex + (i - 1) * 2;
+        bucket.indices.push(base, base + 1, base + 2);
+        bucket.indices.push(base + 1, base + 3, base + 2);
       }
     }
+  }
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.computeVertexNormals();
+  // Create one mesh per hierarchy level
+  for (const [hierarchy, bucket] of buckets) {
+    if (bucket.vertices.length < 6) continue;
 
-    const matName = edge.hierarchy === 'primary' ? 'road_primary'
-      : (edge.hierarchy === 'secondary' || edge.hierarchy === 'collector' || edge.hierarchy === 'local')
-        ? 'road_secondary'
-        : 'road_secondary';
-    const mesh = new THREE.Mesh(geometry, materials.get(matName));
-    mesh.receiveShadow = true;
-    mesh.name = `road_${edge.id || ''}`;
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(bucket.vertices, 3));
+    geom.setIndex(bucket.indices);
+    geom.computeVertexNormals();
 
+    const material = getRoadMaterial(hierarchy);
+    const mesh = new THREE.Mesh(geom, material);
     group.add(mesh);
   }
 
   return group;
 }
-
-export { ROAD_LIFT };
