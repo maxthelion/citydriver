@@ -240,9 +240,15 @@ The terrain mesh displayed by the GPU and the height values used to place object
 
 1. Generate a discrete heightmap array (`Float32Array`) by sampling analytical noise at each grid vertex
 2. All terrain modifications (river carving, coastline) modify this same array
-3. Build the terrain mesh directly from this array
-4. Provide `sampleHeightmap(x, z)` that does bilinear interpolation of the same array
+3. Build the terrain mesh directly from this array (two triangles per quad)
+4. Provide `sampleHeightmap(x, z)` that interpolates using the **same triangle split** as the terrain mesh
 5. **All object placement and car physics use `sampleHeightmap()`**, never the raw noise
+
+**Critical:** `sampleHeightmap()` must NOT use bilinear interpolation. The terrain mesh splits each quad into two triangles along the `(0,1)→(1,0)` diagonal. The GPU linearly interpolates within each triangle, which differs from bilinear interpolation across the quad. The correct interpolation is barycentric within the matching triangle:
+- If `fx + fz ≤ 1` (triangle 1): `h = h00 + fx*(h10-h00) + fz*(h01-h00)`
+- If `fx + fz > 1` (triangle 2): `h = h10 + (1-fx)*(h01-h10) + (fx+fz-1)*(h11-h10)`
+
+At small cell sizes (~5m) the bilinear/triangular error is negligible, but at larger cell sizes (~39m) it causes roads to visibly float above or clip through the rendered terrain.
 
 This eliminates the class of bugs where objects float above or clip through terrain.
 
@@ -312,10 +318,11 @@ A simple car model built from box primitives:
 
 ### Camera
 
-Three modes:
+Four modes:
 1. **Chase cam** (default): smooth follow, ~12 back, ~5 up. Must not go below terrain.
 2. **Top-down**: directly above, looking down.
 3. **Hood cam**: first-person from hood, looking forward.
+4. **Free cam** (debug): Minecraft creative-style fly camera for inspecting terrain, roads, and generation output. Mouse look (pointer lock), WASD/arrows to pan horizontally, Space to rise, Shift to descend. 100 units/sec movement speed. Pressing Escape exits pointer lock and returns to chase cam. Car continues to exist but is not controlled while in free cam.
 
 ### Minimap
 
@@ -328,7 +335,7 @@ Three modes:
 - Parks as green patches
 - Car as red directional arrow
 
-Static base layer drawn once per generation. Car arrow redrawn per frame. Game modes can overlay (markers, paths).
+Static base layer drawn once per generation. Car arrow redrawn per frame.
 
 ### UI
 
@@ -340,17 +347,6 @@ Static base layer drawn once per generation. Car arrow redrawn per frame. Game m
 ### Regeneration
 
 New random seed on each regenerate. Old city cleaned up (geometries disposed). Cancellation if re-triggered mid-generation.
-
-### Game Modes
-
-Pluggable modes layer behavior onto the core driving simulation:
-
-- `game.modes` — array of active mode instances
-- Modes extend `GameMode` base class with hooks: `cleanup(game)`, `cityGenerated(game)`, `update(dt, game)`, `drawMinimap(ctx, game)`
-- Self-contained: modes own their 3D objects, HUD, and state
-- Multiple modes active simultaneously
-
-**Treasure Hunt** (existing mode): target on road network, gold 3D marker, minimap overlay, timer scoring with streak bonuses.
 
 ---
 
@@ -384,12 +380,13 @@ Standard 2D Perlin noise:
 ### Bilinear Heightmap Interpolation
 
 Given world (x, z):
-1. Convert to grid indices
-2. Clamp to bounds
-3. Sample 4 neighbors
-4. `lerp(lerp(h00, h10, fx), lerp(h01, h11, fx), fz)`
+1. Convert to grid indices, get fractional parts `fx`, `fz`
+2. Clamp to bounds, read 4 corner heights `h00`, `h10`, `h01`, `h11`
+3. Barycentric interpolation matching terrain mesh triangle split:
+   - `fx + fz ≤ 1`: `h00 + fx*(h10-h00) + fz*(h01-h00)`
+   - `fx + fz > 1`: `h10 + (1-fx)*(h01-h10) + (fx+fz-1)*(h11-h10)`
 
-Matches GPU's PlaneGeometry linear interpolation.
+Matches the terrain mesh triangulation exactly (diagonal from (0,1) to (1,0)).
 
 ### A* Terrain Pathfinding (Pass 2)
 
@@ -458,10 +455,6 @@ src/
   materials.js          — Shared materials, palettes, and geometries
   car.js                — Car mesh
   game.js               — Game class (scene, renderer, loop, UI, camera)
-  modes/
-    GameMode.js         — Base class
-    TreasureHunt.js     — Treasure hunt mode
-    targetPicker.js     — Road location picker
 package.json
 test/
   *.test.js
