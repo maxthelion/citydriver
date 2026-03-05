@@ -21,8 +21,9 @@
   #sidebar .missing { opacity: 0.3; }
   #viewer { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   #image-area { flex: 1; display: flex; overflow: hidden; }
-  #image-container { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 12px; position: relative; }
-  #image-container img { image-rendering: pixelated; cursor: crosshair; }
+  #image-container { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 12px; }
+  #image-wrapper { position: relative; flex-shrink: 0; }
+  #image-wrapper img { image-rendering: pixelated; cursor: crosshair; display: block; }
   #image-container.zoomed img { cursor: zoom-out; }
   #grid-overlay { position: absolute; top: 0; left: 0; pointer-events: none; }
   #grid-overlay.interactive { pointer-events: auto; }
@@ -55,7 +56,9 @@
   <div id="viewer">
     <div id="image-area">
       <div id="image-container">
-        <div id="grid-overlay"></div>
+        <div id="image-wrapper">
+          <div id="grid-overlay"></div>
+        </div>
       </div>
       <div id="zoom-panel">
         <div class="header">
@@ -81,6 +84,7 @@ let cityParams = null; // {width, height, cellSize} from the city
 
 const sidebar = document.getElementById('sidebar');
 const container = document.getElementById('image-container');
+const wrapper = document.getElementById('image-wrapper');
 const gridOverlay = document.getElementById('grid-overlay');
 const status = document.getElementById('status');
 const dirInput = document.getElementById('dirInput');
@@ -178,12 +182,11 @@ async function probeNumberedFile(base, num) {
 function showImage() {
   const tile = tiles[currentIdx];
   // Remove old image but keep grid overlay
-  const oldImg = container.querySelector('img');
+  const oldImg = wrapper.querySelector('img');
   if (oldImg) oldImg.remove();
   container.className = '';
 
   if (!tile || !tile.url) {
-    container.innerHTML = `<div style="color:#666;padding:40px">No image</div>`;
     status.textContent = 'No image';
     return;
   }
@@ -195,12 +198,12 @@ function showImage() {
     status.textContent = `${tile.num}. ${tile.name} — ${img.naturalWidth}x${img.naturalHeight} — zoom ${zoom}x`;
   };
   img.src = tile.url;
-  container.insertBefore(img, gridOverlay);
+  wrapper.insertBefore(img, gridOverlay);
 }
 
 container.addEventListener('wheel', (e) => {
   e.preventDefault();
-  const img = container.querySelector('img');
+  const img = wrapper.querySelector('img');
   if (!img) return;
   if (e.deltaY < 0) {
     zoom = Math.min(zoom * 2, 16);
@@ -225,7 +228,7 @@ function applyZoom(img) {
 
 gridToggle.addEventListener('change', () => {
   gridVisible = gridToggle.checked;
-  const img = container.querySelector('img');
+  const img = wrapper.querySelector('img');
   if (img) updateGrid(img);
 });
 
@@ -313,7 +316,7 @@ function onCellClick(col, row, img) {
 zoomClose.addEventListener('click', () => {
   zoomPanel.classList.remove('visible');
   selectedCell = null;
-  const img = container.querySelector('img');
+  const img = wrapper.querySelector('img');
   if (img) updateGrid(img);
 });
 
@@ -330,22 +333,22 @@ document.addEventListener('keydown', e => {
     selectTile(Math.max(currentIdx - 1, 0));
   } else if (e.key === '+' || e.key === '=') {
     zoom = Math.min(zoom * 2, 16);
-    const img = container.querySelector('img');
+    const img = wrapper.querySelector('img');
     if (img) { applyZoom(img); updateGrid(img); }
   } else if (e.key === '-') {
     zoom = Math.max(zoom / 2, 0.5);
-    const img = container.querySelector('img');
+    const img = wrapper.querySelector('img');
     if (img) { applyZoom(img); updateGrid(img); }
   } else if (e.key === 'g') {
     // Toggle grid
     gridVisible = !gridVisible;
     gridToggle.checked = gridVisible;
-    const img = container.querySelector('img');
+    const img = wrapper.querySelector('img');
     if (img) updateGrid(img);
   } else if (e.key === 'Escape') {
     zoomPanel.classList.remove('visible');
     selectedCell = null;
-    const img = container.querySelector('img');
+    const img = wrapper.querySelector('img');
     if (img) updateGrid(img);
   } else if (e.key >= '0' && e.key <= '9') {
     clearTimeout(window._numTimeout);
