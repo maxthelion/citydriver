@@ -149,9 +149,9 @@ function addRegionalRoad(graph, road, sharedNodes, params, elevation, waterMask,
     roadGrid.set(p.gx, p.gz, 1);
   }
 
-  // Simplify and smooth the city-resolution path
-  const simplified = simplifyPath(result.path, 1.5);
-  const smooth = smoothPath(simplified, cs);
+  // Aggressively simplify within the city — roads should be straight
+  const simplified = simplifyPath(result.path, 4.0);
+  const smooth = smoothPath(simplified, cs, 1); // single smoothing pass
   if (smooth.length < 2) return;
 
   // Place nodes at start and end; everything else is polyline intermediates
@@ -387,11 +387,11 @@ function connectSeed(graph, seedX, seedZ, baseCost, params) {
 
   const result = findPath(seedGx, seedGz, targetGx, targetGz, width, height, baseCost);
   if (result) {
-    const simplified = simplifyPath(result.path, 1.0);
-    const smooth = smoothPath(simplified, cs);
+    const simplified = simplifyPath(result.path, 4.0);
+    const smooth = smoothPath(simplified, cs, 1);
     graph.addEdge(seedNode, nearest.id, {
       points: smooth.slice(1, -1),
-      width: 10,
+      width: 16,
       hierarchy: 'arterial',
     });
   }
@@ -449,8 +449,8 @@ function addWaterfrontRoad(graph, cityLayers, baseCost) {
   const result = findPath(startCell.gx, startCell.gz, endCell.gx, endCell.gz, width, height, waterfrontCost);
   if (!result) return;
 
-  const simplified = simplifyPath(result.path, 2.0);
-  const smooth = smoothPath(simplified, cs);
+  const simplified = simplifyPath(result.path, 4.0);
+  const smooth = smoothPath(simplified, cs, 1);
   if (smooth.length < 2) return;
 
   // Add as a single edge with polyline intermediates
@@ -482,7 +482,7 @@ function addWaterfrontRoad(graph, cityLayers, baseCost) {
       const tGz = Math.round(target.z / cs);
       const connResult = findPath(wGx, wGz, tGx, tGz, width, height, baseCost);
       if (connResult) {
-        const connSmooth = smoothPath(simplifyPath(connResult.path, 1.0), cs);
+        const connSmooth = smoothPath(simplifyPath(connResult.path, 4.0), cs, 1);
         graph.addEdge(wfNodeId, nearestId, {
           points: connSmooth.slice(1, -1),
           width: 8,
@@ -555,8 +555,8 @@ function addFallbackRoads(graph, seedX, seedZ, baseCost, params, rng) {
     const dGz = Math.round(d.z / cs);
     const result = findPath(seedGx, seedGz, dGx, dGz, width, height, baseCost);
     if (result) {
-      const simplified = simplifyPath(result.path, 1.0);
-      const smooth = smoothPath(simplified, cs);
+      const simplified = simplifyPath(result.path, 4.0);
+      const smooth = smoothPath(simplified, cs, 1);
       const node = graph.addNode(smooth[smooth.length - 1].x, smooth[smooth.length - 1].z, {
         type: 'entry',
         direction: d.dir,

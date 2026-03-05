@@ -152,31 +152,7 @@ export function generateStreetsAndPlots(cityLayers, graph, rng) {
     allPlots.push(...plots);
   }
 
-  // Phase 2: Back lanes — where density is high enough and plots are deep
-  const backLaneEdges = generateBackLanes(graph, allPlots, ownership, neighborhoods, density, w, h, cs, claimedCells, rng);
-
-  // Phase 3: Cross streets — break long blocks
-  const crossStreetEdges = generateCrossStreets(graph, allPlots, ownership, neighborhoods, density, elevation, waterMask, seaLevel, w, h, cs, claimedCells, rng);
-
-  // Phase 4: Frontage plots along new streets (back lanes and cross streets)
-  const newStreetEdges = [...backLaneEdges, ...crossStreetEdges];
-  for (const edgeId of newStreetEdges) {
-    const plots = generateFrontagePlots(graph, edgeId, ownership, neighborhoods, density, elevation, waterMask, seaLevel, w, h, cs, claimedCells, rng);
-    allPlots.push(...plots);
-  }
-
-  // Phase 5: Fill remaining frontage gaps on all local streets
-  for (const [edgeId, edge] of graph.edges) {
-    if (edgeIdsBefore.has(edgeId)) continue; // already processed arterials
-    if (newStreetEdges.includes(edgeId)) continue; // already processed
-    const plots = generateFrontagePlots(graph, edgeId, ownership, neighborhoods, density, elevation, waterMask, seaLevel, w, h, cs, claimedCells, rng);
-    allPlots.push(...plots);
-  }
-
   const newEdgeIds = new Set();
-  for (const edgeId of graph.edges.keys()) {
-    if (!edgeIdsBefore.has(edgeId)) newEdgeIds.add(edgeId);
-  }
 
   return { plots: allPlots, newEdgeIds };
 }
