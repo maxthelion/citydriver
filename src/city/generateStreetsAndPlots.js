@@ -19,80 +19,87 @@ import { distance2D } from '../core/math.js';
 
 const PLOT_CONFIG = {
   oldTown: {
-    frontageWidth: 6,    // metres
-    plotDepth: 22,
-    frontSetback: 0,
-    rearGarden: 5,
-    backLane: true,
-    crossStreetSpacing: 45,
-    buildingCoverage: 0.85,
-  },
-  waterfront: {
-    frontageWidth: 10,
-    plotDepth: 28,
+    frontageWidth: 8,    // metres
+    plotDepth: 30,
     frontSetback: 1,
     rearGarden: 6,
     backLane: true,
     crossStreetSpacing: 55,
-    buildingCoverage: 0.7,
+    buildingCoverage: 0.80,
   },
-  market: {
-    frontageWidth: 5,
-    plotDepth: 14,
-    frontSetback: 0,
-    rearGarden: 3,
-    backLane: false,
-    crossStreetSpacing: 40,
-    buildingCoverage: 0.9,
-  },
-  roadside: {
-    frontageWidth: 7,
-    plotDepth: 28,
+  waterfront: {
+    frontageWidth: 14,
+    plotDepth: 35,
     frontSetback: 2,
     rearGarden: 8,
     backLane: true,
-    crossStreetSpacing: 55,
+    crossStreetSpacing: 65,
     buildingCoverage: 0.65,
   },
-  hilltop: {
-    frontageWidth: 14,
-    plotDepth: 38,
-    frontSetback: 6,
-    rearGarden: 12,
+  market: {
+    frontageWidth: 7,
+    plotDepth: 20,
+    frontSetback: 0,
+    rearGarden: 4,
     backLane: false,
-    crossStreetSpacing: 70,
-    buildingCoverage: 0.35,
+    crossStreetSpacing: 50,
+    buildingCoverage: 0.85,
+  },
+  roadside: {
+    frontageWidth: 10,
+    plotDepth: 35,
+    frontSetback: 3,
+    rearGarden: 10,
+    backLane: true,
+    crossStreetSpacing: 65,
+    buildingCoverage: 0.55,
+  },
+  hilltop: {
+    frontageWidth: 18,
+    plotDepth: 45,
+    frontSetback: 8,
+    rearGarden: 15,
+    backLane: false,
+    crossStreetSpacing: 80,
+    buildingCoverage: 0.30,
   },
   valley: {
-    frontageWidth: 9,
-    plotDepth: 28,
-    frontSetback: 4,
-    rearGarden: 8,
+    frontageWidth: 12,
+    plotDepth: 35,
+    frontSetback: 5,
+    rearGarden: 10,
     backLane: true,
-    crossStreetSpacing: 60,
-    buildingCoverage: 0.5,
+    crossStreetSpacing: 70,
+    buildingCoverage: 0.45,
   },
   suburban: {
-    frontageWidth: 12,
-    plotDepth: 38,
-    frontSetback: 6,
-    rearGarden: 14,
+    frontageWidth: 16,
+    plotDepth: 45,
+    frontSetback: 8,
+    rearGarden: 16,
     backLane: false,
-    crossStreetSpacing: 75,
-    buildingCoverage: 0.35,
+    crossStreetSpacing: 85,
+    buildingCoverage: 0.30,
   },
   industrial: {
-    frontageWidth: 22,
-    plotDepth: 40,
-    frontSetback: 4,
-    rearGarden: 8,
+    frontageWidth: 28,
+    plotDepth: 50,
+    frontSetback: 5,
+    rearGarden: 10,
     backLane: false,
-    crossStreetSpacing: 60,
-    buildingCoverage: 0.6,
+    crossStreetSpacing: 70,
+    buildingCoverage: 0.55,
   },
 };
 
-const ROAD_WIDTH = 6; // metres — width of local/back-lane streets
+// Road widths include sidewalks/verges on both sides
+const ROAD_WIDTHS = {
+  arterial: 16,   // 7m carriageway + 2x 3m sidewalk + 2x 1.5m verge
+  collector: 12,  // 6m carriageway + 2x 2m sidewalk + 2x 1m verge
+  structural: 14, // similar to arterial
+  local: 9,       // 5m carriageway + 2x 2m sidewalk
+  backLane: 7,    // 4m carriageway + 2x 1.5m sidewalk
+};
 
 /**
  * @param {import('../core/LayerStack.js').LayerStack} cityLayers
@@ -201,8 +208,9 @@ function generateFrontagePlots(graph, edgeId, ownership, neighborhoods, density,
       const nx = side === 'left' ? leftNX : -leftNX;
       const nz = side === 'left' ? leftNZ : -leftNZ;
 
+      const hierarchy = edge.hierarchy || 'local';
       const sidePlots = generateSidePlots(
-        p0, segLen, dirX, dirZ, nx, nz, side,
+        p0, segLen, dirX, dirZ, nx, nz, side, hierarchy,
         edgeId, ownership, neighborhoods, density, elevation, waterMask,
         seaLevel, w, h, cs, claimedCells, rng,
       );
@@ -216,7 +224,7 @@ function generateFrontagePlots(graph, edgeId, ownership, neighborhoods, density,
 /**
  * Generate plots along one side of a road segment.
  */
-function generateSidePlots(p0, segLen, dirX, dirZ, nx, nz, side, edgeId, ownership, neighborhoods, density, elevation, waterMask, seaLevel, w, h, cs, claimedCells, rng) {
+function generateSidePlots(p0, segLen, dirX, dirZ, nx, nz, side, hierarchy, edgeId, ownership, neighborhoods, density, elevation, waterMask, seaLevel, w, h, cs, claimedCells, rng) {
   const plots = [];
 
   // Sample neighborhood type at segment midpoint
@@ -243,8 +251,9 @@ function generateSidePlots(p0, segLen, dirX, dirZ, nx, nz, side, edgeId, ownersh
   const numPlots = Math.max(1, Math.floor(segLen / frontageWidth));
   const actualWidth = segLen / numPlots;
 
-  // Offset from road centerline (half road width)
-  const roadOffset = (ROAD_WIDTH / 2) + 0.5;
+  // Offset from road centerline (half road width including sidewalks)
+  const roadTotalWidth = ROAD_WIDTHS[hierarchy] || ROAD_WIDTHS.local;
+  const roadOffset = roadTotalWidth / 2 + 1; // +1m buffer
 
   for (let i = 0; i < numPlots; i++) {
     const t0 = (i * actualWidth) / segLen;
@@ -274,11 +283,8 @@ function generateSidePlots(p0, segLen, dirX, dirZ, nx, nz, side, edgeId, ownersh
     // Validate all corners
     if (!validatePlotCorners([f0, f1, r1, r0], elevation, waterMask, seaLevel, w, h, cs)) continue;
 
-    // Check for overlap with existing plots
-    const plotCenterGx = Math.round((f0.x + r1.x) / 2 / cs);
-    const plotCenterGz = Math.round((f0.z + r1.z) / 2 / cs);
-    const cellKey = `${plotCenterGx},${plotCenterGz}`;
-    if (claimedCells.has(cellKey)) continue;
+    // Check for overlap with existing plots (sample multiple points)
+    if (isPlotOverlapping(f0, f1, r0, r1, cs, claimedCells)) continue;
 
     // Claim cells under this plot
     claimPlotCells(f0, f1, r0, r1, cs, claimedCells);
@@ -395,7 +401,7 @@ function generateBackLanes(graph, existingPlots, ownership, neighborhoods, densi
       if (neighbors.includes(backNodes[i + 1])) continue;
 
       const edgeId = graph.addEdge(backNodes[i], backNodes[i + 1], {
-        width: 5,
+        width: ROAD_WIDTHS.backLane,
         hierarchy: 'local',
       });
       newEdgeIds.push(edgeId);
@@ -494,7 +500,7 @@ function generateCrossStreets(graph, existingPlots, ownership, neighborhoods, de
       if (graph.neighbors(startNode).includes(endNode)) continue;
 
       const crossEdgeId = graph.addEdge(startNode, endNode, {
-        width: 5,
+        width: ROAD_WIDTHS.backLane,
         hierarchy: 'local',
       });
       newEdgeIds.push(crossEdgeId);
@@ -517,19 +523,38 @@ function validatePlotCorners(corners, elevation, waterMask, seaLevel, w, h, cs) 
   return true;
 }
 
-function claimPlotCells(f0, f1, r0, r1, cs, claimedCells) {
-  // Claim a grid of cells under the plot footprint
-  const minX = Math.min(f0.x, f1.x, r0.x, r1.x);
-  const maxX = Math.max(f0.x, f1.x, r0.x, r1.x);
-  const minZ = Math.min(f0.z, f1.z, r0.z, r1.z);
-  const maxZ = Math.max(f0.z, f1.z, r0.z, r1.z);
+/** Check if a plot overlaps already-claimed cells. Reject if >30% overlap. */
+function isPlotOverlapping(f0, f1, r0, r1, cs, claimedCells) {
+  const step = 3; // sample every 3m
+  const corners = [f0, f1, r1, r0];
+  let samples = 0;
+  let hits = 0;
 
-  const step = cs * 0.5;
-  for (let x = minX; x <= maxX; x += step) {
-    for (let z = minZ; z <= maxZ; z += step) {
-      const gx = Math.round(x / cs);
-      const gz = Math.round(z / cs);
-      claimedCells.add(`${gx},${gz}`);
+  // Walk the quad using bilinear interpolation
+  for (let u = 0; u <= 1; u += step / Math.max(1, dist(f0, f1))) {
+    for (let v = 0; v <= 1; v += step / Math.max(1, dist(f0, r0))) {
+      const x = f0.x * (1 - u) * (1 - v) + f1.x * u * (1 - v) + r1.x * u * v + r0.x * (1 - u) * v;
+      const z = f0.z * (1 - u) * (1 - v) + f1.z * u * (1 - v) + r1.z * u * v + r0.z * (1 - u) * v;
+      const key = `${Math.round(x / 3)},${Math.round(z / 3)}`;
+      samples++;
+      if (claimedCells.has(key)) hits++;
+    }
+  }
+  return samples > 0 && (hits / samples) > 0.3;
+}
+
+function dist(a, b) {
+  return Math.sqrt((a.x - b.x) ** 2 + (a.z - b.z) ** 2);
+}
+
+/** Claim a fine grid of cells under the plot footprint. */
+function claimPlotCells(f0, f1, r0, r1, cs, claimedCells) {
+  const step = 3; // 3m resolution
+  for (let u = 0; u <= 1; u += step / Math.max(1, dist(f0, f1))) {
+    for (let v = 0; v <= 1; v += step / Math.max(1, dist(f0, r0))) {
+      const x = f0.x * (1 - u) * (1 - v) + f1.x * u * (1 - v) + r1.x * u * v + r0.x * (1 - u) * v;
+      const z = f0.z * (1 - u) * (1 - v) + f1.z * u * (1 - v) + r1.z * u * v + r0.z * (1 - u) * v;
+      claimedCells.add(`${Math.round(x / 3)},${Math.round(z / 3)}`);
     }
   }
 }

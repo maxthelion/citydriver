@@ -86,7 +86,7 @@ export function generateCollectors(cityLayers, graph, rng) {
       const node = k === smooth.length - 1
         ? findOrCreateNode(graph, b.x, b.z, cs * 2)
         : graph.addNode(smooth[k].x, smooth[k].z, { type: 'collector' });
-      graph.addEdge(prevNode, node, { width: 8, hierarchy: 'collector' });
+      graph.addEdge(prevNode, node, { width: 12, hierarchy: 'collector' });
       collectorEdgesAdded++;
       prevNode = node;
     }

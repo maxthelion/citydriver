@@ -101,7 +101,10 @@ export function generateBuildings(cityLayers, plots, rng) {
     const materialShade = rng.range(-0.15, 0.15); // ±15% brightness variation
 
     // ---- Directional setbacks ----
-    const setbacks = getSetbacks(type, cs);
+    // Prefer plot-level setback data from frontage-first generation
+    const setbacks = plot.setback !== undefined
+      ? getSetbacksFromPlot(plot, type)
+      : getSetbacks(type, cs);
     const footprint = applyDirectionalSetbacks(
       plot.vertices, plot.frontageDirection, setbacks,
     );
@@ -138,6 +141,39 @@ export function generateBuildings(cityLayers, plots, rng) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Derive setbacks from the plot's own frontage-first data.
+ * Front setback and rear garden come from the plot config.
+ * Side gaps are derived from buildingCoverage.
+ */
+function getSetbacksFromPlot(plot, type) {
+  const front = plot.setback || 0;
+  const rear = plot.rearGarden || (plot.depth * 0.2);
+  const frontageWidth = plot.frontageWidth || 10;
+  const coverage = plot.buildingCoverage || 0.5;
+
+  // Side gap: distribute remaining width evenly
+  const buildingWidth = frontageWidth * coverage;
+  const totalSideGap = Math.max(0, frontageWidth - buildingWidth);
+
+  let sideLeft, sideRight;
+  if (type === 'terrace' || type === 'commercial') {
+    // Party walls: no side gaps
+    sideLeft = 0;
+    sideRight = 0;
+  } else if (type === 'semi-detached') {
+    // One shared wall, one gap
+    sideLeft = totalSideGap;
+    sideRight = 0;
+  } else {
+    // Detached: gaps on both sides
+    sideLeft = totalSideGap / 2;
+    sideRight = totalSideGap / 2;
+  }
+
+  return { front, rear, sideLeft, sideRight };
+}
 
 /**
  * Return directional setback distances for a given building type.

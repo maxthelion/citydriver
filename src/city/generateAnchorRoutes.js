@@ -87,7 +87,7 @@ function addRegionalRoad(graph, road, sharedNodes, params, elevation, waterMask,
   const clipped = clipPathToBounds(worldPts, maxX, maxZ);
   if (clipped.length < 2) return;
 
-  const roadWidth = road.hierarchy === 'arterial' ? 12 : 8;
+  const roadWidth = road.hierarchy === 'arterial' ? 16 : 12;
   const hierarchy = road.hierarchy || 'arterial';
 
   // Build a distance field from the regional centerline for corridor-constrained pathfinding.
@@ -458,7 +458,7 @@ function addWaterfrontRoad(graph, cityLayers, baseCost) {
   const endNode = graph.addNode(smooth[smooth.length - 1].x, smooth[smooth.length - 1].z, { type: 'waterfront' });
   graph.addEdge(startNode, endNode, {
     points: smooth.slice(1, -1),
-    width: 8,
+    width: 14,
     hierarchy: 'structural',
   });
 

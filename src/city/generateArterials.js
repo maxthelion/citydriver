@@ -101,7 +101,7 @@ export function generateArterials(cityLayers, graph, rng) {
 
     // Add gap-fill road
     const gapNode = graph.addNode(smooth[0].x, smooth[0].z, { type: 'arterialGap' });
-    addPathAsEdges(graph, smooth, gapNode, target.id, cs * 20, { width: 10, hierarchy: 'arterial' });
+    addPathAsEdges(graph, smooth, gapNode, target.id, cs * 20, { width: 16, hierarchy: 'arterial' });
 
     // Update arterial nodes list
     arterialNodes.push({ id: gapNode, x: smooth[0].x, z: smooth[0].z });
@@ -141,7 +141,7 @@ export function generateArterials(cityLayers, graph, rng) {
 
       const simplified = simplifyPath(result.path, 2.0);
       const smooth = smoothPath(simplified, cs);
-      addPathAsEdges(graph, smooth, entryNodes[i], entryNodes[j], cs * 20, { width: 10, hierarchy: 'arterial' });
+      addPathAsEdges(graph, smooth, entryNodes[i], entryNodes[j], cs * 20, { width: 16, hierarchy: 'arterial' });
     }
   }
 }

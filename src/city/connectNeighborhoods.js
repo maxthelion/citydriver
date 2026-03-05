@@ -70,7 +70,7 @@ export function connectNeighborhoods(cityLayers, graph, neighborhoods, rng) {
 
     graph.addEdge(startNode, endNode, {
       points: smooth.slice(1, -1),
-      width: conn.hierarchy === 'arterial' ? 12 : 8,
+      width: conn.hierarchy === 'arterial' ? 16 : 12,
       hierarchy: conn.hierarchy,
     });
   }

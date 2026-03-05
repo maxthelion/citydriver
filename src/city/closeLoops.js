@@ -61,12 +61,12 @@ export function closeLoops(graph, maxConnectDist = 500, cityLayers = null) {
           const simplified = simplifyPath(result.path, 1.0);
           const smooth = smoothPath(simplified, cs);
           const intermediates = smooth.slice(1, -1);
-          graph.addEdge(deadId, bestId, { points: intermediates, width: 6, hierarchy: 'local' });
+          graph.addEdge(deadId, bestId, { points: intermediates, width: 9, hierarchy: 'local' });
           continue;
         }
       }
       // Fallback: straight line
-      graph.addEdge(deadId, bestId, { width: 6, hierarchy: 'local' });
+      graph.addEdge(deadId, bestId, { width: 9, hierarchy: 'local' });
     }
   }
 }
@@ -151,13 +151,13 @@ function connectComponents(graph, cityLayers = null) {
           const simplified = simplifyPath(result.path, 1.0);
           const smooth = smoothPath(simplified, cs);
           const intermediates = smooth.slice(1, -1);
-          graph.addEdge(bestOtherId, bestMainId, { points: intermediates, width: 6, hierarchy: 'local' });
+          graph.addEdge(bestOtherId, bestMainId, { points: intermediates, width: 9, hierarchy: 'local' });
           for (const id of components[i]) mainComponent.add(id);
           continue;
         }
       }
       // Fallback: straight line
-      graph.addEdge(bestOtherId, bestMainId, { width: 6, hierarchy: 'local' });
+      graph.addEdge(bestOtherId, bestMainId, { width: 9, hierarchy: 'local' });
       for (const id of components[i]) mainComponent.add(id);
     }
   }
