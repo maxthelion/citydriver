@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { generateRegion } from '../src/regional/pipeline.js';
 import { generateCityStepByStep } from '../src/city/pipelineDebug.js';
 import { renderDebugGrid, renderRegionOverview } from '../src/rendering/debugTiles.js';
+import { renderSchematic } from '../src/rendering/schematicRenderer.js';
 import { SeededRandom } from '../src/core/rng.js';
 import sharp from 'sharp';
 
@@ -100,6 +101,39 @@ for (let i = 0; i < tiles.length; i++) {
     .toFile(tilePath);
 }
 console.log(`  + ${tiles.length} individual tiles`);
+
+// Render schematic tiles for grid overlay (8 columns)
+const gridCols = 8;
+const cityWorldW = params.width * params.cellSize;
+const cityWorldH = params.height * params.cellSize;
+const cellWorldW = cityWorldW / gridCols;
+const gridRows = Math.ceil(cityWorldH / cellWorldW);
+const plots = cityLayers.getData('plots') || [];
+const buildings = cityLayers.getData('buildings') || [];
+
+console.log(`Rendering ${gridCols}x${gridRows} schematic grid...`);
+let schematicCount = 0;
+for (let row = 0; row < gridRows; row++) {
+  for (let col = 0; col < gridCols; col++) {
+    const cx = (col + 0.5) * cellWorldW;
+    const cz = (row + 0.5) * cellWorldW;
+
+    // Skip cells with no plots or buildings nearby
+    const halfView = 250; // 500m / 2
+    const hasContent = plots.some(p => p.centroid &&
+      Math.abs(p.centroid.x - cx) < halfView * 1.2 &&
+      Math.abs(p.centroid.z - cz) < halfView * 1.2);
+    if (!hasContent) continue;
+
+    const buf = renderSchematic({ cx, cz, cityLayers, roadGraph, plots, buildings });
+    const tilePath = join(outDir, `schematic-${col}-${row}.png`);
+    await sharp(Buffer.from(buf.data.buffer), {
+      raw: { width: buf.width, height: buf.height, channels: 4 },
+    }).png().toFile(tilePath);
+    schematicCount++;
+  }
+}
+console.log(`  + ${schematicCount} schematic tiles`);
 
 // Create/update "debug-latest" symlink
 const latestLink = 'debug-latest';

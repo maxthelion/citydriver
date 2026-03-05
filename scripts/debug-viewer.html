@@ -26,7 +26,7 @@
   #image-container.zoomed img { cursor: zoom-out; }
   #grid-overlay { position: absolute; top: 0; left: 0; pointer-events: none; }
   #grid-overlay.interactive { pointer-events: auto; }
-  #zoom-panel { width: 400px; border-left: 1px solid #333; overflow: hidden; display: none; flex-direction: column; }
+  #zoom-panel { width: 600px; border-left: 1px solid #333; overflow: hidden; display: none; flex-direction: column; }
   #zoom-panel.visible { display: flex; }
   #zoom-panel .header { padding: 6px 10px; background: #16213e; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
   #zoom-panel .header button { background: #444; font-size: 12px; }
@@ -271,26 +271,43 @@ function onCellClick(col, row, img) {
   selectedCell = { col, row };
   updateGrid(img);
 
-  // Render zoomed view of this cell
-  const imgW = img.naturalWidth;
-  const imgH = img.naturalHeight;
-  const cellW = imgW / gridCols;
+  // Try to load pre-rendered schematic tile first
+  const base = resolveDir(currentDir);
+  const schematicUrl = `${base}/schematic-${col}-${row}.png`;
 
-  const sx = col * cellW;
-  const sy = row * cellW;
-  const sw = Math.min(cellW, imgW - sx);
-  const sh = Math.min(cellW, imgH - sy);
-
-  // Draw to canvas at high zoom
-  const canvasSize = 400;
-  zoomCanvas.width = canvasSize;
-  zoomCanvas.height = canvasSize;
-  const ctx = zoomCanvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvasSize, canvasSize);
-
-  zoomTitle.textContent = `Cell ${col},${row} — ${Math.round(sw)}x${Math.round(sh)}px`;
+  zoomTitle.textContent = `Cell ${col},${row} — loading schematic...`;
   zoomPanel.classList.add('visible');
+
+  const schImg = new Image();
+  schImg.onload = () => {
+    // Schematic tile exists — show it at full resolution
+    const canvasSize = Math.min(600, schImg.naturalWidth);
+    zoomCanvas.width = canvasSize;
+    zoomCanvas.height = canvasSize;
+    const ctx = zoomCanvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(schImg, 0, 0, canvasSize, canvasSize);
+    zoomTitle.textContent = `Cell ${col},${row} — schematic ${schImg.naturalWidth}x${schImg.naturalHeight}`;
+  };
+  schImg.onerror = () => {
+    // No schematic — fall back to zoomed pixel crop
+    const imgW = img.naturalWidth;
+    const imgH = img.naturalHeight;
+    const cellW = imgW / gridCols;
+    const sx = col * cellW;
+    const sy = row * cellW;
+    const sw = Math.min(cellW, imgW - sx);
+    const sh = Math.min(cellW, imgH - sy);
+
+    const canvasSize = 400;
+    zoomCanvas.width = canvasSize;
+    zoomCanvas.height = canvasSize;
+    const ctx = zoomCanvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvasSize, canvasSize);
+    zoomTitle.textContent = `Cell ${col},${row} — pixel zoom ${Math.round(sw)}x${Math.round(sh)}`;
+  };
+  schImg.src = schematicUrl;
 }
 
 zoomClose.addEventListener('click', () => {
