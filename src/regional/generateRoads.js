@@ -66,10 +66,16 @@ export function generateRoads(params, settlements, elevation, slope, waterMask, 
     existingPairs.add(keyRev);
   }
 
-  // Sort: arterials first so the trunk network exists before feeders pathfind
+  // Sort: arterials first so the trunk network exists before feeders pathfind.
+  // Within each hierarchy, shorter roads first so they stamp the roadGrid
+  // early and attract longer roads to merge through them.
   connections.sort((a, b) => {
     const order = { arterial: 0, collector: 1, local: 2 };
-    return (order[a.hierarchy] ?? 3) - (order[b.hierarchy] ?? 3);
+    const hDiff = (order[a.hierarchy] ?? 3) - (order[b.hierarchy] ?? 3);
+    if (hDiff !== 0) return hDiff;
+    const distA = distance2D(a.from.gx, a.from.gz, a.to.gx, a.to.gz);
+    const distB = distance2D(b.from.gx, b.from.gz, b.to.gx, b.to.gz);
+    return distA - distB;
   });
 
   // Find paths
@@ -143,6 +149,19 @@ function buildConnections(settlements, gridWidth) {
     else hierarchy = 'local';
 
     connections.push({ from: a, to: b, hierarchy });
+  }
+
+  // Proximity guarantee: any two routable settlements within close range
+  // always get connected, regardless of K limits. This ensures nearby
+  // settlements aren't left without a direct link.
+  const proximityThreshold = 15;
+  for (let i = 0; i < routable.length; i++) {
+    for (let j = i + 1; j < routable.length; j++) {
+      const dist = distance2D(routable[i].gx, routable[i].gz, routable[j].gx, routable[j].gz);
+      if (dist <= proximityThreshold) {
+        addConnection(routable[i], routable[j]);
+      }
+    }
   }
 
   // For each settlement, connect to K nearest neighbors
