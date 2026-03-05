@@ -38,8 +38,9 @@ export function generateAnchorRoutes(cityLayers, rng) {
   // Track existing road cells so later roads prefer sharing established routes
   const roadGrid = new Grid2D(w, h, { type: 'uint8' });
 
-  // 1. Inherit each regional road — re-pathfind at city resolution within a corridor
+  // 1. Inherit arterial and collector regional roads only (skip local tracks)
   for (const road of regionalRoads) {
+    if (road.hierarchy === 'local') continue;
     addRegionalRoad(graph, road, sharedNodes, params, elevation, waterMask, roadGrid);
   }
 
@@ -158,9 +159,12 @@ function addRegionalRoad(graph, road, sharedNodes, params, elevation, waterMask,
   const startPos = { x: smooth[0].x, z: smooth[0].z, key: clipped[0].key };
   const endPos = { x: smooth[smooth.length - 1].x, z: smooth[smooth.length - 1].z, key: clipped[clipped.length - 1].key };
 
-  const startNode = getOrCreateNode(graph, sharedNodes, startPos);
-  const endNode = getOrCreateNode(graph, sharedNodes, endPos);
+  const startNode = getOrCreateNode(graph, sharedNodes, startPos, cs);
+  const endNode = getOrCreateNode(graph, sharedNodes, endPos, cs);
   if (startNode === endNode) return;
+
+  // Skip if edge already exists between these nodes
+  if (graph.neighbors(startNode).includes(endNode)) return;
 
   graph.addEdge(startNode, endNode, {
     points: smooth.slice(1, -1),
@@ -173,10 +177,11 @@ function addRegionalRoad(graph, road, sharedNodes, params, elevation, waterMask,
  * Fallback: add regional road directly without re-pathfinding (used when corridor
  * pathfinding fails, e.g. if start/end are in water at city resolution).
  */
-function addRegionalRoadDirect(graph, road, clipped, sharedNodes, roadWidth, hierarchy) {
-  const startNode = getOrCreateNode(graph, sharedNodes, clipped[0]);
-  const endNode = getOrCreateNode(graph, sharedNodes, clipped[clipped.length - 1]);
+function addRegionalRoadDirect(graph, road, clipped, sharedNodes, roadWidth, hierarchy, cs = 10) {
+  const startNode = getOrCreateNode(graph, sharedNodes, clipped[0], cs);
+  const endNode = getOrCreateNode(graph, sharedNodes, clipped[clipped.length - 1], cs);
   if (startNode === endNode) return;
+  if (graph.neighbors(startNode).includes(endNode)) return;
 
   const intermediates = [];
   for (let i = 1; i < clipped.length - 1; i++) {
@@ -246,12 +251,18 @@ function buildCorridorDistanceGrid(clippedWorldPts, gridW, gridH, cs, corridorRa
   return grid;
 }
 
-function getOrCreateNode(graph, sharedNodes, pos) {
-  if (sharedNodes.has(pos.key)) {
+function getOrCreateNode(graph, sharedNodes, pos, cs = 10) {
+  if (pos.key && sharedNodes.has(pos.key)) {
     return sharedNodes.get(pos.key);
   }
+  // Also snap to any nearby existing node (within 3 cell widths)
+  const nearest = graph.nearestNode(pos.x, pos.z);
+  if (nearest && nearest.dist < cs * 3) {
+    if (pos.key) sharedNodes.set(pos.key, nearest.id);
+    return nearest.id;
+  }
   const id = graph.addNode(pos.x, pos.z, { type: 'inherited' });
-  sharedNodes.set(pos.key, id);
+  if (pos.key) sharedNodes.set(pos.key, id);
   return id;
 }
 
