@@ -10,9 +10,8 @@ import { identifyRiverCrossings } from './riverCrossings.js';
 import { placeNeighborhoods } from './placeNeighborhoods.js';
 import { connectNeighborhoods } from './connectNeighborhoods.js';
 import { computeNeighborhoodInfluence } from './neighborhoodInfluence.js';
-import { generateNeighborhoodStreets } from './generateNeighborhoodStreets.js';
+import { generateStreetsAndPlots } from './generateStreetsAndPlots.js';
 import { closeLoops } from './closeLoops.js';
-import { generatePlots } from './generatePlots.js';
 import { generateBuildings } from './generateBuildings.js';
 import { generateAmenities } from './generateAmenities.js';
 import { generateCityLandCover } from './generateLandCover.js';
@@ -96,13 +95,15 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   steps.push({ name: 'Density', render: 'density' });
   steps.push({ name: 'Districts', render: 'districts' });
 
-  // C7: Neighborhood streets (per-type grid patterns)
-  generateNeighborhoodStreets(cityLayers, roadGraph, rng.fork('streets'));
+  // C7: Streets and plots (merged, frontage-first)
+  const { plots, newEdgeIds: streetPlotEdges } = generateStreetsAndPlots(cityLayers, roadGraph, rng.fork('streetsAndPlots'));
+  cityLayers.setData('plots', plots);
   curEdges = new Set(roadGraph.edges.keys());
   steps.push({
-    name: 'Streets', render: 'roads',
-    edgeIds: new Set(curEdges), newEdgeIds: difference(curEdges, prevEdges),
+    name: 'Streets + Plots', render: 'roads',
+    edgeIds: new Set(curEdges), newEdgeIds: streetPlotEdges,
   });
+  steps.push({ name: 'Plots', render: 'plots' });
   prevEdges = new Set(curEdges);
 
   // C8: Loop closure (lightweight safety net)
@@ -113,11 +114,6 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
     edgeIds: new Set(curEdges), newEdgeIds: difference(curEdges, prevEdges),
   });
   cityLayers.setData('roadGraph', roadGraph);
-
-  // C9: Plots
-  const plots = generatePlots(cityLayers, roadGraph, rng.fork('plots'));
-  cityLayers.setData('plots', plots);
-  steps.push({ name: 'Plots', render: 'plots' });
 
   // C10: Buildings
   const buildings = generateBuildings(cityLayers, plots, rng.fork('buildings'));

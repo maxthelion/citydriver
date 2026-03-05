@@ -11,9 +11,8 @@ import { identifyRiverCrossings } from './riverCrossings.js';
 import { placeNeighborhoods } from './placeNeighborhoods.js';
 import { connectNeighborhoods } from './connectNeighborhoods.js';
 import { computeNeighborhoodInfluence } from './neighborhoodInfluence.js';
-import { generateNeighborhoodStreets } from './generateNeighborhoodStreets.js';
+import { generateStreetsAndPlots } from './generateStreetsAndPlots.js';
 import { closeLoops } from './closeLoops.js';
-import { generatePlots } from './generatePlots.js';
 import { generateBuildings } from './generateBuildings.js';
 import { generateAmenities } from './generateAmenities.js';
 import { generateCityLandCover } from './generateLandCover.js';
@@ -73,18 +72,15 @@ export function generateCity(regionalLayers, settlement, rng, options = {}) {
   cityLayers.setGrid('districts', districts);
   cityLayers.setData('ownership', ownership);
 
-  // C7. Neighborhood streets (per-type grid patterns)
-  generateNeighborhoodStreets(cityLayers, roadGraph, rng.fork('streets'));
+  // C7. Streets and plots (merged, frontage-first)
+  const { plots } = generateStreetsAndPlots(cityLayers, roadGraph, rng.fork('streetsAndPlots'));
+  cityLayers.setData('plots', plots);
 
   // C8. Loop closure (lightweight safety net)
   closeLoops(roadGraph, 500, cityLayers);
 
   // Store road graph
   cityLayers.setData('roadGraph', roadGraph);
-
-  // C9. Plots
-  const plots = generatePlots(cityLayers, roadGraph, rng.fork('plots'));
-  cityLayers.setData('plots', plots);
 
   // C10. Buildings (with population budget)
   const buildings = generateBuildings(cityLayers, plots, rng.fork('buildings'));
