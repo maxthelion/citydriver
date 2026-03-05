@@ -155,10 +155,13 @@ export function buildRegionRoads(layers) {
   const halfH = (elevation.height - 1) * cs / 2;
 
   for (const road of roads) {
-    if (!road.path || road.path.length < 2) continue;
+    // Use rawPath for full terrain-following detail; fall back to simplified
+    const pathData = road.rawPath || road.path;
+    if (!pathData || pathData.length < 2) continue;
 
-    const color = road.hierarchy === 'arterial' ? 0xccaa66 : 0x998855;
-    const points = road.path.map(p => {
+    const hierarchyColors = { arterial: 0xccaa66, collector: 0x998855, local: 0x776644 };
+    const color = hierarchyColors[road.hierarchy] || 0x776644;
+    const points = pathData.map(p => {
       const elev = elevation.get(p.gx, p.gz);
       return new THREE.Vector3(
         p.gx * cs - halfW,
