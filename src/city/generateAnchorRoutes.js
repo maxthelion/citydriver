@@ -166,6 +166,9 @@ function addRegionalRoad(graph, road, sharedNodes, params, elevation, waterMask,
   // Skip if edge already exists between these nodes
   if (graph.neighbors(startNode).includes(endNode)) return;
 
+  // Skip if a near-parallel edge already covers this corridor
+  if (hasParallelEdge(graph, startNode, endNode, cs * 8)) return;
+
   graph.addEdge(startNode, endNode, {
     points: smooth.slice(1, -1),
     width: roadWidth,
@@ -249,6 +252,38 @@ function buildCorridorDistanceGrid(clippedWorldPts, gridW, gridH, cs, corridorRa
   }
 
   return grid;
+}
+
+/**
+ * Check if the graph already has an edge running parallel and close to the
+ * line from startNode to endNode. Prevents double-roads in shared corridors.
+ */
+function hasParallelEdge(graph, startNode, endNode, maxDist) {
+  const a = graph.getNode(startNode);
+  const b = graph.getNode(endNode);
+  const mx = (a.x + b.x) / 2;
+  const mz = (a.z + b.z) / 2;
+  const angle = Math.atan2(b.z - a.z, b.x - a.x);
+
+  for (const [, edge] of graph.edges) {
+    const f = graph.getNode(edge.from);
+    const t = graph.getNode(edge.to);
+    if (!f || !t) continue;
+
+    // Check midpoint proximity
+    const emx = (f.x + t.x) / 2;
+    const emz = (f.z + t.z) / 2;
+    const d = Math.sqrt((mx - emx) ** 2 + (mz - emz) ** 2);
+    if (d > maxDist) continue;
+
+    // Check angle similarity (within 20°)
+    const eAngle = Math.atan2(t.z - f.z, t.x - f.x);
+    let adiff = Math.abs(angle - eAngle);
+    if (adiff > Math.PI) adiff = 2 * Math.PI - adiff;
+    if (adiff > Math.PI / 2) adiff = Math.PI - adiff; // handle opposite direction
+    if (adiff < Math.PI / 9) return true; // ~20°
+  }
+  return false;
 }
 
 function getOrCreateNode(graph, sharedNodes, pos, cs = 10) {
