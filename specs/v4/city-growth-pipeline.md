@@ -755,12 +755,23 @@ The occupancy grid gives us per-tick invariant checking at 3m resolution for fre
 | **Validator suite** | Structural and quality metrics (dead-end fraction, frontage coverage, etc.) | End-of-pipeline | ~20ms |
 | **Multi-seed smoke** | All tier-1 validators pass across 10+ seeds | CI / pre-commit | ~2s total |
 
+### Agent-Readable Bitmaps
+
+The bitmaps rendered by `debugTiles.js` serve a dual purpose: they're both programmatically testable (pixel analysis in vitest) and visually inspectable by AI agents. When debugging a generation issue or evaluating output quality, **agents should render and look at the debug bitmaps** — the raw RGBA buffers can be read as images, giving immediate visual feedback about what the pipeline produced.
+
+This means:
+- When implementing a new pipeline stage, render its debug tile and inspect it visually before moving on.
+- When a test fails, render the failing seed's bitmaps and look at them to understand what went wrong.
+- When evaluating whether output "looks right," the bitmap is the ground truth — not just the validator scores.
+
+The existing `renderDebugGrid()` composites all stages into a single 4x4 grid image. Individual tiles are also returned separately. Both are plain `Uint8Array` RGBA buffers that can be written to PNG for visual inspection or analysed programmatically in tests.
+
 ### Implementation Approach
 
 Build testing incrementally alongside the pipeline, not after:
 
-1. **Before writing the growth loop:** Add multi-seed smoke tests that assert tier-1 validators on the current pipeline. Establish the baseline. Add the missing tier-1 validators (`V_noOverlappingRoads`, `V_plotsNotOnRoads`, `V_plotsNotInWater`).
+1. **Before writing the growth loop:** Add multi-seed smoke tests that assert tier-1 validators on the current pipeline. Establish the baseline. Add the missing tier-1 validators (`V_noOverlappingRoads`, `V_plotsNotOnRoads`, `V_plotsNotInWater`). *(Done — see `test/city/multiSeedSmoke.test.js`)*
 2. **When building each growth loop step:** Add per-tick occupancy invariant checks. These are trivial — a `for` loop over the occupancy array.
-3. **When a bug is found visually:** Write a bitmap test or validator that catches it, add it to the suite, then fix the bug. Never fix a visual bug without a corresponding test.
+3. **When a bug is found visually:** Render the bitmap, look at it, write a bitmap test or validator that catches the issue, add it to the suite, then fix the bug. Never fix a visual bug without a corresponding test.
 4. **Save reference bitmaps for seed 42.** After each milestone, snapshot the schematic renders. Future runs diff against these. Any unexpected change triggers investigation.
 5. **CI runs the full suite.** Every commit must pass all seeds. If a change breaks seed 777, we know before merging.

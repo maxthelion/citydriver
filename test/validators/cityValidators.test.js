@@ -5,6 +5,9 @@ import {
   V_noBuildingOverlaps,
   V_roadGraphConnected,
   V_buildingsHaveRoadAccess,
+  V_noOverlappingRoads,
+  V_plotsNotOnRoads,
+  V_plotsNotInWater,
   S_deadEndFraction,
   S_plotFrontageRate,
   S_densityBuildingCorrelation,
@@ -114,6 +117,14 @@ function makeValidCity(overrides = {}) {
     { vertices: [{ x: 58, z: 22 }, { x: 72, z: 22 }, { x: 72, z: 38 }, { x: 58, z: 38 }], area: 256, centroid: { x: 65, z: 30 }, density: 0.5, district: 'B' },
   ];
   layers.setData('plots', plots);
+
+  // Water mask: all dry
+  const waterMask = new Grid2D(gridW, gridH, { cellSize, fill: 0 });
+  if (overrides.waterMask) {
+    // Apply custom water cells
+    overrides.waterMask.forEach(([gx, gz]) => waterMask.set(gx, gz, 1));
+  }
+  layers.setGrid('waterMask', waterMask);
 
   // Amenities
   const amenities = overrides.amenities ?? [
@@ -265,6 +276,82 @@ describe('Tier 1: V_buildingsHaveRoadAccess', () => {
   it('returns true when data is missing', () => {
     const layers = new LayerStack();
     expect(V_buildingsHaveRoadAccess.fn(layers)).toBe(true);
+  });
+});
+
+describe('Tier 1: V_noOverlappingRoads', () => {
+  it('returns true for non-overlapping roads', () => {
+    const layers = makeValidCity();
+    expect(V_noOverlappingRoads.fn(layers)).toBe(true);
+  });
+
+  it('returns false for parallel overlapping roads', () => {
+    const graph = new PlanarGraph();
+    // Two parallel edges running the same path, not sharing endpoints
+    const a0 = graph.addNode(0, 0);
+    const a1 = graph.addNode(100, 0);
+    const b0 = graph.addNode(0, 2);  // 2m away — within default width of 9
+    const b1 = graph.addNode(100, 2);
+    graph.addEdge(a0, a1, { width: 9, hierarchy: 'local' });
+    graph.addEdge(b0, b1, { width: 9, hierarchy: 'local' });
+    const layers = makeValidCity({ roadGraph: graph });
+    expect(V_noOverlappingRoads.fn(layers)).toBe(false);
+  });
+
+  it('returns true when edges share endpoints (adjacent)', () => {
+    const graph = new PlanarGraph();
+    const n0 = graph.addNode(0, 0);
+    const n1 = graph.addNode(50, 0);
+    const n2 = graph.addNode(100, 0);
+    graph.addEdge(n0, n1, { width: 9 });
+    graph.addEdge(n1, n2, { width: 9 });
+    const layers = makeValidCity({ roadGraph: graph });
+    expect(V_noOverlappingRoads.fn(layers)).toBe(true);
+  });
+
+  it('returns true when data is missing', () => {
+    const layers = new LayerStack();
+    expect(V_noOverlappingRoads.fn(layers)).toBe(true);
+  });
+});
+
+describe('Tier 1: V_plotsNotOnRoads', () => {
+  it('returns true when plot centroids are away from roads', () => {
+    const layers = makeValidCity();
+    expect(V_plotsNotOnRoads.fn(layers)).toBe(true);
+  });
+
+  it('returns false when a plot centroid sits on a road', () => {
+    // Place a plot centroid exactly on the road edge from (20,20) to (80,20)
+    const plots = [
+      { vertices: [{ x: 48, z: 18 }, { x: 52, z: 18 }, { x: 52, z: 22 }, { x: 48, z: 22 }],
+        area: 16, centroid: { x: 50, z: 20 }, density: 0.5, district: 'A' },
+    ];
+    const layers = makeValidCity({ plots });
+    expect(V_plotsNotOnRoads.fn(layers)).toBe(false);
+  });
+
+  it('returns true when data is missing', () => {
+    const layers = new LayerStack();
+    expect(V_plotsNotOnRoads.fn(layers)).toBe(true);
+  });
+});
+
+describe('Tier 1: V_plotsNotInWater', () => {
+  it('returns true when no plots are in water', () => {
+    const layers = makeValidCity();
+    expect(V_plotsNotInWater.fn(layers)).toBe(true);
+  });
+
+  it('returns false when a plot centroid is on a water cell', () => {
+    // Plot centroid at (30,30), which maps to grid cell (3,3) with cellSize=10
+    const layers = makeValidCity({ waterMask: [[3, 3]] });
+    expect(V_plotsNotInWater.fn(layers)).toBe(false);
+  });
+
+  it('returns true when data is missing', () => {
+    const layers = new LayerStack();
+    expect(V_plotsNotInWater.fn(layers)).toBe(true);
   });
 });
 
@@ -551,9 +638,9 @@ describe('Tier 3: Q_amenityCatchment', () => {
 // ============================================================
 
 describe('getCityValidators', () => {
-  it('returns all 15 validators', () => {
+  it('returns all 18 validators', () => {
     const validators = getCityValidators();
-    expect(validators).toHaveLength(15);
+    expect(validators).toHaveLength(18);
   });
 
   it('contains all tiers', () => {
@@ -564,9 +651,9 @@ describe('getCityValidators', () => {
     expect(tiers.has(3)).toBe(true);
   });
 
-  it('has 5 tier 1, 6 tier 2, 4 tier 3', () => {
+  it('has 8 tier 1, 6 tier 2, 4 tier 3', () => {
     const validators = getCityValidators();
-    expect(validators.filter(v => v.tier === 1)).toHaveLength(5);
+    expect(validators.filter(v => v.tier === 1)).toHaveLength(8);
     expect(validators.filter(v => v.tier === 2)).toHaveLength(6);
     expect(validators.filter(v => v.tier === 3)).toHaveLength(4);
   });
@@ -579,7 +666,7 @@ describe('runValidators', () => {
     const results = runValidators(layers, validators);
 
     expect(results.valid).toBe(true);
-    expect(results.tier1).toHaveLength(5);
+    expect(results.tier1).toHaveLength(8);
     expect(results.tier2).toHaveLength(6);
     expect(results.tier3).toHaveLength(4);
     expect(results.structural).toBeGreaterThan(0);

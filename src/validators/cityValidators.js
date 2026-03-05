@@ -91,6 +91,26 @@ function polylineLength(polyline) {
 }
 
 /**
+ * Sample a point at parametric position t (0-1) along a polyline.
+ */
+function samplePolylineAt(polyline, totalLen, t) {
+  const targetDist = t * totalLen;
+  let accum = 0;
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const segLen = distance2D(polyline[i].x, polyline[i].z, polyline[i + 1].x, polyline[i + 1].z);
+    if (accum + segLen >= targetDist) {
+      const frac = segLen > 0 ? (targetDist - accum) / segLen : 0;
+      return {
+        x: polyline[i].x + frac * (polyline[i + 1].x - polyline[i].x),
+        z: polyline[i].z + frac * (polyline[i + 1].z - polyline[i].z),
+      };
+    }
+    accum += segLen;
+  }
+  return polyline[polyline.length - 1];
+}
+
+/**
  * Compute perimeter of a polygon.
  */
 function polygonPerimeter(polygon) {
@@ -210,6 +230,110 @@ export const V_buildingsHaveRoadAccess = {
     for (const b of buildings) {
       const dist = pointToAnyRoadDist(b.centroid.x, b.centroid.z, roadGraph);
       if (dist > threshold) return false;
+    }
+    return true;
+  },
+};
+
+/**
+ * V_noOverlappingRoads (T1): No two road edges run parallel within half a road
+ * width of each other for a significant fraction of their length.
+ * Samples 5 points along each edge pair and flags overlap when 3+ samples
+ * are closer than the average width of the two edges.
+ */
+export const V_noOverlappingRoads = {
+  name: 'V_noOverlappingRoads',
+  tier: 1,
+  fn(cityLayers) {
+    const roadGraph = cityLayers.getData('roadGraph');
+    if (!roadGraph || roadGraph.edges.size < 2) return true;
+
+    const edgeIds = [...roadGraph.edges.keys()];
+    const polylines = new Map();
+    for (const id of edgeIds) polylines.set(id, roadGraph.edgePolyline(id));
+
+    for (let i = 0; i < edgeIds.length; i++) {
+      const aId = edgeIds[i];
+      const aEdge = roadGraph.getEdge(aId);
+      const aPoly = polylines.get(aId);
+      const aLen = polylineLength(aPoly);
+      if (aLen < 5) continue;
+
+      for (let j = i + 1; j < edgeIds.length; j++) {
+        const bId = edgeIds[j];
+        const bEdge = roadGraph.getEdge(bId);
+        const bPoly = polylines.get(bId);
+        const bLen = polylineLength(bPoly);
+        if (bLen < 5) continue;
+
+        // Skip edges that share a node — adjacent edges are expected to be close
+        if (aEdge.from === bEdge.from || aEdge.from === bEdge.to ||
+            aEdge.to === bEdge.from || aEdge.to === bEdge.to) continue;
+
+        const threshold = ((aEdge.width || 9) + (bEdge.width || 9)) / 2;
+
+        // Sample 5 points along edge A, find min distance to edge B
+        let closeCount = 0;
+        for (let s = 0; s < 5; s++) {
+          const t = (s + 0.5) / 5;
+          const pt = samplePolylineAt(aPoly, aLen, t);
+          const dist = pointToPolylineDist(pt.x, pt.z, bPoly);
+          if (dist < threshold) closeCount++;
+        }
+
+        if (closeCount >= 3) return false;
+      }
+    }
+    return true;
+  },
+};
+
+/**
+ * V_plotsNotOnRoads (T1): No plot centroid lies within half the nearest
+ * road's width of any road edge.
+ */
+export const V_plotsNotOnRoads = {
+  name: 'V_plotsNotOnRoads',
+  tier: 1,
+  fn(cityLayers) {
+    const plots = cityLayers.getData('plots');
+    const roadGraph = cityLayers.getData('roadGraph');
+    if (!plots || !roadGraph || plots.length === 0 || roadGraph.edges.size === 0) return true;
+
+    for (const plot of plots) {
+      if (!plot.centroid) continue;
+      let minDist = Infinity;
+      let minWidth = 9;
+      for (const [edgeId] of roadGraph.edges) {
+        const edge = roadGraph.getEdge(edgeId);
+        const polyline = roadGraph.edgePolyline(edgeId);
+        const d = pointToPolylineDist(plot.centroid.x, plot.centroid.z, polyline);
+        if (d < minDist) {
+          minDist = d;
+          minWidth = edge.width || 9;
+        }
+      }
+      if (minDist < minWidth / 2) return false;
+    }
+    return true;
+  },
+};
+
+/**
+ * V_plotsNotInWater (T1): No plot centroid lies on a water cell.
+ */
+export const V_plotsNotInWater = {
+  name: 'V_plotsNotInWater',
+  tier: 1,
+  fn(cityLayers) {
+    const plots = cityLayers.getData('plots');
+    const waterMask = cityLayers.getGrid('waterMask');
+    if (!plots || !waterMask) return true;
+
+    for (const plot of plots) {
+      if (!plot.centroid) continue;
+      const { gx, gz } = waterMask.worldToGrid(plot.centroid.x, plot.centroid.z);
+      if (waterMask.sample(gx, gz) > 0) return false;
     }
     return true;
   },
@@ -642,6 +766,9 @@ export function getCityValidators() {
     V_noBuildingOverlaps,
     V_roadGraphConnected,
     V_buildingsHaveRoadAccess,
+    V_noOverlappingRoads,
+    V_plotsNotOnRoads,
+    V_plotsNotInWater,
     S_deadEndFraction,
     S_plotFrontageRate,
     S_densityBuildingCorrelation,
