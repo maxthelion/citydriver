@@ -20,11 +20,22 @@
   #sidebar .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #sidebar .missing { opacity: 0.3; }
   #viewer { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  #image-container { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 12px; }
-  #image-container img { image-rendering: pixelated; cursor: zoom-in; }
+  #image-area { flex: 1; display: flex; overflow: hidden; }
+  #image-container { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 12px; position: relative; }
+  #image-container img { image-rendering: pixelated; cursor: crosshair; }
   #image-container.zoomed img { cursor: zoom-out; }
+  #grid-overlay { position: absolute; top: 0; left: 0; pointer-events: none; }
+  #grid-overlay.interactive { pointer-events: auto; }
+  #zoom-panel { width: 400px; border-left: 1px solid #333; overflow: hidden; display: none; flex-direction: column; }
+  #zoom-panel.visible { display: flex; }
+  #zoom-panel .header { padding: 6px 10px; background: #16213e; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
+  #zoom-panel .header button { background: #444; font-size: 12px; }
+  #zoom-panel canvas { flex: 1; image-rendering: pixelated; }
   #status { padding: 4px 12px; background: #16213e; border-top: 1px solid #333; color: #888; font-size: 12px; }
   kbd { background: #333; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+  .grid-cell { position: absolute; border: 1px solid rgba(255,255,0,0.15); cursor: pointer; }
+  .grid-cell:hover { border-color: rgba(255,255,0,0.6); background: rgba(255,255,0,0.08); }
+  .grid-cell.selected { border-color: rgba(255,100,100,0.8); background: rgba(255,100,100,0.1); }
 </style>
 </head>
 <body>
@@ -34,30 +45,51 @@
   <input id="dirInput" type="text" value="" placeholder="debug-latest" size="24">
   <button id="loadBtn">Load</button>
   <span id="info" style="color:#888"></span>
+  <label style="margin-left:12px"><input type="checkbox" id="gridToggle"> Grid</label>
   <span style="flex:1"></span>
-  <span style="color:#666"><kbd>&uarr;</kbd><kbd>&darr;</kbd> navigate &nbsp; <kbd>+</kbd><kbd>-</kbd><kbd>scroll</kbd> zoom &nbsp; <kbd>g</kbd> grid</span>
+  <span style="color:#666"><kbd>&uarr;</kbd><kbd>&darr;</kbd> nav &nbsp; <kbd>scroll</kbd> zoom &nbsp; <kbd>g</kbd> grid toggle &nbsp; click cell for zoom</span>
 </div>
 
 <div id="main">
   <div id="sidebar"></div>
   <div id="viewer">
-    <div id="image-container"></div>
+    <div id="image-area">
+      <div id="image-container">
+        <div id="grid-overlay"></div>
+      </div>
+      <div id="zoom-panel">
+        <div class="header">
+          <span id="zoom-title">Zoom</span>
+          <button id="zoom-close">X</button>
+        </div>
+        <canvas id="zoom-canvas"></canvas>
+      </div>
+    </div>
     <div id="status"></div>
   </div>
 </div>
 
 <script>
-// Auto-discovered tiles — populated on load
 let tiles = [];
 let currentDir = '';
 let currentIdx = 0;
 let zoom = 2;
+let gridVisible = false;
+let gridCols = 8; // cells across
+let selectedCell = null;
+let cityParams = null; // {width, height, cellSize} from the city
 
 const sidebar = document.getElementById('sidebar');
 const container = document.getElementById('image-container');
+const gridOverlay = document.getElementById('grid-overlay');
 const status = document.getElementById('status');
 const dirInput = document.getElementById('dirInput');
 const info = document.getElementById('info');
+const gridToggle = document.getElementById('gridToggle');
+const zoomPanel = document.getElementById('zoom-panel');
+const zoomCanvas = document.getElementById('zoom-canvas');
+const zoomTitle = document.getElementById('zoom-title');
+const zoomClose = document.getElementById('zoom-close');
 
 function buildSidebar() {
   sidebar.innerHTML = '';
@@ -77,7 +109,6 @@ function selectTile(idx) {
   sidebar.querySelectorAll('.item').forEach((el, i) => {
     el.classList.toggle('active', i === idx);
   });
-  // Scroll active item into view
   const active = sidebar.querySelector('.item.active');
   if (active) active.scrollIntoView({ block: 'nearest' });
   showImage();
@@ -97,7 +128,6 @@ function checkImage(url) {
   });
 }
 
-// Known step names to try discovering. We probe all possible numbered files.
 async function loadDir() {
   currentDir = dirInput.value.trim();
   if (!currentDir) return;
@@ -106,22 +136,16 @@ async function loadDir() {
   tiles = [];
   const base = resolveDir(currentDir);
 
-  // Try region overview first
   if (await checkImage(`${base}/00-region.png`)) {
     tiles.push({ num: '00', name: 'Region', url: `${base}/00-region.png` });
   }
 
-  // Probe numbered files 01-20
   for (let i = 1; i <= 20; i++) {
     const num = String(i).padStart(2, '0');
-    // Try to find any file starting with this number
     const found = await probeNumberedFile(base, num);
-    if (found) {
-      tiles.push(found);
-    }
+    if (found) tiles.push(found);
   }
 
-  // Try grid composite
   if (await checkImage(`${base}/grid.png`)) {
     tiles.push({ num: 'grid', name: 'Grid (all)', url: `${base}/grid.png` });
   }
@@ -132,11 +156,11 @@ async function loadDir() {
 }
 
 async function probeNumberedFile(base, num) {
-  // Known slug patterns from both v3 and v4 pipelines
   const slugs = [
     'elevation', 'slope', 'water-mask', 'anchor-routes',
     'neighborhoods', 'neighborhood-map', 'density', 'density-v2',
     'districts', 'arterials', 'collectors', 'streets',
+    'streets-plots', 'streets---plots',
     'loop-closure', 'rezone', 'plots', 'buildings',
     'amenities', 'land-cover',
   ];
@@ -144,8 +168,7 @@ async function probeNumberedFile(base, num) {
   for (const slug of slugs) {
     const url = `${base}/${num}-${slug}.png`;
     if (await checkImage(url)) {
-      // Convert slug back to display name
-      const name = slug.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+      const name = slug.split('-').filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
       return { num, name, url };
     }
   }
@@ -154,7 +177,9 @@ async function probeNumberedFile(base, num) {
 
 function showImage() {
   const tile = tiles[currentIdx];
-  container.innerHTML = '';
+  // Remove old image but keep grid overlay
+  const oldImg = container.querySelector('img');
+  if (oldImg) oldImg.remove();
   container.className = '';
 
   if (!tile || !tile.url) {
@@ -166,17 +191,11 @@ function showImage() {
   const img = new Image();
   img.onload = () => {
     applyZoom(img);
+    updateGrid(img);
     status.textContent = `${tile.num}. ${tile.name} — ${img.naturalWidth}x${img.naturalHeight} — zoom ${zoom}x`;
   };
   img.src = tile.url;
-  container.appendChild(img);
-
-  img.addEventListener('click', () => {
-    zoom = zoom >= 4 ? 1 : zoom * 2;
-    applyZoom(img);
-    status.textContent = `${tile.num}. ${tile.name} — ${img.naturalWidth}x${img.naturalHeight} — zoom ${zoom}x`;
-  });
-
+  container.insertBefore(img, gridOverlay);
 }
 
 container.addEventListener('wheel', (e) => {
@@ -189,6 +208,7 @@ container.addEventListener('wheel', (e) => {
     zoom = Math.max(zoom / 2, 0.5);
   }
   applyZoom(img);
+  updateGrid(img);
   const tile = tiles[currentIdx];
   if (tile) {
     status.textContent = `${tile.num}. ${tile.name} — ${img.naturalWidth}x${img.naturalHeight} — zoom ${zoom}x`;
@@ -201,7 +221,87 @@ function applyZoom(img) {
   container.className = zoom > 1 ? 'zoomed' : '';
 }
 
-// Keyboard shortcuts
+// --- Grid overlay ---
+
+gridToggle.addEventListener('change', () => {
+  gridVisible = gridToggle.checked;
+  const img = container.querySelector('img');
+  if (img) updateGrid(img);
+});
+
+function updateGrid(img) {
+  gridOverlay.innerHTML = '';
+  gridOverlay.style.width = img.style.width;
+  gridOverlay.style.height = img.style.height;
+
+  if (!gridVisible) {
+    gridOverlay.className = '';
+    return;
+  }
+
+  gridOverlay.className = 'interactive';
+
+  const imgW = img.naturalWidth;
+  const imgH = img.naturalHeight;
+  const cellW = imgW / gridCols;
+  const gridRows = Math.ceil(imgH / cellW);
+
+  for (let row = 0; row < gridRows; row++) {
+    for (let col = 0; col < gridCols; col++) {
+      const div = document.createElement('div');
+      div.className = 'grid-cell';
+      if (selectedCell && selectedCell.row === row && selectedCell.col === col) {
+        div.className += ' selected';
+      }
+      div.style.left = (col * cellW * zoom) + 'px';
+      div.style.top = (row * cellW * zoom) + 'px';
+      div.style.width = (cellW * zoom) + 'px';
+      div.style.height = (Math.min(cellW, imgH - row * cellW) * zoom) + 'px';
+      div.title = `Cell ${col},${row}`;
+      div.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onCellClick(col, row, img);
+      });
+      gridOverlay.appendChild(div);
+    }
+  }
+}
+
+function onCellClick(col, row, img) {
+  selectedCell = { col, row };
+  updateGrid(img);
+
+  // Render zoomed view of this cell
+  const imgW = img.naturalWidth;
+  const imgH = img.naturalHeight;
+  const cellW = imgW / gridCols;
+
+  const sx = col * cellW;
+  const sy = row * cellW;
+  const sw = Math.min(cellW, imgW - sx);
+  const sh = Math.min(cellW, imgH - sy);
+
+  // Draw to canvas at high zoom
+  const canvasSize = 400;
+  zoomCanvas.width = canvasSize;
+  zoomCanvas.height = canvasSize;
+  const ctx = zoomCanvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvasSize, canvasSize);
+
+  zoomTitle.textContent = `Cell ${col},${row} — ${Math.round(sw)}x${Math.round(sh)}px`;
+  zoomPanel.classList.add('visible');
+}
+
+zoomClose.addEventListener('click', () => {
+  zoomPanel.classList.remove('visible');
+  selectedCell = null;
+  const img = container.querySelector('img');
+  if (img) updateGrid(img);
+});
+
+// --- Keyboard shortcuts ---
+
 document.addEventListener('keydown', e => {
   if (e.target === dirInput) return;
 
@@ -212,16 +312,24 @@ document.addEventListener('keydown', e => {
     e.preventDefault();
     selectTile(Math.max(currentIdx - 1, 0));
   } else if (e.key === '+' || e.key === '=') {
-    zoom = Math.min(zoom * 2, 8);
+    zoom = Math.min(zoom * 2, 16);
     const img = container.querySelector('img');
-    if (img) { applyZoom(img); status.textContent = status.textContent.replace(/zoom \d+x/, `zoom ${zoom}x`); }
+    if (img) { applyZoom(img); updateGrid(img); }
   } else if (e.key === '-') {
-    zoom = Math.max(zoom / 2, 1);
+    zoom = Math.max(zoom / 2, 0.5);
     const img = container.querySelector('img');
-    if (img) { applyZoom(img); status.textContent = status.textContent.replace(/zoom \d+x/, `zoom ${zoom}x`); }
+    if (img) { applyZoom(img); updateGrid(img); }
   } else if (e.key === 'g') {
-    const gridIdx = tiles.findIndex(t => t.num === 'grid');
-    if (gridIdx >= 0) selectTile(gridIdx);
+    // Toggle grid
+    gridVisible = !gridVisible;
+    gridToggle.checked = gridVisible;
+    const img = container.querySelector('img');
+    if (img) updateGrid(img);
+  } else if (e.key === 'Escape') {
+    zoomPanel.classList.remove('visible');
+    selectedCell = null;
+    const img = container.querySelector('img');
+    if (img) updateGrid(img);
   } else if (e.key >= '0' && e.key <= '9') {
     clearTimeout(window._numTimeout);
     if (window._numBuffer !== undefined && Date.now() - window._numTime < 500) {
@@ -244,7 +352,6 @@ document.addEventListener('keydown', e => {
 document.getElementById('loadBtn').addEventListener('click', loadDir);
 dirInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadDir(); });
 
-// Auto-detect directory from URL params
 const urlParams = new URLSearchParams(location.search);
 const dirParam = urlParams.get('dir');
 if (dirParam) {
