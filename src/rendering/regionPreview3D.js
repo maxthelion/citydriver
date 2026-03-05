@@ -159,8 +159,8 @@ export function buildRegionRoads(layers) {
     const pathData = road.rawPath || road.path;
     if (!pathData || pathData.length < 2) continue;
 
-    const hierarchyColors = { arterial: 0xccaa66, collector: 0x998855, local: 0x776644 };
-    const color = hierarchyColors[road.hierarchy] || 0x776644;
+    const hierarchyColors = { arterial: 0xff3333, collector: 0xaa44cc, local: 0x8833aa };
+    const color = hierarchyColors[road.hierarchy] || 0x8833aa;
     const points = pathData.map(p => {
       const elev = elevation.get(p.gx, p.gz);
       return new THREE.Vector3(
@@ -171,7 +171,8 @@ export function buildRegionRoads(layers) {
     });
 
     const geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const material = new THREE.LineBasicMaterial({ color });
+    const linewidth = road.hierarchy === 'arterial' ? 2 : 1;
+    const material = new THREE.LineBasicMaterial({ color, linewidth });
     group.add(new THREE.Line(geometry, material));
   }
 
