@@ -6,6 +6,7 @@
 import { extractCityContext } from './extractCityContext.js';
 import { refineTerrain } from './refineTerrain.js';
 import { generateAnchorRoutes } from './generateAnchorRoutes.js';
+import { identifyRiverCrossings } from './riverCrossings.js';
 import { placeNeighborhoods } from './placeNeighborhoods.js';
 import { connectNeighborhoods } from './connectNeighborhoods.js';
 import { computeNeighborhoodInfluence } from './neighborhoodInfluence.js';
@@ -63,6 +64,11 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
     edgeIds: new Set(curEdges), newEdgeIds: structuralEdges,
   });
   prevEdges = new Set(curEdges);
+
+  // C3b: River crossings (bridge points)
+  const { bridgeGrid, bridges } = identifyRiverCrossings(cityLayers);
+  cityLayers.setGrid('bridgeGrid', bridgeGrid);
+  cityLayers.setData('bridges', bridges);
 
   // C4: Place neighborhood nuclei
   const neighborhoods = placeNeighborhoods(cityLayers, roadGraph, rng.fork('neighborhoods'));

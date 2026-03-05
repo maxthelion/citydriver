@@ -277,6 +277,32 @@ export function renderWaterMask(buf, waterMask) {
   }
 }
 
+function renderBridges(buf, bridgeGrid, bridges, cs) {
+  // Overlay bridge grid cells
+  if (bridgeGrid) {
+    for (let gz = 0; gz < buf.height; gz++) {
+      for (let gx = 0; gx < buf.width; gx++) {
+        if (bridgeGrid.get(gx, gz) > 0) {
+          blendPixel(buf, gx, gz, 255, 200, 50, 150);
+        }
+      }
+    }
+  }
+
+  // Mark bridge center points
+  if (bridges) {
+    for (const b of bridges) {
+      const px = Math.round(b.x / cs);
+      const pz = Math.round(b.z / cs);
+      for (let dz = -2; dz <= 2; dz++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          setPixel(buf, px + dx, pz + dz, 255, 50, 50);
+        }
+      }
+    }
+  }
+}
+
 export function renderDensity(buf, density) {
   for (let gz = 0; gz < buf.height; gz++) {
     for (let gx = 0; gx < buf.width; gx++) {
@@ -554,6 +580,7 @@ function renderTile(tileW, tileH, step, idx, cityLayers, roadGraph) {
     case 'waterMask':
       renderElevationFaint(tile, elevation, seaLevel);
       renderWaterMask(tile, cityLayers.getGrid('waterMask'));
+      renderBridges(tile, cityLayers.getGrid('bridgeGrid'), cityLayers.getData('bridges'), cs);
       break;
     case 'density':
       renderDensity(tile, step.grid || cityLayers.getGrid('density'));

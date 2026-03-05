@@ -161,6 +161,7 @@ export function terrainCostFunction(elevation, options = {}) {
     slopePenalty = 10,
     waterGrid = null,
     waterPenalty = 100,
+    bridgeGrid = null,
     edgeMargin = 5,
     edgePenalty = 5,
     seaLevel = null,
@@ -177,10 +178,13 @@ export function terrainCostFunction(elevation, options = {}) {
 
     let c = baseDist + slope * slopePenalty;
 
-    // Block water cells entirely
-    if (seaLevel !== null && elevation.get(toGx, toGz) < seaLevel) return Infinity;
+    // Bridge cells bypass water penalties
+    const isBridge = bridgeGrid && bridgeGrid.get(toGx, toGz) > 0;
 
-    if (waterGrid && waterGrid.get(toGx, toGz) > 0) {
+    // Block below-sea-level cells (unless bridged)
+    if (seaLevel !== null && elevation.get(toGx, toGz) < seaLevel && !isBridge) return Infinity;
+
+    if (waterGrid && waterGrid.get(toGx, toGz) > 0 && !isBridge) {
       c += waterPenalty;
     }
 

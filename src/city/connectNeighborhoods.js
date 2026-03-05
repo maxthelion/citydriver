@@ -18,6 +18,7 @@ export function connectNeighborhoods(cityLayers, graph, neighborhoods, rng) {
   const params = cityLayers.getData('params');
   const elevation = cityLayers.getGrid('elevation');
   const waterMask = cityLayers.getGrid('waterMask');
+  const bridgeGrid = cityLayers.getGrid('bridgeGrid');
 
   if (!params || !elevation || neighborhoods.length < 2) return;
 
@@ -27,11 +28,12 @@ export function connectNeighborhoods(cityLayers, graph, neighborhoods, rng) {
   const seaLevel = params.seaLevel ?? 0;
 
   // Terrain cost: low slope penalty so paths stay direct, only avoid water/cliffs
-  // No edge penalty — these are internal city connections, not regional roads
+  // Bridge grid allows crossing rivers at identified bridge points
   const costFn = terrainCostFunction(elevation, {
     slopePenalty: 3,
     waterGrid: waterMask,
     waterPenalty: 100,
+    bridgeGrid: bridgeGrid || null,
     seaLevel,
     edgeMargin: 0,
   });
