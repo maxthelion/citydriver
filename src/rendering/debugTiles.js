@@ -173,6 +173,59 @@ function elevationColor(h, seaLevel, min, max) {
   return [v, v, v];
 }
 
+// --- Neighborhood rendering ---
+
+const NEIGHBORHOOD_COLORS = {
+  oldTown:    [255, 80, 80],
+  waterfront: [80, 150, 255],
+  market:     [255, 200, 50],
+  roadside:   [255, 160, 80],
+  hilltop:    [180, 255, 120],
+  valley:     [120, 220, 180],
+  suburban:   [200, 180, 255],
+  industrial: [180, 140, 100],
+};
+
+export function renderNeighborhoods(buf, elevation, seaLevel, neighborhoods, ownership) {
+  const { min, max } = elevation.bounds();
+  // Draw faint elevation base
+  for (let gz = 0; gz < buf.height; gz++) {
+    for (let gx = 0; gx < buf.width; gx++) {
+      const h = elevation.get(gx, gz);
+      const [r, g, b] = elevationColor(h, seaLevel, min, max);
+      const grey = (r + g + b) / 3;
+      setPixel(buf, gx, gz,
+        Math.floor(grey * 0.4 + r * 0.2),
+        Math.floor(grey * 0.4 + g * 0.2),
+        Math.floor(grey * 0.4 + b * 0.2),
+      );
+    }
+  }
+
+  // Overlay neighborhood ownership with color tint
+  if (ownership) {
+    for (let gz = 0; gz < buf.height; gz++) {
+      for (let gx = 0; gx < buf.width; gx++) {
+        const idx = ownership.get(gx, gz);
+        if (idx < 0 || idx >= neighborhoods.length) continue;
+        const n = neighborhoods[idx];
+        const c = NEIGHBORHOOD_COLORS[n.type] || [200, 200, 200];
+        blendPixel(buf, gx, gz, c[0], c[1], c[2], 80);
+      }
+    }
+  }
+
+  // Draw nucleus markers
+  for (let i = 0; i < neighborhoods.length; i++) {
+    const n = neighborhoods[i];
+    const c = NEIGHBORHOOD_COLORS[n.type] || [255, 255, 255];
+    const sz = n.type === 'oldTown' ? 5 : 3;
+    fillRect(buf, n.gx - Math.floor(sz / 2), n.gz - Math.floor(sz / 2), sz, sz, c[0], c[1], c[2]);
+    // Label
+    drawLabel(buf, n.gx + sz, n.gz - 3, n.type.substring(0, 6), c[0], c[1], c[2]);
+  }
+}
+
 // --- Per-tile renderers ---
 
 export function renderElevation(buf, elevation, seaLevel) {
@@ -526,6 +579,9 @@ function renderTile(tileW, tileH, step, idx, cityLayers, roadGraph) {
     case 'amenities':
       renderElevationFaint(tile, elevation, seaLevel);
       renderAmenities(tile, cityLayers.getData('amenities'), cs);
+      break;
+    case 'neighborhoods':
+      renderNeighborhoods(tile, elevation, seaLevel, step.neighborhoods, step.ownership);
       break;
   }
 

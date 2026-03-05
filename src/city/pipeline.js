@@ -1,16 +1,15 @@
 /**
- * City generation orchestrator.
- * Runs all city generation phases in sequence, with feedback loops
- * and population-budget-driven city extent.
+ * City generation orchestrator (V4).
+ * Neighborhood-first: place nuclei, connect them, generate influence fields,
+ * then build street networks and fill with buildings.
  */
 
 import { extractCityContext } from './extractCityContext.js';
 import { refineTerrain } from './refineTerrain.js';
 import { generateAnchorRoutes } from './generateAnchorRoutes.js';
-import { generateDensityField } from './generateDensityField.js';
-import { generateArterials } from './generateArterials.js';
-import { generateDistricts } from './generateDistricts.js';
-import { generateCollectors } from './generateCollectors.js';
+import { placeNeighborhoods } from './placeNeighborhoods.js';
+import { connectNeighborhoods } from './connectNeighborhoods.js';
+import { computeNeighborhoodInfluence } from './neighborhoodInfluence.js';
 import { generateStreets } from './generateStreets.js';
 import { closeLoops } from './closeLoops.js';
 import { generatePlots } from './generatePlots.js';
@@ -38,7 +37,7 @@ const POPULATION_BY_TIER = {
 export function generateCity(regionalLayers, settlement, rng, options = {}) {
   const { cityRadius = 30, cityCellSize = 10 } = options;
 
-  // B1a. Extract city context
+  // C1. Extract city context
   const cityLayers = extractCityContext(regionalLayers, settlement, {
     cityRadius,
     cityCellSize,
@@ -49,58 +48,47 @@ export function generateCity(regionalLayers, settlement, rng, options = {}) {
   const targetPopulation = POPULATION_BY_TIER[tier] ?? 2000;
   cityLayers.setData('targetPopulation', targetPopulation);
 
-  // B1b. Refine terrain
+  // C2. Refine terrain
   refineTerrain(cityLayers, rng.fork('cityTerrain'));
 
-  // B2. Anchor routes
+  // C3. Anchor routes (inherited regional roads)
   const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'));
 
-  // B3. Density field (initial)
-  let density = generateDensityField(cityLayers, roadGraph, rng.fork('density'));
+  // C4. Place neighborhood nuclei
+  const neighborhoods = placeNeighborhoods(cityLayers, roadGraph, rng.fork('neighborhoods'));
+  cityLayers.setData('neighborhoods', neighborhoods);
+
+  // C5. Connect neighborhoods (forms arterial network)
+  connectNeighborhoods(cityLayers, roadGraph, neighborhoods, rng.fork('connectNeighborhoods'));
+
+  // C6. Neighborhood influence (density + districts)
+  const { density, districts, ownership } = computeNeighborhoodInfluence(cityLayers, neighborhoods);
   cityLayers.setGrid('density', density);
-
-  // B4. Arterials
-  generateArterials(cityLayers, roadGraph, rng.fork('arterials'));
-
-  // Feedback Loop A: Recompute density after arterials (roads influence density)
-  density = generateDensityField(cityLayers, roadGraph, rng.fork('densityPostArterials'));
-  cityLayers.setGrid('density', density);
-
-  // B5. Districts
-  const districts = generateDistricts(cityLayers, roadGraph, rng.fork('districts'));
   cityLayers.setGrid('districts', districts);
+  cityLayers.setData('ownership', ownership);
 
-  // B6. Collectors
-  generateCollectors(cityLayers, roadGraph, rng.fork('collectors'));
-
-  // B7. Streets
+  // C7. Streets (block subdivision — will be replaced with per-neighborhood patterns)
   generateStreets(cityLayers, roadGraph, rng.fork('streets'));
 
-  // B8. Loop closure
+  // C8. Loop closure (lightweight safety net)
   closeLoops(roadGraph, 500, cityLayers);
 
   // Store road graph
   cityLayers.setData('roadGraph', roadGraph);
 
-  // Feedback Loop D: Compute betweenness centrality approximation and rezone
-  rezoneHighCentralityStreets(roadGraph, cityLayers);
-
-  // B9. Plots
+  // C9. Plots
   const plots = generatePlots(cityLayers, roadGraph, rng.fork('plots'));
   cityLayers.setData('plots', plots);
 
-  // B10. Buildings (with population budget)
+  // C10. Buildings (with population budget)
   const buildings = generateBuildings(cityLayers, plots, rng.fork('buildings'));
   cityLayers.setData('buildings', buildings);
 
-  // Feedback Loop B: Flag low-coverage plots as open space
-  flagLowCoveragePlots(plots, buildings, cityLayers);
-
-  // B11. Amenities
+  // C11. Amenities
   const amenities = generateAmenities(cityLayers, buildings, rng.fork('amenities'));
   cityLayers.setData('amenities', amenities);
 
-  // B12. Urban land cover
+  // C12. Urban land cover
   const urbanCover = generateCityLandCover(cityLayers, amenities, rng.fork('urbanCover'));
   cityLayers.setGrid('urbanCover', urbanCover);
 
@@ -123,22 +111,18 @@ export function rezoneHighCentralityStreets(roadGraph, cityLayers) {
 
   const cs = params.cellSize;
 
-  // Approximate centrality: count how many shortest-path trees pass through each node.
-  // Use BFS from a sample of nodes for speed.
   const nodeIds = [...roadGraph.nodes.keys()];
   if (nodeIds.length < 4) return;
 
   const centralityCount = new Map();
   for (const id of nodeIds) centralityCount.set(id, 0);
 
-  // Sample up to 20 source nodes
   const sampleSize = Math.min(20, nodeIds.length);
   const step = Math.max(1, Math.floor(nodeIds.length / sampleSize));
 
   for (let s = 0; s < nodeIds.length; s += step) {
     const sourceId = nodeIds[s];
-    // BFS
-    const visited = new Map(); // nodeId -> parentId
+    const visited = new Map();
     const queue = [sourceId];
     visited.set(sourceId, null);
 
@@ -152,7 +136,6 @@ export function rezoneHighCentralityStreets(roadGraph, cityLayers) {
       }
     }
 
-    // Walk back from each reached node and increment centrality
     for (const [nodeId, parent] of visited) {
       if (parent === null) continue;
       let cur = parent;
@@ -163,15 +146,12 @@ export function rezoneHighCentralityStreets(roadGraph, cityLayers) {
     }
   }
 
-  // Find threshold for high centrality (top 15%)
   const counts = [...centralityCount.values()].sort((a, b) => a - b);
   const threshold = counts[Math.floor(counts.length * 0.85)] || 1;
 
-  // Rezone cells near high-centrality local-street nodes to commercial (0)
   for (const [nodeId, count] of centralityCount) {
     if (count < threshold) continue;
 
-    // Check if this node is on a local street
     const edges = roadGraph.incidentEdges(nodeId);
     const isLocal = edges.some(eId => {
       const e = roadGraph.getEdge(eId);
@@ -183,50 +163,17 @@ export function rezoneHighCentralityStreets(roadGraph, cityLayers) {
     const gx = Math.round(node.x / cs);
     const gz = Math.round(node.z / cs);
 
-    // Rezone nearby cells to commercial
     for (let dz = -1; dz <= 1; dz++) {
       for (let dx = -1; dx <= 1; dx++) {
         const cx = gx + dx;
         const cz = gz + dz;
         if (cx >= 0 && cx < districts.width && cz >= 0 && cz < districts.height) {
           const current = districts.get(cx, cz);
-          // Only rezone residential to commercial (not industrial/parkland)
           if (current === 1 || current === 2) {
-            districts.set(cx, cz, 0); // COMMERCIAL
+            districts.set(cx, cz, 0);
           }
         }
       }
     }
   }
-}
-
-/**
- * Feedback Loop B: flag plots with low building coverage as open space.
- */
-function flagLowCoveragePlots(plots, buildings, cityLayers) {
-  if (!plots || plots.length === 0 || !buildings) return;
-
-  // Build spatial index of building centroids
-  const buildingCentroids = buildings.map(b => b.centroid);
-
-  let openSpaceCount = 0;
-  for (const plot of plots) {
-    // Check if any building centroid falls inside this plot
-    let hasBuildingNear = false;
-    for (const bc of buildingCentroids) {
-      const dx = bc.x - plot.centroid.x;
-      const dz = bc.z - plot.centroid.z;
-      if (dx * dx + dz * dz < plot.area) {
-        hasBuildingNear = true;
-        break;
-      }
-    }
-
-    if (!hasBuildingNear) {
-      plot.openSpace = true;
-      openSpaceCount++;
-    }
-  }
-
-  cityLayers.setData('openSpacePlots', openSpaceCount);
 }
