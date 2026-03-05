@@ -99,9 +99,10 @@ These phases work well and don't need fundamental changes:
 C1.  Extract context             (= B1a, unchanged)
 C2.  Refine terrain              (= B1b, unchanged)
 C3.  Anchor routes               (= B2, unchanged)
-C4.  Place neighborhood nuclei   (NEW)
-C5.  Connect neighborhoods       (NEW — replaces B4 arterials)
-C6.  Neighborhood influence      (NEW — replaces B3 density + B5 districts)
+C3b. River crossings             (NEW — identify bridge points)
+C4.  Place neighborhood nuclei   (NEW)                          ✓ implemented
+C5.  Connect neighborhoods       (NEW — direct cross-streets)   ✓ implemented
+C6.  Neighborhood influence      (NEW — density + districts)    ✓ implemented
 C7.  Neighborhood street grids   (NEW — replaces B6 + B7)
 C8.  Boundary stitching          (NEW — replaces B8 loop closure)
 C9.  Plots                       (evolved B9)
@@ -109,6 +110,71 @@ C10. Buildings                   (evolved B10)
 C11. Amenities                   (evolved B11)
 C12. Land cover                  (evolved B12)
 ```
+
+### C3b. River Crossings
+
+Rivers that run through a city split the road network. Without explicit
+bridge points, neighborhoods on opposite banks can't connect. This step
+identifies where bridges should go, before neighborhoods are placed so that
+both neighborhood placement and connection routing can use them.
+
+**Why before C4:** Neighborhood nuclei should be aware of crossing points.
+A market neighborhood might form at a bridge. Connections in C5 need
+passable crossing cells to route through.
+
+**Algorithm:**
+
+1. **Identify river segments** within city bounds. Use the water mask and
+   elevation to find continuous bands of water that span a significant
+   portion of the city (not just coastal edges or ponds).
+
+2. **Score candidate crossing points** along each river segment. For each
+   water cell, measure:
+   - **River width** at that point (narrower = cheaper bridge = preferred)
+   - **Proximity to existing roads** — crossings near anchor routes or
+     inherited regional roads are preferred (existing demand)
+   - **Bank buildability** — both banks should have flat, buildable land
+     (a bridge into a cliff is useless)
+   - **Spacing from other crossings** — bridges should be spread out, not
+     clustered. Minimum spacing scales with city tier (tier 1: ~80 cells,
+     tier 2: ~120 cells, tier 3: ~150 cells — larger cities need more
+     crossings, closer together)
+
+3. **Place bridge markers** at the best-scoring points. Number of bridges
+   scales with river length and city tier:
+   - Tier 1: 3-5 bridges per major river segment
+   - Tier 2: 2-3 bridges
+   - Tier 3: 1-2 bridges
+
+4. **Mark crossing cells** as passable in a bridge grid. The A* pathfinding
+   in C5 (and later C7) uses this grid to allow routes across water at
+   bridge points only. Bridge cells have normal terrain cost (not the
+   water penalty), but only at the marked locations.
+
+**Bridge properties:**
+
+```js
+{
+  gx, gz,          // grid position (center of crossing)
+  x, z,            // world position
+  width,           // river width at this point (cells)
+  heading,         // perpendicular to river flow (crossing direction)
+  importance,      // 0-1, higher near roads and city center
+}
+```
+
+**Demand-responsive placement:** After C4 places neighborhoods, a second
+pass can add bridges where neighborhood pairs on opposite banks lack a
+nearby crossing. This handles the case where neighborhoods cluster in an
+area the initial scoring missed. The bridge count is capped to prevent
+excessive crossings.
+
+**Downstream effects:**
+- C4 scores waterfront cells near bridges higher (access to both banks)
+- C5 routes connections through bridge cells instead of around the river
+- C7 street grids can extend across bridges naturally
+- C10 buildings: bridge-adjacent plots could get taller/denser buildings
+- Bridge markers could eventually become 3D bridge geometry in rendering
 
 ### C4. Place Neighborhood Nuclei
 
@@ -179,44 +245,45 @@ road proximity, junction proximity.
 
 ### C5. Connect Neighborhoods
 
-Like regional road connections: A* pathfinding between neighborhood nuclei,
-with road-sharing on existing routes. This produces the **arterial network**.
+A* pathfinding between neighborhood nuclei to form **direct cross-streets**.
+Unlike the regional road generator (which merges onto existing routes), city
+neighborhood connections are independent — they cut straight across the
+terrain as the crow flies, only detouring for water and steep slopes. This
+produces the web of cross-connections that knits neighborhoods together.
 
 **Algorithm:**
 
-1. The old-town nucleus connects to all nuclei within a radius (it's the hub).
-2. Each other nucleus connects to its K nearest neighbors (K=2-3).
+1. The old-town nucleus (index 0) connects to **all** other nuclei.
+2. Each other nucleus connects to its K=2 nearest neighbors.
 3. Union-Find ensures full connectivity — bridge any disconnected components.
-4. Connections through the old town merge into its roads.
-5. If two nuclei are on the same inherited road, their connection follows
-   that road (the road-sharing discount handles this naturally).
+4. Connections sorted by importance (highest first), then distance.
 
 **Road hierarchy from connection importance:**
 
-- Old town to any nucleus: `arterial`
-- Between two important nuclei (importance > 0.5): `arterial`
-- Between two medium nuclei: `collector`
-- Between a small nucleus and anything: `collector`
-
-**Ring roads** for tier 1-2 cities: after radial connections are placed,
-identify nuclei at similar distances from center and connect consecutive ones.
-This produces an organic ring that follows the actual neighborhood positions
-rather than a geometric circle.
+- Old town to any nucleus, or max importance > 0.7: `arterial`
+- Max importance > 0.4: `collector`
+- Otherwise: `collector`
 
 **Cost function:**
 
 ```js
-const neighborhoodCost = (fromGx, fromGz, toGx, toGz) => {
-  let c = terrainCost(fromGx, fromGz, toGx, toGz);
-  if (roadGrid.get(toGx, toGz) > 0) c *= 0.3; // share existing roads
-  // Prefer routing through buildable land (creates frontage)
-  if (isBuildable(toGx, toGz)) c *= 0.8;
-  return c;
-};
+const costFn = terrainCostFunction(elevation, {
+  slopePenalty: 3,       // low — prefer directness over flatness
+  waterPenalty: 100,     // high — route around water (unless bridge)
+  seaLevel,
+});
 ```
 
-The connecting roads stamp onto the roadGrid, so later connections merge
-into earlier ones — exactly like the regional road generator.
+No road-sharing discount. Paths are independent and direct. The low slope
+penalty means connections stay close to the straight line between nuclei,
+bending only for significant terrain obstacles. This creates a natural web
+of cross-streets rather than a tree that follows existing roads.
+
+**Bridge-aware routing:** Where a river separates two neighborhoods, the
+cost function allows passage through bridge cells identified in C3b
+(normal cost instead of water penalty). This means connections naturally
+route through the nearest bridge point rather than taking a long detour
+around the river.
 
 ### C6. Neighborhood Influence Fields
 
@@ -513,49 +580,56 @@ The v4 pipeline reuses the same core infrastructure:
 | generateBuildings | **Evolve** — add neighborhood-aware typology |
 | generateAmenities | **Evolve** — use nuclei as placement seeds |
 | generateLandCover | **Evolve** — use neighborhood influence for context |
-| debugTiles, regionPreview3D | **Update** — new debug views for neighborhoods |
+| debugTiles, regionPreview3D | **Updated** — neighborhood map, ownership overlay, nucleus markers |
 
 ## New Files
 
-| File | Purpose |
-|------|---------|
-| `src/city/placeNeighborhoods.js` | C4: Score terrain, place nuclei |
-| `src/city/connectNeighborhoods.js` | C5: A* between nuclei, arterial network |
-| `src/city/neighborhoodInfluence.js` | C6: Influence fields, district assignment |
-| `src/city/generateNeighborhoodStreets.js` | C7: Per-type street generation |
-| `src/city/stitchBoundaries.js` | C8: Cross-neighborhood connections |
+| File | Purpose | Status |
+|------|---------|--------|
+| `src/city/placeNeighborhoods.js` | C4: Score terrain, place nuclei | Done |
+| `src/city/connectNeighborhoods.js` | C5: Direct cross-connections between nuclei | Done |
+| `src/city/neighborhoodInfluence.js` | C6: Influence fields, district assignment | Done |
+| `src/city/riverCrossings.js` | C3b: Identify bridge points along rivers | Planned |
+| `src/city/generateNeighborhoodStreets.js` | C7: Per-type street generation | Planned |
+| `src/city/stitchBoundaries.js` | C8: Cross-neighborhood connections | Planned |
 
 ## Implementation Order
 
-1. **C4 placeNeighborhoods** — can be built and tested independently.
-   Visualize nuclei on the terrain. Iterate until placement feels right.
+1. ~~**C4 placeNeighborhoods**~~ — **Done.** Scores terrain, places nuclei
+   with spacing constraints. Types: oldTown, waterfront, market, roadside,
+   hilltop, valley, suburban.
 
-2. **C5 connectNeighborhoods** — depends on C4. Produces the arterial graph.
-   Can be visualized as a debug step. Should produce a better arterial
-   network than v3 immediately.
+2. ~~**C5 connectNeighborhoods**~~ — **Done.** Direct A* cross-connections
+   between nuclei. Low slope penalty for straight-line paths. Old town
+   connects to all; others connect to K=2 nearest. Union-Find connectivity.
 
-3. **C6 neighborhoodInfluence** — depends on C4. Produces density + districts.
-   Can be visualized. Should produce more coherent districts than v3.
+3. ~~**C6 neighborhoodInfluence**~~ — **Done.** Per-nucleus density falloff
+   with type-specific rates. Max-of-all for combined density. Dominant
+   nucleus determines district type.
 
-4. **C7 generateNeighborhoodStreets** — the biggest piece. Start with one
+4. **C3b riverCrossings** — Identify bridge points along rivers before
+   neighborhoods are placed. Score by width, road proximity, bank
+   buildability. Make bridge cells passable for C5 routing.
+
+5. **C7 generateNeighborhoodStreets** — the biggest piece. Start with one
    pattern (grid) and get it working end-to-end, then add irregular, linear,
    organic. Each pattern is a function that adds edges to the PlanarGraph
    within a neighborhood's footprint.
 
-5. **C8 stitchBoundaries** — depends on C7. Connect the neighborhood grids.
+6. **C8 stitchBoundaries** — depends on C7. Connect the neighborhood grids.
 
-6. **Update C9-C12** — evolve plots, buildings, amenities, land cover to
+7. **Update C9-C12** — evolve plots, buildings, amenities, land cover to
    use neighborhood context. This can be incremental — the existing code
    will produce *something* on the new road network, even if not optimized
    for neighborhood awareness.
 
-7. **Update pipeline.js** — wire it all together.
+8. **Update debug rendering** — neighborhood debug views already added
+   (neighborhood map with ownership overlay, nucleus markers with type
+   labels). Debug viewer rewritten to auto-discover pipeline output files.
 
-8. **Update debug rendering** — add neighborhood boundary visualization,
-   nucleus markers, per-neighborhood street coloring.
-
-Steps 1-3 can be done quickly and will immediately produce better arterials
-and districts. Step 4 is the bulk of the work. Steps 5-8 are refinement.
+Steps 1-3 are complete and producing good results. Step 4 (bridges) is
+needed before C5 can work properly on river cities. Step 5 is the bulk of
+the remaining work.
 
 ## Risks
 

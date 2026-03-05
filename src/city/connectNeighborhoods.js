@@ -1,11 +1,10 @@
 /**
  * C5. Connect neighborhoods.
- * A* pathfinding between neighborhood nuclei to form the arterial network.
- * Uses road-sharing on existing anchor routes so connections merge naturally.
+ * A* pathfinding between neighborhood nuclei to form direct cross-connections.
+ * Paths prefer straight lines, only detouring for water and steep terrain.
  */
 
 import { distance2D } from '../core/math.js';
-import { Grid2D } from '../core/Grid2D.js';
 import { UnionFind } from '../core/UnionFind.js';
 import { findPath, terrainCostFunction, simplifyPath, smoothPath } from '../core/pathfinding.js';
 
@@ -27,23 +26,15 @@ export function connectNeighborhoods(cityLayers, graph, neighborhoods, rng) {
   const cs = params.cellSize;
   const seaLevel = params.seaLevel ?? 0;
 
-  // Build road grid from existing anchor routes for road-sharing
-  const roadGrid = buildRoadGridFromGraph(graph, w, h, cs);
-
-  const baseCost = terrainCostFunction(elevation, {
-    slopePenalty: 10,
+  // Terrain cost: low slope penalty so paths stay direct, only avoid water/cliffs
+  // No edge penalty — these are internal city connections, not regional roads
+  const costFn = terrainCostFunction(elevation, {
+    slopePenalty: 3,
     waterGrid: waterMask,
-    waterPenalty: 50,
+    waterPenalty: 100,
     seaLevel,
+    edgeMargin: 0,
   });
-
-  const costFn = (fromGx, fromGz, toGx, toGz) => {
-    let c = baseCost(fromGx, fromGz, toGx, toGz);
-    if (!isFinite(c) || c <= 0) return c;
-    // Share existing roads
-    if (roadGrid.get(toGx, toGz) > 0) c *= 0.3;
-    return c;
-  };
 
   // Build connections
   const connections = buildNeighborhoodConnections(neighborhoods);
@@ -64,11 +55,6 @@ export function connectNeighborhoods(cityLayers, graph, neighborhoods, rng) {
     );
 
     if (!result) continue;
-
-    // Stamp onto road grid
-    for (const p of result.path) {
-      roadGrid.set(p.gx, p.gz, 1);
-    }
 
     // Simplify and smooth
     const simplified = simplifyPath(result.path, 1.5);
@@ -124,9 +110,19 @@ function buildNeighborhoodConnections(neighborhoods) {
     uf.union(i, j);
   }
 
-  // Old town (index 0) connects to all others
+  // Old town (index 0) connects to nearest K neighbors (not all — distant
+  // connections create unnaturally long straight roads)
+  const oldTownK = Math.min(n - 1, Math.max(3, Math.ceil(n * 0.5)));
+  const sortedFromCenter = [];
   for (let j = 1; j < n; j++) {
-    addConn(0, j);
+    sortedFromCenter.push({
+      j,
+      dist: distance2D(neighborhoods[0].gx, neighborhoods[0].gz, neighborhoods[j].gx, neighborhoods[j].gz),
+    });
+  }
+  sortedFromCenter.sort((a, b) => a.dist - b.dist);
+  for (let k = 0; k < Math.min(oldTownK, sortedFromCenter.length); k++) {
+    addConn(0, sortedFromCenter[k].j);
   }
 
   // Each nucleus connects to K=2 nearest
@@ -168,35 +164,3 @@ function findOrCreateNode(graph, x, z, threshold) {
   return graph.addNode(x, z, { type: 'neighborhood' });
 }
 
-function buildRoadGridFromGraph(graph, w, h, cs) {
-  const grid = new Grid2D(w, h, { type: 'uint8' });
-
-  for (const [, edge] of graph.edges) {
-    const fromNode = graph.getNode(edge.from);
-    const toNode = graph.getNode(edge.to);
-    if (!fromNode || !toNode) continue;
-
-    const points = [
-      { x: fromNode.x, z: fromNode.z },
-      ...(edge.points || []),
-      { x: toNode.x, z: toNode.z },
-    ];
-
-    for (let i = 0; i < points.length - 1; i++) {
-      const ax = points[i].x / cs, az = points[i].z / cs;
-      const bx = points[i + 1].x / cs, bz = points[i + 1].z / cs;
-      const segLen = Math.sqrt((bx - ax) ** 2 + (bz - az) ** 2);
-      const steps = Math.max(1, Math.ceil(segLen));
-      for (let s = 0; s <= steps; s++) {
-        const t = s / steps;
-        const gx = Math.round(ax + (bx - ax) * t);
-        const gz = Math.round(az + (bz - az) * t);
-        if (gx >= 0 && gx < w && gz >= 0 && gz < h) {
-          grid.set(gx, gz, 1);
-        }
-      }
-    }
-  }
-
-  return grid;
-}

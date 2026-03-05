@@ -10,7 +10,7 @@ import { generateAnchorRoutes } from './generateAnchorRoutes.js';
 import { placeNeighborhoods } from './placeNeighborhoods.js';
 import { connectNeighborhoods } from './connectNeighborhoods.js';
 import { computeNeighborhoodInfluence } from './neighborhoodInfluence.js';
-import { generateStreets } from './generateStreets.js';
+import { generateNeighborhoodStreets } from './generateNeighborhoodStreets.js';
 import { closeLoops } from './closeLoops.js';
 import { generatePlots } from './generatePlots.js';
 import { generateBuildings } from './generateBuildings.js';
@@ -67,8 +67,8 @@ export function generateCity(regionalLayers, settlement, rng, options = {}) {
   cityLayers.setGrid('districts', districts);
   cityLayers.setData('ownership', ownership);
 
-  // C7. Streets (block subdivision — will be replaced with per-neighborhood patterns)
-  generateStreets(cityLayers, roadGraph, rng.fork('streets'));
+  // C7. Neighborhood streets (per-type grid patterns)
+  generateNeighborhoodStreets(cityLayers, roadGraph, rng.fork('streets'));
 
   // C8. Loop closure (lightweight safety net)
   closeLoops(roadGraph, 500, cityLayers);

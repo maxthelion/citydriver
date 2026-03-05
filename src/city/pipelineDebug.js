@@ -9,7 +9,7 @@ import { generateAnchorRoutes } from './generateAnchorRoutes.js';
 import { placeNeighborhoods } from './placeNeighborhoods.js';
 import { connectNeighborhoods } from './connectNeighborhoods.js';
 import { computeNeighborhoodInfluence } from './neighborhoodInfluence.js';
-import { generateStreets } from './generateStreets.js';
+import { generateNeighborhoodStreets } from './generateNeighborhoodStreets.js';
 import { closeLoops } from './closeLoops.js';
 import { generatePlots } from './generatePlots.js';
 import { generateBuildings } from './generateBuildings.js';
@@ -90,9 +90,8 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   steps.push({ name: 'Density', render: 'density' });
   steps.push({ name: 'Districts', render: 'districts' });
 
-  // C7: Local streets (reusing existing block subdivision for now)
-  // TODO: Replace with per-neighborhood street generation (C7)
-  generateStreets(cityLayers, roadGraph, rng.fork('streets'));
+  // C7: Neighborhood streets (per-type grid patterns)
+  generateNeighborhoodStreets(cityLayers, roadGraph, rng.fork('streets'));
   curEdges = new Set(roadGraph.edges.keys());
   steps.push({
     name: 'Streets', render: 'roads',
