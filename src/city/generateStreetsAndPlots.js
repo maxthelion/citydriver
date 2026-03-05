@@ -131,20 +131,33 @@ export function generateStreetsAndPlots(cityLayers, graph, rng) {
   const availH = Math.ceil((h * cs) / RES);
   const avail = new Uint8Array(availW * availH); // 0 = available
 
-  // Mark water and below-sea-level cells as unavailable, with buffer
-  // First pass: mark water cells
+  // Mark water as unavailable — use smooth polygons if available, fall back to grid
+  const waterPolygons = cityLayers.getData('waterPolygons');
+  if (waterPolygons && waterPolygons.length > 0) {
+    for (const poly of waterPolygons) {
+      stampPolyOnAvail(poly, avail, availW, availH, RES, 1);
+    }
+  } else {
+    for (let az = 0; az < availH; az++) {
+      for (let ax = 0; ax < availW; ax++) {
+        const wx = ax * RES, wz = az * RES;
+        const gx = Math.round(wx / cs), gz = Math.round(wz / cs);
+        if (gx < 0 || gx >= w || gz < 0 || gz >= h) { avail[az * availW + ax] = 1; continue; }
+        if (elevation && elevation.get(gx, gz) < seaLevel) { avail[az * availW + ax] = 1; continue; }
+        if (waterMask && waterMask.get(gx, gz) > 0) { avail[az * availW + ax] = 1; }
+      }
+    }
+  }
+  // Also mark out-of-bounds cells
   for (let az = 0; az < availH; az++) {
     for (let ax = 0; ax < availW; ax++) {
       const wx = ax * RES, wz = az * RES;
       const gx = Math.round(wx / cs), gz = Math.round(wz / cs);
-      if (gx < 0 || gx >= w || gz < 0 || gz >= h) { avail[az * availW + ax] = 1; continue; }
-      if (elevation && elevation.get(gx, gz) < seaLevel) { avail[az * availW + ax] = 1; continue; }
-      if (waterMask && waterMask.get(gx, gz) > 0) { avail[az * availW + ax] = 1; }
+      if (gx < 0 || gx >= w || gz < 0 || gz >= h) avail[az * availW + ax] = 1;
     }
   }
-  // Second pass: expand water boundary by buffer (12m ≈ 4 cells at 3m res)
-  // Needs to be generous because the water mask is at coarse 10m resolution
-  const waterBuf = 4; // cells
+  // Buffer: expand water boundary by 2 cells (6m) for plot setback from water
+  const waterBuf = 2;
   const availCopy = new Uint8Array(avail);
   for (let az = 0; az < availH; az++) {
     for (let ax = 0; ax < availW; ax++) {
@@ -557,17 +570,31 @@ function isPlotAvailable(verts, avail, availW, availH, RES, threshold) {
 
   let samples = 0, blocked = 0;
   for (let az = minAz; az <= maxAz; az++) {
-    for (let ax = minAx; ax <= maxAx; ax++) {
-      if (!pointInConvexPoly(ax * RES, az * RES, verts)) continue;
-      samples++;
-      if (avail[az * availW + ax] !== 0) blocked++;
+    const wz = az * RES;
+    const intersections = [];
+    for (let i = 0; i < verts.length; i++) {
+      const a = verts[i], b = verts[(i + 1) % verts.length];
+      if ((a.z <= wz && b.z > wz) || (b.z <= wz && a.z > wz)) {
+        const t = (wz - a.z) / (b.z - a.z);
+        intersections.push(a.x + t * (b.x - a.x));
+      }
+    }
+    intersections.sort((a, b) => a - b);
+    for (let i = 0; i < intersections.length - 1; i += 2) {
+      const xStart = Math.max(minAx, Math.ceil(intersections[i] / RES));
+      const xEnd = Math.min(maxAx, Math.floor(intersections[i + 1] / RES));
+      for (let ax = xStart; ax <= xEnd; ax++) {
+        samples++;
+        if (avail[az * availW + ax] !== 0) blocked++;
+      }
     }
   }
   return samples > 0 && (blocked / samples) <= threshold;
 }
 
-/** Stamp a convex polygon onto the availability grid. */
+/** Stamp a polygon onto the availability grid (works for convex and concave). */
 function stampPolyOnAvail(verts, avail, availW, availH, RES, value) {
+  if (verts.length < 3) return;
   const xs = verts.map(v => v.x);
   const zs = verts.map(v => v.z);
   const minAx = Math.max(0, Math.floor(Math.min(...xs) / RES));
@@ -575,9 +602,24 @@ function stampPolyOnAvail(verts, avail, availW, availH, RES, value) {
   const minAz = Math.max(0, Math.floor(Math.min(...zs) / RES));
   const maxAz = Math.min(availH - 1, Math.ceil(Math.max(...zs) / RES));
 
+  // Use scanline fill for efficiency
   for (let az = minAz; az <= maxAz; az++) {
-    for (let ax = minAx; ax <= maxAx; ax++) {
-      if (pointInConvexPoly(ax * RES, az * RES, verts)) {
+    const wz = az * RES;
+    // Find all x-intersections of the polygon edges with this scanline
+    const intersections = [];
+    for (let i = 0; i < verts.length; i++) {
+      const a = verts[i], b = verts[(i + 1) % verts.length];
+      if ((a.z <= wz && b.z > wz) || (b.z <= wz && a.z > wz)) {
+        const t = (wz - a.z) / (b.z - a.z);
+        intersections.push(a.x + t * (b.x - a.x));
+      }
+    }
+    intersections.sort((a, b) => a - b);
+    // Fill between pairs
+    for (let i = 0; i < intersections.length - 1; i += 2) {
+      const xStart = Math.max(minAx, Math.ceil(intersections[i] / RES));
+      const xEnd = Math.min(maxAx, Math.floor(intersections[i + 1] / RES));
+      for (let ax = xStart; ax <= xEnd; ax++) {
         avail[az * availW + ax] = value;
       }
     }

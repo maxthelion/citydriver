@@ -16,6 +16,7 @@ import { closeLoops } from './closeLoops.js';
 import { generateBuildings } from './generateBuildings.js';
 import { generateAmenities } from './generateAmenities.js';
 import { generateCityLandCover } from './generateLandCover.js';
+import { extractWaterPolygons } from './extractWaterPolygons.js';
 import { getCityValidators, runValidators } from '../validators/cityValidators.js';
 
 /** Target population by settlement tier. */
@@ -50,6 +51,10 @@ export function generateCity(regionalLayers, settlement, rng, options = {}) {
 
   // C2. Refine terrain
   refineTerrain(cityLayers, rng.fork('cityTerrain'));
+
+  // C2b. Extract smooth water boundary polygons
+  const waterPolygons = extractWaterPolygons(cityLayers);
+  cityLayers.setData('waterPolygons', waterPolygons);
 
   // C3. Anchor routes (inherited regional roads)
   const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'));

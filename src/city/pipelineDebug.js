@@ -15,6 +15,7 @@ import { closeLoops } from './closeLoops.js';
 import { generateBuildings } from './generateBuildings.js';
 import { generateAmenities } from './generateAmenities.js';
 import { generateCityLandCover } from './generateLandCover.js';
+import { extractWaterPolygons } from './extractWaterPolygons.js';
 
 const POPULATION_BY_TIER = { 1: 50000, 2: 10000, 3: 2000 };
 
@@ -50,6 +51,10 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   refineTerrain(cityLayers, rng.fork('cityTerrain'));
   steps.push({ name: 'Slope', render: 'slope' });
   steps.push({ name: 'Water Mask', render: 'waterMask' });
+
+  // C2b: Extract smooth water boundary polygons
+  const waterPolygons = extractWaterPolygons(cityLayers);
+  cityLayers.setData('waterPolygons', waterPolygons);
 
   // C3: Anchor routes (inherited regional roads)
   const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'));

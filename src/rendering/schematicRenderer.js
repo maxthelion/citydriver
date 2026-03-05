@@ -72,27 +72,33 @@ export function renderSchematic({ cx, cz, cityLayers, roadGraph, plots, building
   const toPixY = (wz) => (wz - cz + halfW) * PPM;
   const inView = (wx, wz) => Math.abs(wx - cx) < halfW && Math.abs(wz - cz) < halfW;
 
-  // --- Background: terrain/water ---
+  // --- Background: solid fill, then water polygons ---
   for (let py = 0; py < IMG_SIZE; py++) {
     for (let px = 0; px < IMG_SIZE; px++) {
-      const wx = cx - halfW + px / PPM;
-      const wz = cz - halfW + py / PPM;
-      const gx = Math.round(wx / cs);
-      const gz = Math.round(wz / cs);
+      setPixel(buf, px, py, BG[0], BG[1], BG[2]);
+    }
+  }
 
-      let r, g, b;
-      if (gx >= 0 && gx < elevation.width && gz >= 0 && gz < elevation.height) {
-        if (waterMask && waterMask.get(gx, gz) > 0) {
-          [r, g, b] = WATER;
-        } else if (elevation.get(gx, gz) < seaLevel) {
-          [r, g, b] = WATER;
-        } else {
-          [r, g, b] = BG;
+  // Draw smooth water polygons if available, fall back to grid
+  const waterPolygons = cityLayers.getData('waterPolygons');
+  if (waterPolygons && waterPolygons.length > 0) {
+    for (const poly of waterPolygons) {
+      fillPolygon(buf, poly, toPixX, toPixY, WATER, IMG_SIZE);
+    }
+  } else {
+    // Fallback: blocky grid water
+    for (let py = 0; py < IMG_SIZE; py++) {
+      for (let px = 0; px < IMG_SIZE; px++) {
+        const wx = cx - halfW + px / PPM;
+        const wz = cz - halfW + py / PPM;
+        const gx = Math.round(wx / cs);
+        const gz = Math.round(wz / cs);
+        if (gx >= 0 && gx < elevation.width && gz >= 0 && gz < elevation.height) {
+          if ((waterMask && waterMask.get(gx, gz) > 0) || elevation.get(gx, gz) < seaLevel) {
+            setPixel(buf, px, py, WATER[0], WATER[1], WATER[2]);
+          }
         }
-      } else {
-        [r, g, b] = BG;
       }
-      setPixel(buf, px, py, r, g, b);
     }
   }
 
@@ -218,6 +224,20 @@ export function renderSchematic({ cx, cz, cityLayers, roadGraph, plots, building
 }
 
 // --- Drawing helpers ---
+
+/** Fill a world-coordinate polygon onto the buffer using scanline fill. */
+function fillPolygon(buf, worldPoly, toPixX, toPixY, color, imgSize) {
+  const pixPts = [];
+  for (const p of worldPoly) {
+    const px = toPixX(p.x);
+    const py = toPixY(p.z);
+    // Skip points way outside viewport
+    if (px < -imgSize || px > imgSize * 2 || py < -imgSize || py > imgSize * 2) continue;
+    pixPts.push({ x: px, y: py });
+  }
+  if (pixPts.length < 3) return;
+  fillPoly(buf, pixPts, color[0], color[1], color[2]);
+}
 
 function fillPoly(buf, pts, r, g, b, a = 255) {
   if (!pts || pts.length < 3) return;
