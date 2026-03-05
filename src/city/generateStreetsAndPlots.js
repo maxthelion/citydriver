@@ -124,18 +124,67 @@ export function generateStreetsAndPlots(cityLayers, graph, rng) {
   const cs = params.cellSize;
   const seaLevel = params.seaLevel ?? 0;
 
-  const edgeIdsBefore = new Set(graph.edges.keys());
+  // Build fine-resolution availability grid (3m cells)
+  // 0 = available, 1 = water/sea, 2 = road corridor, 3 = claimed by plot
+  const RES = 3; // metres per availability cell
+  const availW = Math.ceil((w * cs) / RES);
+  const availH = Math.ceil((h * cs) / RES);
+  const avail = new Uint8Array(availW * availH); // 0 = available
 
-  // Track which side of which edge already has plots to avoid overlap
-  const claimedCells = new Set(); // Set of "gx,gz" strings for plot cells (3m resolution)
+  // Mark water and below-sea-level cells as unavailable, with buffer
+  // First pass: mark water cells
+  for (let az = 0; az < availH; az++) {
+    for (let ax = 0; ax < availW; ax++) {
+      const wx = ax * RES, wz = az * RES;
+      const gx = Math.round(wx / cs), gz = Math.round(wz / cs);
+      if (gx < 0 || gx >= w || gz < 0 || gz >= h) { avail[az * availW + ax] = 1; continue; }
+      if (elevation && elevation.get(gx, gz) < seaLevel) { avail[az * availW + ax] = 1; continue; }
+      if (waterMask && waterMask.get(gx, gz) > 0) { avail[az * availW + ax] = 1; }
+    }
+  }
+  // Second pass: expand water boundary by buffer (12m ≈ 4 cells at 3m res)
+  // Needs to be generous because the water mask is at coarse 10m resolution
+  const waterBuf = 4; // cells
+  const availCopy = new Uint8Array(avail);
+  for (let az = 0; az < availH; az++) {
+    for (let ax = 0; ax < availW; ax++) {
+      if (availCopy[az * availW + ax] !== 1) continue;
+      for (let dz = -waterBuf; dz <= waterBuf; dz++) {
+        for (let dx = -waterBuf; dx <= waterBuf; dx++) {
+          const bx = ax + dx, bz = az + dz;
+          if (bx < 0 || bx >= availW || bz < 0 || bz >= availH) continue;
+          if (avail[bz * availW + bx] === 0) avail[bz * availW + bx] = 1;
+        }
+      }
+    }
+  }
+
+  // Mark road corridors as unavailable (stamp each edge polyline with its width)
+  for (const [edgeId, edge] of graph.edges) {
+    const polyline = graph.edgePolyline(edgeId);
+    const halfW = ((edge.width || 12) / 2) + 2; // +2m buffer
+    stampPolylineOnAvail(polyline, halfW, avail, availW, availH, RES, 2);
+  }
+
+  // Extra buffer around junction nodes (nodes with 3+ edges)
+  for (const [nodeId, node] of graph.nodes) {
+    const degree = graph.neighbors(nodeId).length;
+    if (degree >= 3) {
+      const junctionRadius = 15; // generous clearing around junctions
+      stampCircleOnAvail(node.x, node.z, junctionRadius, avail, availW, availH, RES, 2);
+    }
+  }
 
   // Pre-claim cells from institutional plots placed in C6b
   const institutionalPlots = cityLayers.getData('institutionalPlots') || [];
   for (const ip of institutionalPlots) {
     if (ip.vertices) {
-      claimPlotCellsFromVertices(ip.vertices, claimedCells);
+      stampPolyOnAvail(ip.vertices, avail, availW, availH, RES, 3);
     }
   }
+
+  // Store availability grid for debug rendering
+  cityLayers.setData('availGrid', { data: avail, width: availW, height: availH, res: RES });
 
   const allPlots = [];
 
@@ -148,7 +197,7 @@ export function generateStreetsAndPlots(cityLayers, graph, rng) {
   }
 
   for (const edgeId of arterialEdges) {
-    const plots = generateFrontagePlots(graph, edgeId, ownership, neighborhoods, density, elevation, waterMask, seaLevel, w, h, cs, claimedCells, rng);
+    const plots = generateFrontagePlots(graph, edgeId, ownership, neighborhoods, density, elevation, waterMask, seaLevel, w, h, cs, avail, availW, availH, RES, rng);
     allPlots.push(...plots);
   }
 
@@ -159,147 +208,148 @@ export function generateStreetsAndPlots(cityLayers, graph, rng) {
 
 /**
  * Generate frontage plots along both sides of a road edge.
+ * Plots follow the road curve — each plot's front edge sits on the polyline,
+ * rear edge is offset perpendicular to the local road direction.
  */
-function generateFrontagePlots(graph, edgeId, ownership, neighborhoods, density, elevation, waterMask, seaLevel, w, h, cs, claimedCells, rng) {
+function generateFrontagePlots(graph, edgeId, ownership, neighborhoods, density, elevation, waterMask, seaLevel, w, h, cs, avail, availW, availH, RES, rng) {
   const edge = graph.getEdge(edgeId);
   if (!edge) return [];
 
   const polyline = graph.edgePolyline(edgeId);
   if (polyline.length < 2) return [];
 
+  // Build cumulative distance table along polyline
+  const cumDist = [0];
+  for (let i = 1; i < polyline.length; i++) {
+    const dx = polyline[i].x - polyline[i - 1].x;
+    const dz = polyline[i].z - polyline[i - 1].z;
+    cumDist.push(cumDist[i - 1] + Math.sqrt(dx * dx + dz * dz));
+  }
+  const totalLen = cumDist[cumDist.length - 1];
+  if (totalLen < 5) return [];
+
+  // Trim start/end near junctions
+  const fromDegree = graph.neighbors(edge.from).length;
+  const toDegree = graph.neighbors(edge.to).length;
+  const startTrim = fromDegree >= 3 ? 15 : 0; // skip 15m near junctions
+  const endTrim = toDegree >= 3 ? 15 : 0;
+  const usableStart = startTrim;
+  const usableEnd = totalLen - endTrim;
+  if (usableEnd - usableStart < 5) return [];
+
   const plots = [];
+  const hierarchy = edge.hierarchy || 'local';
+  const roadTotalWidth = ROAD_WIDTHS[hierarchy] || ROAD_WIDTHS.local;
+  const roadOffset = roadTotalWidth / 2 + 1;
 
-  // Process each segment of the polyline
-  for (let seg = 0; seg < polyline.length - 1; seg++) {
-    const p0 = polyline[seg];
-    const p1 = polyline[seg + 1];
+  for (const side of ['left', 'right']) {
+    const sign = side === 'left' ? 1 : -1;
 
-    const dx = p1.x - p0.x;
-    const dz = p1.z - p0.z;
-    const segLen = Math.sqrt(dx * dx + dz * dz);
-    if (segLen < 3) continue;
+    // Sample neighborhood config at edge midpoint
+    const midPt = samplePolyline(polyline, cumDist, totalLen * 0.5);
+    const midDir = samplePolylineDir(polyline, cumDist, totalLen * 0.5);
+    const sampleX = midPt.x + (-midDir.z * sign) * 10;
+    const sampleZ = midPt.z + (midDir.x * sign) * 10;
+    const midGx = Math.round(sampleX / cs);
+    const midGz = Math.round(sampleZ / cs);
 
-    // Unit direction along road
-    const dirX = dx / segLen;
-    const dirZ = dz / segLen;
+    if (midGx < 0 || midGx >= ownership.width || midGz < 0 || midGz >= ownership.height) continue;
+    const ownerIdx = ownership.get(midGx, midGz);
+    if (ownerIdx < 0 || ownerIdx >= neighborhoods.length) continue;
 
-    // Perpendicular normals (left and right)
-    const leftNX = -dirZ;
-    const leftNZ = dirX;
+    const hood = neighborhoods[ownerIdx];
+    const config = PLOT_CONFIG[hood.type] || PLOT_CONFIG.suburban;
+    const d = density.get(midGx, midGz);
+    if (d < 0.05) continue;
 
-    // Generate plots on both sides
-    for (const side of ['left', 'right']) {
-      const nx = side === 'left' ? leftNX : -leftNX;
-      const nz = side === 'left' ? leftNZ : -leftNZ;
+    const plotDepth = config.plotDepth * (0.7 + (1 - d) * 0.3);
+    const frontageWidth = config.frontageWidth * (0.8 + rng.range(-0.1, 0.1));
 
-      const hierarchy = edge.hierarchy || 'local';
-      const sidePlots = generateSidePlots(
-        p0, segLen, dirX, dirZ, nx, nz, side, hierarchy,
-        edgeId, ownership, neighborhoods, density, elevation, waterMask,
-        seaLevel, w, h, cs, claimedCells, rng,
-      );
-      plots.push(...sidePlots);
+    // Walk along usable length placing plots
+    let along = usableStart;
+    while (along + frontageWidth * 0.5 < usableEnd) {
+      const plotEnd = Math.min(along + frontageWidth, usableEnd);
+      const actualWidth = plotEnd - along;
+      if (actualWidth < frontageWidth * 0.4) break;
+
+      // Sample front corners on the polyline, offset by road width
+      const pt0 = samplePolyline(polyline, cumDist, along);
+      const dir0 = samplePolylineDir(polyline, cumDist, along);
+      const n0x = -dir0.z * sign, n0z = dir0.x * sign;
+
+      const pt1 = samplePolyline(polyline, cumDist, plotEnd);
+      const dir1 = samplePolylineDir(polyline, cumDist, plotEnd);
+      const n1x = -dir1.z * sign, n1z = dir1.x * sign;
+
+      const f0 = { x: pt0.x + n0x * roadOffset, z: pt0.z + n0z * roadOffset };
+      const f1 = { x: pt1.x + n1x * roadOffset, z: pt1.z + n1z * roadOffset };
+      const r0 = { x: pt0.x + n0x * (roadOffset + plotDepth), z: pt0.z + n0z * (roadOffset + plotDepth) };
+      const r1 = { x: pt1.x + n1x * (roadOffset + plotDepth), z: pt1.z + n1z * (roadOffset + plotDepth) };
+
+      along = plotEnd;
+
+      // Validate against availability grid — reject if any unavailable
+      if (!isPlotAvailable([f0, f1, r1, r0], avail, availW, availH, RES, 0.0)) continue;
+
+      // Claim cells
+      stampPolyOnAvail([f0, f1, r1, r0], avail, availW, availH, RES, 3);
+
+      const cx = (f0.x + f1.x + r0.x + r1.x) / 4;
+      const cz = (f0.z + f1.z + r0.z + r1.z) / 4;
+      const district = getDistrictFromHood(hood, d);
+      const midDirPlot = samplePolylineDir(polyline, cumDist, (along + plotEnd) / 2);
+
+      plots.push({
+        vertices: [f0, f1, r1, r0],
+        area: actualWidth * plotDepth,
+        centroid: { x: cx, z: cz },
+        frontageEdgeId: edgeId,
+        frontageDirection: { x: midDirPlot.x, z: midDirPlot.z },
+        frontageWidth: actualWidth,
+        depth: plotDepth,
+        setback: config.frontSetback,
+        rearGarden: config.rearGarden,
+        density: d,
+        district,
+        neighborhoodIdx: ownerIdx,
+        neighborhoodType: hood.type,
+        side,
+        buildingCoverage: config.buildingCoverage,
+      });
     }
   }
 
   return plots;
 }
 
-/**
- * Generate plots along one side of a road segment.
- */
-function generateSidePlots(p0, segLen, dirX, dirZ, nx, nz, side, hierarchy, edgeId, ownership, neighborhoods, density, elevation, waterMask, seaLevel, w, h, cs, claimedCells, rng) {
-  const plots = [];
-
-  // Sample neighborhood type at segment midpoint
-  const midX = p0.x + dirX * segLen * 0.5 + nx * 5;
-  const midZ = p0.z + dirZ * segLen * 0.5 + nz * 5;
-  const midGx = Math.round(midX / cs);
-  const midGz = Math.round(midZ / cs);
-
-  if (midGx < 0 || midGx >= ownership.width || midGz < 0 || midGz >= ownership.height) return plots;
-
-  const ownerIdx = ownership.get(midGx, midGz);
-  if (ownerIdx < 0 || ownerIdx >= neighborhoods.length) return plots;
-
-  const hood = neighborhoods[ownerIdx];
-  const config = PLOT_CONFIG[hood.type] || PLOT_CONFIG.suburban;
-  const d = density.get(midGx, midGz);
-  if (d < 0.05) return plots;
-
-  // Adjust plot depth by density: denser = shallower (more streets, less depth)
-  const plotDepth = config.plotDepth * (0.7 + (1 - d) * 0.3);
-  const frontageWidth = config.frontageWidth * (0.8 + rng.range(-0.1, 0.1));
-
-  // How many plots fit along this segment?
-  const numPlots = Math.max(1, Math.floor(segLen / frontageWidth));
-  const actualWidth = segLen / numPlots;
-
-  // Offset from road centerline (half road width including sidewalks)
-  const roadTotalWidth = ROAD_WIDTHS[hierarchy] || ROAD_WIDTHS.local;
-  const roadOffset = roadTotalWidth / 2 + 1; // +1m buffer
-
-  for (let i = 0; i < numPlots; i++) {
-    const t0 = (i * actualWidth) / segLen;
-    const t1 = ((i + 1) * actualWidth) / segLen;
-    const tMid = (t0 + t1) / 2;
-
-    // Front corners (at road edge + offset)
-    const f0 = {
-      x: p0.x + dirX * segLen * t0 + nx * roadOffset,
-      z: p0.z + dirZ * segLen * t0 + nz * roadOffset,
-    };
-    const f1 = {
-      x: p0.x + dirX * segLen * t1 + nx * roadOffset,
-      z: p0.z + dirZ * segLen * t1 + nz * roadOffset,
-    };
-
-    // Rear corners (offset + depth)
-    const r0 = {
-      x: f0.x + nx * plotDepth,
-      z: f0.z + nz * plotDepth,
-    };
-    const r1 = {
-      x: f1.x + nx * plotDepth,
-      z: f1.z + nz * plotDepth,
-    };
-
-    // Validate all corners
-    if (!validatePlotCorners([f0, f1, r1, r0], elevation, waterMask, seaLevel, w, h, cs)) continue;
-
-    // Check for overlap with existing plots (sample multiple points)
-    if (isPlotOverlapping(f0, f1, r0, r1, cs, claimedCells)) continue;
-
-    // Claim cells under this plot
-    claimPlotCells(f0, f1, r0, r1, cs, claimedCells);
-
-    // Get district at plot center
-    const districts = null; // Will be derived from neighborhood type
-    const district = getDistrictFromHood(hood, d);
-
-    plots.push({
-      vertices: [f0, f1, r1, r0],
-      area: actualWidth * plotDepth,
-      centroid: {
-        x: (f0.x + f1.x + r0.x + r1.x) / 4,
-        z: (f0.z + f1.z + r0.z + r1.z) / 4,
-      },
-      frontageEdgeId: edgeId,
-      frontageDirection: { x: dirX, z: dirZ },
-      frontageWidth: actualWidth,
-      depth: plotDepth,
-      setback: config.frontSetback,
-      rearGarden: config.rearGarden,
-      density: d,
-      district,
-      neighborhoodIdx: ownerIdx,
-      neighborhoodType: hood.type,
-      side,
-      buildingCoverage: config.buildingCoverage,
-    });
+/** Sample a point along a polyline at distance `d` from start. */
+function samplePolyline(polyline, cumDist, d) {
+  d = Math.max(0, Math.min(d, cumDist[cumDist.length - 1]));
+  for (let i = 1; i < cumDist.length; i++) {
+    if (cumDist[i] >= d) {
+      const segLen = cumDist[i] - cumDist[i - 1];
+      const t = segLen > 0 ? (d - cumDist[i - 1]) / segLen : 0;
+      return {
+        x: polyline[i - 1].x + (polyline[i].x - polyline[i - 1].x) * t,
+        z: polyline[i - 1].z + (polyline[i].z - polyline[i - 1].z) * t,
+      };
+    }
   }
+  return { x: polyline[polyline.length - 1].x, z: polyline[polyline.length - 1].z };
+}
 
-  return plots;
+/** Sample the unit direction of the polyline at distance `d`. */
+function samplePolylineDir(polyline, cumDist, d) {
+  d = Math.max(0, Math.min(d, cumDist[cumDist.length - 1]));
+  for (let i = 1; i < cumDist.length; i++) {
+    if (cumDist[i] >= d) {
+      const dx = polyline[i].x - polyline[i - 1].x;
+      const dz = polyline[i].z - polyline[i - 1].z;
+      const len = Math.sqrt(dx * dx + dz * dz);
+      return len > 0 ? { x: dx / len, z: dz / len } : { x: 1, z: 0 };
+    }
+  }
+  return { x: 1, z: 0 };
 }
 
 /**
@@ -494,85 +544,81 @@ function generateCrossStreets(graph, existingPlots, ownership, neighborhoods, de
   return newEdgeIds;
 }
 
-// -- Helpers --
+// -- Availability grid helpers --
 
-function validatePlotCorners(corners, elevation, waterMask, seaLevel, w, h, cs) {
-  for (const c of corners) {
-    const gx = Math.round(c.x / cs);
-    const gz = Math.round(c.z / cs);
-    if (gx < 0 || gx >= w || gz < 0 || gz >= h) return false;
-    if (elevation && elevation.get(gx, gz) < seaLevel) return false;
-    if (waterMask && waterMask.get(gx, gz) > 0) return false;
-  }
-  return true;
-}
+/** Check if a polygon's area is mostly available. Returns false if >threshold fraction is unavailable. */
+function isPlotAvailable(verts, avail, availW, availH, RES, threshold) {
+  const xs = verts.map(v => v.x);
+  const zs = verts.map(v => v.z);
+  const minAx = Math.max(0, Math.floor(Math.min(...xs) / RES));
+  const maxAx = Math.min(availW - 1, Math.ceil(Math.max(...xs) / RES));
+  const minAz = Math.max(0, Math.floor(Math.min(...zs) / RES));
+  const maxAz = Math.min(availH - 1, Math.ceil(Math.max(...zs) / RES));
 
-/** Check if a plot overlaps already-claimed cells. Reject if >30% overlap. */
-function isPlotOverlapping(f0, f1, r0, r1, cs, claimedCells) {
-  const step = 3; // sample every 3m
-  const corners = [f0, f1, r1, r0];
-  let samples = 0;
-  let hits = 0;
-
-  // Walk the quad using bilinear interpolation
-  for (let u = 0; u <= 1; u += step / Math.max(1, dist(f0, f1))) {
-    for (let v = 0; v <= 1; v += step / Math.max(1, dist(f0, r0))) {
-      const x = f0.x * (1 - u) * (1 - v) + f1.x * u * (1 - v) + r1.x * u * v + r0.x * (1 - u) * v;
-      const z = f0.z * (1 - u) * (1 - v) + f1.z * u * (1 - v) + r1.z * u * v + r0.z * (1 - u) * v;
-      const key = `${Math.round(x / 3)},${Math.round(z / 3)}`;
+  let samples = 0, blocked = 0;
+  for (let az = minAz; az <= maxAz; az++) {
+    for (let ax = minAx; ax <= maxAx; ax++) {
+      if (!pointInConvexPoly(ax * RES, az * RES, verts)) continue;
       samples++;
-      if (claimedCells.has(key)) hits++;
+      if (avail[az * availW + ax] !== 0) blocked++;
     }
   }
-  return samples > 0 && (hits / samples) > 0.3;
+  return samples > 0 && (blocked / samples) <= threshold;
 }
 
-function dist(a, b) {
-  return Math.sqrt((a.x - b.x) ** 2 + (a.z - b.z) ** 2);
-}
+/** Stamp a convex polygon onto the availability grid. */
+function stampPolyOnAvail(verts, avail, availW, availH, RES, value) {
+  const xs = verts.map(v => v.x);
+  const zs = verts.map(v => v.z);
+  const minAx = Math.max(0, Math.floor(Math.min(...xs) / RES));
+  const maxAx = Math.min(availW - 1, Math.ceil(Math.max(...xs) / RES));
+  const minAz = Math.max(0, Math.floor(Math.min(...zs) / RES));
+  const maxAz = Math.min(availH - 1, Math.ceil(Math.max(...zs) / RES));
 
-/** Claim a fine grid of cells under the plot footprint. */
-function claimPlotCells(f0, f1, r0, r1, cs, claimedCells) {
-  const step = 3; // 3m resolution
-  for (let u = 0; u <= 1; u += step / Math.max(1, dist(f0, f1))) {
-    for (let v = 0; v <= 1; v += step / Math.max(1, dist(f0, r0))) {
-      const x = f0.x * (1 - u) * (1 - v) + f1.x * u * (1 - v) + r1.x * u * v + r0.x * (1 - u) * v;
-      const z = f0.z * (1 - u) * (1 - v) + f1.z * u * (1 - v) + r1.z * u * v + r0.z * (1 - u) * v;
-      claimedCells.add(`${Math.round(x / 3)},${Math.round(z / 3)}`);
+  for (let az = minAz; az <= maxAz; az++) {
+    for (let ax = minAx; ax <= maxAx; ax++) {
+      if (pointInConvexPoly(ax * RES, az * RES, verts)) {
+        avail[az * availW + ax] = value;
+      }
     }
   }
 }
 
-function getDistrictFromHood(hood, density) {
-  // Map neighborhood type + density to district enum
-  // 0=commercial, 1=dense_residential, 2=suburban, 3=industrial, 4=parkland
-  const typeMap = {
-    oldTown: density > 0.5 ? 0 : 1,
-    waterfront: 3,
-    market: 0,
-    roadside: density > 0.6 ? 0 : 1,
-    hilltop: 2,
-    valley: 2,
-    suburban: 2,
-    industrial: 3,
-  };
-  return typeMap[hood.type] ?? 2;
+/** Stamp a polyline corridor (line with half-width) onto the availability grid. */
+function stampPolylineOnAvail(polyline, halfWidth, avail, availW, availH, RES, value) {
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const p0 = polyline[i], p1 = polyline[i + 1];
+    const dx = p1.x - p0.x, dz = p1.z - p0.z;
+    const len = Math.sqrt(dx * dx + dz * dz);
+    if (len < 0.1) continue;
+
+    const ux = dx / len, uz = dz / len;
+    const nx = -uz, nz = ux;
+
+    // Build quad for this segment
+    const verts = [
+      { x: p0.x + nx * halfWidth, z: p0.z + nz * halfWidth },
+      { x: p1.x + nx * halfWidth, z: p1.z + nz * halfWidth },
+      { x: p1.x - nx * halfWidth, z: p1.z - nz * halfWidth },
+      { x: p0.x - nx * halfWidth, z: p0.z - nz * halfWidth },
+    ];
+    stampPolyOnAvail(verts, avail, availW, availH, RES, value);
+  }
 }
 
-/** Claim cells under an arbitrary convex polygon (for institutional plots). */
-function claimPlotCellsFromVertices(vertices, claimedCells) {
-  const step = 3;
-  const xs = vertices.map(v => v.x);
-  const zs = vertices.map(v => v.z);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minZ = Math.min(...zs);
-  const maxZ = Math.max(...zs);
+/** Stamp a circle onto the availability grid. */
+function stampCircleOnAvail(cx, cz, radius, avail, availW, availH, RES, value) {
+  const minAx = Math.max(0, Math.floor((cx - radius) / RES));
+  const maxAx = Math.min(availW - 1, Math.ceil((cx + radius) / RES));
+  const minAz = Math.max(0, Math.floor((cz - radius) / RES));
+  const maxAz = Math.min(availH - 1, Math.ceil((cz + radius) / RES));
+  const r2 = radius * radius;
 
-  for (let px = minX; px <= maxX; px += step) {
-    for (let pz = minZ; pz <= maxZ; pz += step) {
-      if (pointInConvexPoly(px, pz, vertices)) {
-        claimedCells.add(`${Math.round(px / 3)},${Math.round(pz / 3)}`);
+  for (let az = minAz; az <= maxAz; az++) {
+    for (let ax = minAx; ax <= maxAx; ax++) {
+      const dx = ax * RES - cx, dz = az * RES - cz;
+      if (dx * dx + dz * dz <= r2) {
+        avail[az * availW + ax] = value;
       }
     }
   }
@@ -588,6 +634,20 @@ function pointInConvexPoly(px, pz, verts) {
     if (ex * tz - ez * tx < 0) return false;
   }
   return true;
+}
+
+function getDistrictFromHood(hood, density) {
+  const typeMap = {
+    oldTown: density > 0.5 ? 0 : 1,
+    waterfront: 3,
+    market: 0,
+    roadside: density > 0.6 ? 0 : 1,
+    hilltop: 2,
+    valley: 2,
+    suburban: 2,
+    industrial: 3,
+  };
+  return typeMap[hood.type] ?? 2;
 }
 
 function findOrCreateNode(graph, x, z, threshold) {

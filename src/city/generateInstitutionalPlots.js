@@ -258,7 +258,7 @@ function tryPlaceInstitution(candidate, spec, type, elevation, waterMask, slope,
     if (isAreaOverlapping(corners, cs, claimedCells)) continue;
 
     // Check the interior is mostly buildable
-    if (!isInteriorBuildable(corners, elevation, waterMask, slope, seaLevel, w, h, cs, 0.8)) continue;
+    if (!isInteriorBuildable(corners, elevation, waterMask, slope, seaLevel, w, h, cs, 0.95)) continue;
 
     const centroid = {
       x: (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4,
@@ -309,10 +309,17 @@ function findNearestRoadDirection(x, z, roadGraph, maxDist) {
 }
 
 function isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h) {
-  if (gx < 1 || gx >= w - 1 || gz < 1 || gz >= h - 1) return false;
+  if (gx < 2 || gx >= w - 2 || gz < 2 || gz >= h - 2) return false;
   if (elevation && elevation.get(gx, gz) < seaLevel) return false;
-  if (waterMask && waterMask.get(gx, gz) > 0) return false;
   if (slope && slope.get(gx, gz) > 0.2) return false;
+  // Check cell and immediate neighbors for water (buffer against coarse grid)
+  if (waterMask) {
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (waterMask.get(gx + dx, gz + dz) > 0) return false;
+      }
+    }
+  }
   return true;
 }
 

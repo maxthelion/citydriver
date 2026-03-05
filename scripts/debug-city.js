@@ -74,6 +74,7 @@ console.log('Rendering...');
 const { grid, tiles } = renderDebugGrid(cityLayers, roadGraph, steps);
 
 // Create output directory
+await rm(outDir, { recursive: true, force: true });
 await mkdir(outDir, { recursive: true });
 
 // Write region overview
