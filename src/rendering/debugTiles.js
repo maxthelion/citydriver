@@ -424,7 +424,7 @@ export function renderRegionOverview(regionalLayers, settlement, cityRadius) {
   if (roads) {
     for (const road of roads) {
       if (!road.path || road.path.length < 2) continue;
-      const regionRoadColors = { arterial: [200, 180, 120], collector: [160, 140, 100], local: [120, 110, 80] };
+      const regionRoadColors = { arterial: [200, 180, 120], collector: [160, 140, 100], local: [120, 110, 80], track: [100, 90, 70] };
       const c = regionRoadColors[road.hierarchy] || [120, 110, 80];
       for (let i = 0; i < road.path.length - 1; i++) {
         drawLine(buf,

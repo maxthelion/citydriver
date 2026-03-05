@@ -159,7 +159,7 @@ export function buildRegionRoads(layers) {
     const pathData = road.rawPath || road.path;
     if (!pathData || pathData.length < 2) continue;
 
-    const hierarchyColors = { arterial: 0xff3333, collector: 0xaa44cc, local: 0x8833aa };
+    const hierarchyColors = { arterial: 0xff3333, collector: 0xaa44cc, local: 0x8833aa, track: 0x997755 };
     const color = hierarchyColors[road.hierarchy] || 0x8833aa;
     const points = pathData.map(p => {
       const elev = elevation.get(p.gx, p.gz);
