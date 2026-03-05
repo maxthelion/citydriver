@@ -8,7 +8,6 @@ import { refineTerrain } from './refineTerrain.js';
 import { generateAnchorRoutes } from './generateAnchorRoutes.js';
 import { identifyRiverCrossings } from './riverCrossings.js';
 import { placeNeighborhoods } from './placeNeighborhoods.js';
-import { connectNeighborhoods } from './connectNeighborhoods.js';
 import { computeNeighborhoodInfluence } from './neighborhoodInfluence.js';
 import { generateInstitutionalPlots } from './generateInstitutionalPlots.js';
 import { generateStreetsAndPlots } from './generateStreetsAndPlots.js';
@@ -33,8 +32,9 @@ function difference(a, b) {
  * @returns {{ cityLayers, roadGraph, steps: Array<{name, render, ...}> }}
  */
 export function generateCityStepByStep(regionalLayers, settlement, rng, options = {}) {
-  const { cityRadius = 30, cityCellSize = 10 } = options;
+  const { cityRadius = 30, cityCellSize = 10, stopAfter } = options;
   const steps = [];
+  const stop = (name) => stopAfter && name.toLowerCase() === stopAfter.toLowerCase();
 
   // C1: Extract city context
   const cityLayers = extractCityContext(regionalLayers, settlement, {
@@ -44,6 +44,7 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   cityLayers.setData('targetPopulation', POPULATION_BY_TIER[tier] ?? 2000);
 
   steps.push({ name: 'Elevation', render: 'elevation' });
+  if (stop('elevation')) return { cityLayers, roadGraph: null, steps };
 
   // C2: Refine terrain
   refineTerrain(cityLayers, rng.fork('cityTerrain'));
@@ -63,6 +64,7 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
     name: 'Anchor Routes', render: 'roads',
     edgeIds: new Set(curEdges), newEdgeIds: structuralEdges,
   });
+  if (stop('anchor routes')) { cityLayers.setData('roadGraph', roadGraph); return { cityLayers, roadGraph, steps }; }
   prevEdges = new Set(curEdges);
 
   // C3b: River crossings (bridge points)
@@ -74,16 +76,7 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   const neighborhoods = placeNeighborhoods(cityLayers, roadGraph, rng.fork('neighborhoods'));
   cityLayers.setData('neighborhoods', neighborhoods);
 
-  // C5: Connect neighborhoods (arterial network)
-  connectNeighborhoods(cityLayers, roadGraph, neighborhoods, rng.fork('connectNeighborhoods'));
-  curEdges = new Set(roadGraph.edges.keys());
-  steps.push({
-    name: 'Neighborhoods', render: 'roads',
-    edgeIds: new Set(curEdges), newEdgeIds: difference(curEdges, prevEdges),
-  });
-  prevEdges = new Set(curEdges);
-
-  // C6: Neighborhood influence (density + districts)
+  // C5: Neighborhood influence (density + districts) — no connector roads
   const { density, districts, ownership } = computeNeighborhoodInfluence(cityLayers, neighborhoods);
   cityLayers.setGrid('density', density);
   cityLayers.setGrid('districts', districts);
@@ -95,12 +88,20 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   });
   steps.push({ name: 'Density', render: 'density' });
   steps.push({ name: 'Districts', render: 'districts' });
+  if (stop('districts') || stop('density') || stop('neighborhoods')) {
+    cityLayers.setData('roadGraph', roadGraph);
+    return { cityLayers, roadGraph, steps };
+  }
 
   // C6b: Large institutional plots
   const institutionalPlots = generateInstitutionalPlots(cityLayers, roadGraph, rng.fork('institutions'));
   cityLayers.setData('institutionalPlots', institutionalPlots);
   cityLayers.setData('plots', institutionalPlots); // temporary — will be merged with frontage plots
   steps.push({ name: 'Institutions', render: 'plots' });
+  if (stop('institutions')) {
+    cityLayers.setData('roadGraph', roadGraph);
+    return { cityLayers, roadGraph, steps };
+  }
 
   // C7: Streets and plots (merged, frontage-first)
   const { plots, newEdgeIds: streetPlotEdges } = generateStreetsAndPlots(cityLayers, roadGraph, rng.fork('streetsAndPlots'));
@@ -111,6 +112,10 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
     edgeIds: new Set(curEdges), newEdgeIds: streetPlotEdges,
   });
   steps.push({ name: 'Plots', render: 'plots' });
+  if (stop('plots') || stop('streets + plots')) {
+    cityLayers.setData('roadGraph', roadGraph);
+    return { cityLayers, roadGraph, steps };
+  }
   prevEdges = new Set(curEdges);
 
   // C8: Loop closure (lightweight safety net)
@@ -126,6 +131,7 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   const buildings = generateBuildings(cityLayers, plots, rng.fork('buildings'));
   cityLayers.setData('buildings', buildings);
   steps.push({ name: 'Buildings', render: 'buildings' });
+  if (stop('buildings')) return { cityLayers, roadGraph, steps };
 
   // C11: Amenities
   const amenities = generateAmenities(cityLayers, buildings, rng.fork('amenities'));

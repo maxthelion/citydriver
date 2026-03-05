@@ -9,7 +9,6 @@ import { refineTerrain } from './refineTerrain.js';
 import { generateAnchorRoutes } from './generateAnchorRoutes.js';
 import { identifyRiverCrossings } from './riverCrossings.js';
 import { placeNeighborhoods } from './placeNeighborhoods.js';
-import { connectNeighborhoods } from './connectNeighborhoods.js';
 import { computeNeighborhoodInfluence } from './neighborhoodInfluence.js';
 import { generateInstitutionalPlots } from './generateInstitutionalPlots.js';
 import { generateStreetsAndPlots } from './generateStreetsAndPlots.js';
@@ -64,10 +63,7 @@ export function generateCity(regionalLayers, settlement, rng, options = {}) {
   const neighborhoods = placeNeighborhoods(cityLayers, roadGraph, rng.fork('neighborhoods'));
   cityLayers.setData('neighborhoods', neighborhoods);
 
-  // C5. Connect neighborhoods (forms arterial network)
-  connectNeighborhoods(cityLayers, roadGraph, neighborhoods, rng.fork('connectNeighborhoods'));
-
-  // C6. Neighborhood influence (density + districts)
+  // C5. Neighborhood influence (density + districts)
   const { density, districts, ownership } = computeNeighborhoodInfluence(cityLayers, neighborhoods);
   cityLayers.setGrid('density', density);
   cityLayers.setGrid('districts', districts);
