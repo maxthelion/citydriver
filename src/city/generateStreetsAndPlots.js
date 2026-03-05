@@ -127,7 +127,15 @@ export function generateStreetsAndPlots(cityLayers, graph, rng) {
   const edgeIdsBefore = new Set(graph.edges.keys());
 
   // Track which side of which edge already has plots to avoid overlap
-  const claimedCells = new Set(); // Set of "gx,gz" strings for plot cells
+  const claimedCells = new Set(); // Set of "gx,gz" strings for plot cells (3m resolution)
+
+  // Pre-claim cells from institutional plots placed in C6b
+  const institutionalPlots = cityLayers.getData('institutionalPlots') || [];
+  for (const ip of institutionalPlots) {
+    if (ip.vertices) {
+      claimPlotCellsFromVertices(ip.vertices, claimedCells);
+    }
+  }
 
   const allPlots = [];
 
@@ -573,6 +581,37 @@ function getDistrictFromHood(hood, density) {
     industrial: 3,
   };
   return typeMap[hood.type] ?? 2;
+}
+
+/** Claim cells under an arbitrary convex polygon (for institutional plots). */
+function claimPlotCellsFromVertices(vertices, claimedCells) {
+  const step = 3;
+  const xs = vertices.map(v => v.x);
+  const zs = vertices.map(v => v.z);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minZ = Math.min(...zs);
+  const maxZ = Math.max(...zs);
+
+  for (let px = minX; px <= maxX; px += step) {
+    for (let pz = minZ; pz <= maxZ; pz += step) {
+      if (pointInConvexPoly(px, pz, vertices)) {
+        claimedCells.add(`${Math.round(px / 3)},${Math.round(pz / 3)}`);
+      }
+    }
+  }
+}
+
+function pointInConvexPoly(px, pz, verts) {
+  for (let i = 0; i < verts.length; i++) {
+    const j = (i + 1) % verts.length;
+    const ex = verts[j].x - verts[i].x;
+    const ez = verts[j].z - verts[i].z;
+    const tx = px - verts[i].x;
+    const tz = pz - verts[i].z;
+    if (ex * tz - ez * tx < 0) return false;
+  }
+  return true;
 }
 
 function findOrCreateNode(graph, x, z, threshold) {

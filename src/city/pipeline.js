@@ -11,6 +11,7 @@ import { identifyRiverCrossings } from './riverCrossings.js';
 import { placeNeighborhoods } from './placeNeighborhoods.js';
 import { connectNeighborhoods } from './connectNeighborhoods.js';
 import { computeNeighborhoodInfluence } from './neighborhoodInfluence.js';
+import { generateInstitutionalPlots } from './generateInstitutionalPlots.js';
 import { generateStreetsAndPlots } from './generateStreetsAndPlots.js';
 import { closeLoops } from './closeLoops.js';
 import { generateBuildings } from './generateBuildings.js';
@@ -72,9 +73,13 @@ export function generateCity(regionalLayers, settlement, rng, options = {}) {
   cityLayers.setGrid('districts', districts);
   cityLayers.setData('ownership', ownership);
 
+  // C6b. Large institutional plots (parks, churches, markets, etc.)
+  const institutionalPlots = generateInstitutionalPlots(cityLayers, roadGraph, rng.fork('institutions'));
+  cityLayers.setData('institutionalPlots', institutionalPlots);
+
   // C7. Streets and plots (merged, frontage-first)
   const { plots } = generateStreetsAndPlots(cityLayers, roadGraph, rng.fork('streetsAndPlots'));
-  cityLayers.setData('plots', plots);
+  cityLayers.setData('plots', [...institutionalPlots, ...plots]);
 
   // C8. Loop closure (lightweight safety net)
   closeLoops(roadGraph, 500, cityLayers);

@@ -46,35 +46,53 @@ export function generateBuildings(cityLayers, plots, rng) {
     const d = plot.density ?? (density ? density.get(gx, gz) : 0.3);
     const district = plot.district ?? 0;
 
-    // ---- Density-driven skip ----
-    let skipChance;
-    if (d < 0.3) skipChance = 0.3;       // Suburban: skip 30%
-    else if (d < 0.7) skipChance = 0.05;  // Urban: skip 5%
-    else skipChance = 0;                   // Core: skip 0%
-    if (rng.next() < skipChance) continue;
-
-    // ---- Building type from district ----
+    // ---- Building type from district/plot ----
     let type, maxFloors;
-    switch (district) {
-      case DISTRICT.COMMERCIAL:
-        type = 'commercial';
-        maxFloors = 5;
-        break;
-      case DISTRICT.DENSE_RESIDENTIAL:
-        type = 'terrace';
-        maxFloors = 3;
-        break;
-      case DISTRICT.SUBURBAN:
-        type = rng.next() > 0.5 ? 'detached' : 'semi-detached';
-        maxFloors = 2;
-        break;
-      case DISTRICT.INDUSTRIAL:
-        type = 'warehouse';
-        maxFloors = 2;
-        break;
-      default:
-        type = 'detached';
-        maxFloors = 2;
+
+    // ---- Institutional plot handling ----
+    if (plot.isInstitutional) {
+      if (plot.institutionType === 'park') continue; // Parks get no buildings
+      // Other institutions get a single building with appropriate type
+      type = plot.institutionType === 'church' ? 'church'
+        : plot.institutionType === 'hospital' ? 'hospital'
+        : plot.institutionType === 'school' ? 'school'
+        : plot.institutionType === 'market' ? 'market_hall'
+        : 'civic';
+      maxFloors = plot.institutionType === 'church' ? 3
+        : plot.institutionType === 'hospital' ? 4
+        : 2;
+    } else {
+      // ---- Density-driven skip ----
+      let skipChance;
+      if (d < 0.3) skipChance = 0.3;       // Suburban: skip 30%
+      else if (d < 0.7) skipChance = 0.05;  // Urban: skip 5%
+      else skipChance = 0;                   // Core: skip 0%
+      if (rng.next() < skipChance) continue;
+
+      // ---- Building type from district ----
+      switch (district) {
+        case DISTRICT.COMMERCIAL:
+          type = 'commercial';
+          maxFloors = 5;
+          break;
+        case DISTRICT.DENSE_RESIDENTIAL:
+          type = 'terrace';
+          maxFloors = 3;
+          break;
+        case DISTRICT.SUBURBAN:
+          type = rng.next() > 0.5 ? 'detached' : 'semi-detached';
+          maxFloors = 2;
+          break;
+        case DISTRICT.INDUSTRIAL:
+          type = 'warehouse';
+          maxFloors = 2;
+          break;
+        case DISTRICT.PARKLAND:
+          continue; // No buildings in parkland plots
+        default:
+          type = 'detached';
+          maxFloors = 2;
+      }
     }
 
     // ---- Height with block-level coherence ----

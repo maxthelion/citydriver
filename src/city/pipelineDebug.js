@@ -10,6 +10,7 @@ import { identifyRiverCrossings } from './riverCrossings.js';
 import { placeNeighborhoods } from './placeNeighborhoods.js';
 import { connectNeighborhoods } from './connectNeighborhoods.js';
 import { computeNeighborhoodInfluence } from './neighborhoodInfluence.js';
+import { generateInstitutionalPlots } from './generateInstitutionalPlots.js';
 import { generateStreetsAndPlots } from './generateStreetsAndPlots.js';
 import { closeLoops } from './closeLoops.js';
 import { generateBuildings } from './generateBuildings.js';
@@ -95,9 +96,15 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   steps.push({ name: 'Density', render: 'density' });
   steps.push({ name: 'Districts', render: 'districts' });
 
+  // C6b: Large institutional plots
+  const institutionalPlots = generateInstitutionalPlots(cityLayers, roadGraph, rng.fork('institutions'));
+  cityLayers.setData('institutionalPlots', institutionalPlots);
+  cityLayers.setData('plots', institutionalPlots); // temporary — will be merged with frontage plots
+  steps.push({ name: 'Institutions', render: 'plots' });
+
   // C7: Streets and plots (merged, frontage-first)
   const { plots, newEdgeIds: streetPlotEdges } = generateStreetsAndPlots(cityLayers, roadGraph, rng.fork('streetsAndPlots'));
-  cityLayers.setData('plots', plots);
+  cityLayers.setData('plots', [...institutionalPlots, ...plots]);
   curEdges = new Set(roadGraph.edges.keys());
   steps.push({
     name: 'Streets + Plots', render: 'roads',
