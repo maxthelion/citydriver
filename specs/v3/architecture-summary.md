@@ -120,13 +120,13 @@ Route roads between settlements using terrain-weighted pathfinding. Roads follow
 Inherit and refine the regional heightmap, river geometry, coastline, geology, and land cover for the local area around the chosen settlement. Add high-frequency terrain detail.
 
 **B2. Anchor Routes**
-Place the first roads — waterfront routes, roads following natural features, connections to regional road entry points. These are the ancient routes that predate planned development.
+Inherit regional roads that pass through the city area. Clip to the city boundary, refine at city grid resolution using corridor-guided pathfinding, and detect where roads intersect or share corridors. Connect the city seed to the nearest inherited road. Add focused structural roads — a waterfront promenade near the center if coastal, paths along riverbanks if a river passes through. These inherited routes are the skeleton that all subsequent road phases build on.
 
 **B3. Density Field**
 Compute a population density heatmap driven by distance from the city seed, proximity to arterials, terrain suitability, and waterfront desirability. Identify district centers at density peaks.
 
 **B4. Arterial Network**
-Connect regional entry roads to the city seed and to each other. These become the main streets — widest roads, most traffic, commercial character. Bridge locations become critical nodes.
+Fill gaps in the inherited arterial network. Where populated areas lack arterial access (based on the density field), pathfind new connections. Add cross-links between parallel inherited roads through high-density areas. Mark bridge locations where arterials must cross rivers.
 
 **B5. District Division**
 Arterials and natural features carve the city into districts. Assign district character (commercial core, dense residential, suburban, industrial, parkland) based on the density field, terrain, and proximity to water and transport.

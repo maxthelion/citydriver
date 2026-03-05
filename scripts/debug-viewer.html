@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>City Debug Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; color: #eee; font-family: monospace; font-size: 14px; }
+  #controls { padding: 8px 12px; background: #16213e; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  #controls label { color: #aaa; }
+  #controls input, #controls select { background: #0f3460; color: #eee; border: 1px solid #444; padding: 4px 8px; font-family: monospace; }
+  #controls button { background: #e94560; color: #fff; border: none; padding: 4px 12px; cursor: pointer; font-family: monospace; }
+  #controls button:hover { background: #ff6b6b; }
+  #main { display: flex; height: calc(100vh - 40px); }
+  #sidebar { width: 200px; overflow-y: auto; background: #16213e; border-right: 1px solid #333; flex-shrink: 0; }
+  #sidebar .item { padding: 6px 10px; cursor: pointer; border-bottom: 1px solid #222; display: flex; align-items: center; gap: 6px; }
+  #sidebar .item:hover { background: #1a1a4e; }
+  #sidebar .item.active { background: #0f3460; color: #fff; }
+  #sidebar .num { color: #e94560; min-width: 24px; }
+  #sidebar .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #viewer { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  #image-container { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 12px; }
+  #image-container img { image-rendering: pixelated; cursor: zoom-in; }
+  #image-container.zoomed img { cursor: zoom-out; }
+  #status { padding: 4px 12px; background: #16213e; border-top: 1px solid #333; color: #888; font-size: 12px; }
+  kbd { background: #333; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div id="controls">
+  <label>Dir:</label>
+  <input id="dirInput" type="text" value="" placeholder="debug-12345-v7" size="24">
+  <button id="loadBtn">Load</button>
+  <span id="info" style="color:#888"></span>
+  <span style="flex:1"></span>
+  <span style="color:#666"><kbd>&uarr;</kbd><kbd>&darr;</kbd> navigate &nbsp; <kbd>+</kbd><kbd>-</kbd> zoom &nbsp; <kbd>g</kbd> grid</span>
+</div>
+
+<div id="main">
+  <div id="sidebar"></div>
+  <div id="viewer">
+    <div id="image-container"></div>
+    <div id="status"></div>
+  </div>
+</div>
+
+<script>
+const TILES = [
+  { num: '00', name: 'Region' },
+  { num: '01', name: 'Elevation' },
+  { num: '02', name: 'Slope' },
+  { num: '03', name: 'Water Mask' },
+  { num: '04', name: 'Anchor Routes' },
+  { num: '05', name: 'Density' },
+  { num: '06', name: 'Arterials' },
+  { num: '07', name: 'Density v2' },
+  { num: '08', name: 'Districts' },
+  { num: '09', name: 'Collectors' },
+  { num: '10', name: 'Streets' },
+  { num: '11', name: 'Loop Closure' },
+  { num: '12', name: 'Rezone' },
+  { num: '13', name: 'Plots' },
+  { num: '14', name: 'Buildings' },
+  { num: '15', name: 'Amenities' },
+  { num: '16', name: 'Land Cover' },
+  { num: 'grid', name: 'Grid (all)' },
+];
+
+let currentDir = '';
+let currentIdx = 0;
+let zoom = 2;
+let fileMap = {};
+
+const sidebar = document.getElementById('sidebar');
+const container = document.getElementById('image-container');
+const status = document.getElementById('status');
+const dirInput = document.getElementById('dirInput');
+const info = document.getElementById('info');
+
+// Build sidebar
+TILES.forEach((tile, idx) => {
+  const div = document.createElement('div');
+  div.className = 'item';
+  div.dataset.idx = idx;
+  div.innerHTML = `<span class="num">${tile.num}</span><span class="name">${tile.name}</span>`;
+  div.addEventListener('click', () => selectTile(idx));
+  sidebar.appendChild(div);
+});
+
+function selectTile(idx) {
+  currentIdx = idx;
+  sidebar.querySelectorAll('.item').forEach((el, i) => {
+    el.classList.toggle('active', i === idx);
+  });
+  showImage();
+}
+
+async function loadDir() {
+  currentDir = dirInput.value.trim();
+  if (!currentDir) return;
+
+  // Try to discover which files exist by loading the known set
+  fileMap = {};
+  info.textContent = `Loading ${currentDir}...`;
+
+  // Try loading each expected file
+  let found = 0;
+  for (const tile of TILES) {
+    // Guess the filename from the directory listing pattern
+    const candidates = tile.num === 'grid'
+      ? ['grid.png']
+      : await guessFilename(tile.num);
+
+    for (const fname of candidates) {
+      const url = `${resolveDir(currentDir)}/${fname}`;
+      const exists = await checkImage(url);
+      if (exists) {
+        fileMap[tile.num] = url;
+        found++;
+        break;
+      }
+    }
+  }
+
+  info.textContent = `${currentDir}: ${found} images`;
+  selectTile(0);
+}
+
+function resolveDir(dir) {
+  // If viewer is served from scripts/, images are one level up
+  const base = location.pathname.includes('/scripts/') ? '../' : '';
+  return base + dir;
+}
+
+async function guessFilename(num) {
+  const name = TILES.find(t => t.num === num)?.name || '';
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return [`${num}-${slug}.png`];
+}
+
+function checkImage(url) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = url;
+  });
+}
+
+function showImage() {
+  const tile = TILES[currentIdx];
+  const url = fileMap[tile.num];
+
+  container.innerHTML = '';
+  container.className = '';
+
+  if (!url) {
+    container.innerHTML = `<div style="color:#666;padding:40px">No image for ${tile.num} ${tile.name}</div>`;
+    status.textContent = `${tile.num}. ${tile.name} — not found`;
+    return;
+  }
+
+  const img = new Image();
+  img.onload = () => {
+    applyZoom(img);
+    status.textContent = `${tile.num}. ${tile.name} — ${img.naturalWidth}x${img.naturalHeight} — zoom ${zoom}x`;
+  };
+  img.src = url;
+  container.appendChild(img);
+
+  img.addEventListener('click', () => {
+    zoom = zoom >= 4 ? 1 : zoom * 2;
+    applyZoom(img);
+    status.textContent = `${tile.num}. ${tile.name} — ${img.naturalWidth}x${img.naturalHeight} — zoom ${zoom}x`;
+  });
+}
+
+function applyZoom(img) {
+  img.style.width = (img.naturalWidth * zoom) + 'px';
+  img.style.height = (img.naturalHeight * zoom) + 'px';
+  container.className = zoom > 1 ? 'zoomed' : '';
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.target === dirInput) return;
+
+  if (e.key === 'ArrowDown' || e.key === 'j') {
+    e.preventDefault();
+    selectTile(Math.min(currentIdx + 1, TILES.length - 1));
+  } else if (e.key === 'ArrowUp' || e.key === 'k') {
+    e.preventDefault();
+    selectTile(Math.max(currentIdx - 1, 0));
+  } else if (e.key === '+' || e.key === '=') {
+    zoom = Math.min(zoom * 2, 8);
+    const img = container.querySelector('img');
+    if (img) { applyZoom(img); status.textContent = status.textContent.replace(/zoom \d+x/, `zoom ${zoom}x`); }
+  } else if (e.key === '-') {
+    zoom = Math.max(zoom / 2, 1);
+    const img = container.querySelector('img');
+    if (img) { applyZoom(img); status.textContent = status.textContent.replace(/zoom \d+x/, `zoom ${zoom}x`); }
+  } else if (e.key === 'g') {
+    selectTile(TILES.length - 1); // Grid view
+  } else if (e.key >= '0' && e.key <= '9') {
+    // Jump to tile by number
+    const num = parseInt(e.key);
+    // If pressed quickly after another digit, combine (e.g. 1 then 6 = 16)
+    clearTimeout(window._numTimeout);
+    if (window._numBuffer !== undefined && Date.now() - window._numTime < 500) {
+      const combined = window._numBuffer * 10 + num;
+      const idx = TILES.findIndex(t => t.num === String(combined).padStart(2, '0'));
+      if (idx >= 0) selectTile(idx);
+      window._numBuffer = undefined;
+    } else {
+      window._numBuffer = num;
+      window._numTime = Date.now();
+      window._numTimeout = setTimeout(() => {
+        const idx = TILES.findIndex(t => t.num === String(num).padStart(2, '0'));
+        if (idx >= 0) selectTile(idx);
+        window._numBuffer = undefined;
+      }, 300);
+    }
+  }
+});
+
+document.getElementById('loadBtn').addEventListener('click', loadDir);
+dirInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadDir(); });
+
+// Auto-detect directory from URL params
+const params = new URLSearchParams(location.search);
+const dirParam = params.get('dir');
+if (dirParam) {
+  dirInput.value = dirParam;
+  loadDir();
+}
+</script>
+</body>
+</html>

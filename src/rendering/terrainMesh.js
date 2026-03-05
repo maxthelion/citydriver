@@ -16,10 +16,10 @@ export function buildCityTerrainMesh(cityLayers) {
   const h = elevation.height;
   const cs = elevation.cellSize;
 
-  const geometry = new THREE.PlaneGeometry(w * cs, h * cs, w - 1, h - 1);
+  // Use (w-1)*cs so vertex spacing equals cs exactly, matching road/building coords
+  const geometry = new THREE.PlaneGeometry((w - 1) * cs, (h - 1) * cs, w - 1, h - 1);
   geometry.rotateX(-Math.PI / 2);
-  // Shift geometry from centered (-half..+half) to local coords (0..w*cs)
-  geometry.translate(w * cs / 2, 0, h * cs / 2);
+  geometry.translate((w - 1) * cs / 2, 0, (h - 1) * cs / 2);
 
   const positions = geometry.attributes.position.array;
   const colors = new Float32Array(positions.length);

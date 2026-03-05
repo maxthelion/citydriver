@@ -3,6 +3,8 @@
  * generateRegion(params, rng) => LayerStack
  *
  * Phases are added incrementally. Each phase enriches the LayerStack.
+ * Settlement placement uses a feedback loop:
+ *   A6a primaries → A6b farms → A7a roads → A6c market towns → A7b roads → A6d growth
  */
 
 import { LayerStack } from '../core/LayerStack.js';
@@ -12,7 +14,10 @@ import { generateHydrology } from './generateHydrology.js';
 import { generateCoastline } from './generateCoastline.js';
 import { generateLandCover } from './generateLandCover.js';
 import { generateSettlements } from './generateSettlements.js';
+import { generateFarms } from './generateFarms.js';
 import { generateRoads } from './generateRoads.js';
+import { generateMarketTowns } from './generateMarketTowns.js';
+import { growSettlements } from './growSettlements.js';
 
 /**
  * @param {object} params
@@ -88,8 +93,16 @@ export function generateRegion(params, rng) {
   layers.setData('confluences', hydrology.confluences);
   layers.setGrid('waterMask', hydrology.waterMask);
 
-  // A6. Settlements (before land cover so clearing can be applied)
-  const settlements = generateSettlements(
+  const geoExtras = {
+    springLine: geology.springLine,
+    erosionResistance: geology.erosionResistance,
+    coastlineFeatures: coastResult?.coastlineFeatures || [],
+  };
+
+  // === Settlement + Road feedback loop ===
+
+  // A6a. Primary settlements (cities, towns, villages)
+  const { settlements: primaries, proximityGrids } = generateSettlements(
     { width, height, cellSize, seaLevel },
     terrain.elevation,
     terrain.slope,
@@ -97,14 +110,71 @@ export function generateRegion(params, rng) {
     hydrology.waterMask,
     hydrology.confluences,
     hydrology.rivers,
-    rng,
-    {
-      springLine: geology.springLine,
-      erosionResistance: geology.erosionResistance,
-      coastlineFeatures: coastResult?.coastlineFeatures || [],
-    },
+    rng.fork('settlements'),
+    geoExtras,
   );
-  layers.setData('settlements', settlements);
+
+  // A6b. Farms and hamlets (geography-driven)
+  const farms = generateFarms(
+    { width, height, cellSize, seaLevel },
+    terrain.elevation,
+    terrain.slope,
+    geology.soilFertility,
+    primaries,
+    proximityGrids,
+    hydrology.confluences,
+    rng.fork('farms'),
+    geoExtras,
+  );
+
+  let allSettlements = [...primaries, ...farms];
+
+  // A7a. Initial roads (connect primaries + hamlets)
+  const roadsA = generateRoads(
+    { width, height, cellSize },
+    allSettlements,
+    terrain.elevation,
+    terrain.slope,
+    hydrology.waterMask,
+    rng.fork('roads'),
+  );
+
+  // A6c. Market towns (road-attracted) + promote hamlets on arterials
+  const { newTowns, promotions } = generateMarketTowns(
+    { width, height, cellSize, seaLevel },
+    terrain.elevation,
+    terrain.slope,
+    geology.soilFertility,
+    allSettlements,
+    roadsA.roads,
+    proximityGrids,
+    rng.fork('marketTowns'),
+    geoExtras,
+  );
+
+  // Apply promotions
+  for (const { settlement, newTier } of promotions) {
+    settlement.tier = newTier;
+  }
+
+  allSettlements = [...allSettlements, ...newTowns];
+
+  // A7b. Road update (incremental — connect new settlements, reuse existing roadGrid)
+  const roadsB = generateRoads(
+    { width, height, cellSize },
+    allSettlements,
+    terrain.elevation,
+    terrain.slope,
+    hydrology.waterMask,
+    rng.fork('roadsB'),
+    { existingRoadGrid: roadsA.roadGrid, existingRoads: roadsA.roads },
+  );
+
+  // A6d. Growth pass (promote busy settlements)
+  growSettlements(allSettlements, roadsB.roads);
+
+  layers.setData('settlements', allSettlements);
+  layers.setData('roads', roadsB.roads);
 
   // A5. Land Cover
   const landCover = generateLandCover(
@@ -114,21 +184,10 @@ export function generateRegion(params, rng) {
     geology.soilFertility,
     geology.permeability,
     hydrology.waterMask,
-    settlements,
+    allSettlements,
     rng,
   );
   layers.setGrid('landCover', landCover);
-
-  // A7. Roads
-  const roads = generateRoads(
-    { width, height, cellSize },
-    settlements,
-    terrain.elevation,
-    terrain.slope,
-    hydrology.waterMask,
-    rng,
-  );
-  layers.setData('roads', roads);
 
   return layers;
 }

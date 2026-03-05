@@ -10,7 +10,7 @@
 | A3 | Hydrology | `generateHydrology.js` | rivers, confluences, waterMask, flow accumulation |
 | A6 | Settlements | `generateSettlements.js` | Tiered settlements (scored by river/coast/flat/fertility) |
 | A5 | Land Cover | `generateLandCover.js` | landCover grid (water/farmland/forest/moorland/marsh/etc) |
-| A7 | Roads | `generateRoads.js` | roads array (A* between settlements, arterial/collector hierarchy) |
+| A7 | Roads | `generateRoads.js` | roads array (A* between settlements, arterial/collector hierarchy, rawPath + simplified path) |
 
 ## City Pipeline (`src/city/pipeline.js`)
 
@@ -18,7 +18,7 @@
 |---|-------|------|--------|
 | B1a | Extract Context | `extractCityContext.js` | Crop regional layers to city bounds |
 | B1b | Refine Terrain | `refineTerrain.js` | High-freq noise detail on heightmap |
-| B2 | Anchor Routes | `generateAnchorRoutes.js` | PlanarGraph with entry roads + waterfront |
+| B2 | Anchor Routes | `generateAnchorRoutes.js` | PlanarGraph: regional roads re-pathfound at city resolution within corridor, + waterfront structural road |
 | B3 | Density Field | `generateDensityField.js` | density grid (0-1) |
 | B4 | Arterials | `generateArterials.js` | Wide main roads, bridges |
 | — | Feedback A | — | Recompute density after arterials |

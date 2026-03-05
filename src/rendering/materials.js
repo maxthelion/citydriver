@@ -48,7 +48,13 @@ export function getRoadMaterial(hierarchy) {
     local: 0x666666,       // Lighter gray
   };
   const color = colors[hierarchy] || 0x333333;
-  const mat = new THREE.MeshLambertMaterial({ color });
+  const mat = new THREE.MeshLambertMaterial({
+    color,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
   cache.set(key, mat);
   return mat;
 }

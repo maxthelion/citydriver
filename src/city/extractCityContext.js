@@ -53,6 +53,7 @@ export function extractCityContext(regionalLayers, settlement, options = {}) {
     settlement,
     regionalMinGx: minGx,
     regionalMinGz: minGz,
+    regionalCellSize,
   });
 
   // Resample each grid layer at city resolution

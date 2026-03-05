@@ -75,12 +75,14 @@ export class App {
     this._minimapCamera.lookAt(hw, 0, hh);
     this._minimapCamera.layers.enableAll();
 
-    // Player position indicator (red dot visible only to minimap)
+    // Player position indicator (red dot visible only to minimap via layers)
     const dotGeo = new THREE.CircleGeometry(cityWidth * 0.012, 16);
     const dotMat = new THREE.MeshBasicMaterial({ color: 0xff3333, depthTest: false });
     this._minimapDot = new THREE.Mesh(dotGeo, dotMat);
     this._minimapDot.rotation.x = -Math.PI / 2;
     this._minimapDot.renderOrder = 999;
+    this._minimapDot.layers.set(1); // Only on layer 1
+    this._minimapCamera.layers.enable(1); // Minimap sees layer 1
     this.scene.add(this._minimapDot);
   }
 

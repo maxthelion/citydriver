@@ -31,7 +31,6 @@ export function buildRoadMeshes(graph, elevation) {
 
     for (let i = 0; i < polyline.length; i++) {
       const p = polyline[i];
-      const y = elevation ? elevation.sample(p.x / cs, p.z / cs) + 0.5 : 0.5;
 
       let dx, dz;
       if (i < polyline.length - 1) {
@@ -46,9 +45,17 @@ export function buildRoadMeshes(graph, elevation) {
       const perpX = -dz / len;
       const perpZ = dx / len;
 
+      // Sample elevation at each edge separately so roads follow cross-slope
+      const lx = p.x + perpX * halfWidth;
+      const lz = p.z + perpZ * halfWidth;
+      const rx = p.x - perpX * halfWidth;
+      const rz = p.z - perpZ * halfWidth;
+      const yL = elevation ? elevation.sample(lx / cs, lz / cs) + 0.3 : 0.3;
+      const yR = elevation ? elevation.sample(rx / cs, rz / cs) + 0.3 : 0.3;
+
       bucket.vertices.push(
-        p.x + perpX * halfWidth, y, p.z + perpZ * halfWidth,
-        p.x - perpX * halfWidth, y, p.z - perpZ * halfWidth,
+        lx, yL, lz,
+        rx, yR, rz,
       );
 
       if (i > 0) {

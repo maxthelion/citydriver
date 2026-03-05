@@ -116,7 +116,7 @@ export function generateCity(regionalLayers, settlement, rng, options = {}) {
  * Feedback Loop D: approximate betweenness centrality and rezone
  * high-centrality local streets to commercial.
  */
-function rezoneHighCentralityStreets(roadGraph, cityLayers) {
+export function rezoneHighCentralityStreets(roadGraph, cityLayers) {
   const districts = cityLayers.getGrid('districts');
   const params = cityLayers.getData('params');
   if (!districts || !params) return;

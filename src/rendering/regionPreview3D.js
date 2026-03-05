@@ -15,7 +15,7 @@ export function buildRegionTerrain(layers) {
   const cs = elevation.cellSize;
 
   const geometry = new THREE.PlaneGeometry(
-    w * cs, h * cs,
+    (w - 1) * cs, (h - 1) * cs,
     w - 1, h - 1,
   );
   geometry.rotateX(-Math.PI / 2);
@@ -130,9 +130,9 @@ export function buildSettlementMarkers(layers) {
     const marker = new THREE.Mesh(geom, mat);
 
     marker.position.set(
-      s.gx * cs - elevation.width * cs / 2,
+      s.gx * cs - (elevation.width - 1) * cs / 2,
       h + size,
-      s.gz * cs - elevation.height * cs / 2,
+      s.gz * cs - (elevation.height - 1) * cs / 2,
     );
     marker.userData = { settlement: s };
     group.add(marker);
@@ -151,8 +151,8 @@ export function buildRegionRoads(layers) {
 
   const group = new THREE.Group();
   const cs = elevation.cellSize;
-  const halfW = elevation.width * cs / 2;
-  const halfH = elevation.height * cs / 2;
+  const halfW = (elevation.width - 1) * cs / 2;
+  const halfH = (elevation.height - 1) * cs / 2;
 
   for (const road of roads) {
     if (!road.path || road.path.length < 2) continue;
@@ -212,8 +212,8 @@ export function buildRegionRiverMeshes(layers) {
   if (!rivers || !elevation) return new THREE.Group();
 
   const cs = elevation.cellSize;
-  const halfW = elevation.width * cs / 2;
-  const halfH = elevation.height * cs / 2;
+  const halfW = (elevation.width - 1) * cs / 2;
+  const halfH = (elevation.height - 1) * cs / 2;
 
   const vertices = [];
   const indices = [];
