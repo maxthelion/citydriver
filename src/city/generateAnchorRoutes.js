@@ -14,6 +14,7 @@
 import { PlanarGraph } from '../core/PlanarGraph.js';
 import { Grid2D } from '../core/Grid2D.js';
 import { findPath, terrainCostFunction, simplifyPath, smoothPath } from '../core/pathfinding.js';
+import { stampEdge, stampJunction, wrapCostWithOccupancy } from './roadOccupancy.js';
 
 /**
  * @param {import('../core/LayerStack.js').LayerStack} cityLayers
@@ -247,11 +248,26 @@ export function generateAnchorRoutes(cityLayers, rng) {
   }
 
   // --- Phase 5: Waterfront road + seed connection ---
+  // Stamp Phase 1-4 edges onto occupancy so Phase 5 pathfinding can reuse them
+  const occupancy = cityLayers.getData('occupancy');
+  const phase5Cost = occupancy ? wrapCostWithOccupancy(baseCost, occupancy, cs) : baseCost;
+
+  // Stamp existing edges before Phase 5 pathfinding
+  if (occupancy) {
+    for (const edgeId of graph.edges.keys()) {
+      stampEdge(graph, edgeId, occupancy);
+    }
+    for (const [nodeId, node] of graph.nodes) {
+      if (graph.neighbors(nodeId).length >= 3) {
+        stampJunction(node.x, node.z, 15, occupancy);
+      }
+    }
+  }
 
   const seedX = Math.floor(w / 2) * cs;
   const seedZ = Math.floor(h / 2) * cs;
-  connectSeed(graph, seedX, seedZ, baseCost, params);
-  addWaterfrontRoad(graph, cityLayers, baseCost);
+  connectSeed(graph, seedX, seedZ, phase5Cost, params, cityLayers);
+  addWaterfrontRoad(graph, cityLayers, phase5Cost);
 
   if (graph.edges.size === 0) {
     addFallbackRoads(graph, seedX, seedZ, baseCost, params, rng);
@@ -353,7 +369,7 @@ function interpolateBoundaryCrossing(outside, inside, maxX, maxZ) {
   };
 }
 
-function connectSeed(graph, seedX, seedZ, baseCost, params) {
+function connectSeed(graph, seedX, seedZ, baseCost, params, cityLayers) {
   const { width, height, cellSize: cs } = params;
 
   if (graph.nodes.size === 0) {
@@ -381,11 +397,13 @@ function connectSeed(graph, seedX, seedZ, baseCost, params) {
   );
   if (result) {
     const smooth = smoothPath(simplifyPath(result.path, 3.0), cs, 1);
-    graph.addEdge(seedNode, nearest.id, {
+    const edgeId = graph.addEdge(seedNode, nearest.id, {
       points: smooth.slice(1, -1),
       width: 16,
       hierarchy: 'arterial',
     });
+    const occupancy = cityLayers?.getData('occupancy');
+    if (occupancy) stampEdge(graph, edgeId, occupancy);
   }
 }
 
@@ -450,12 +468,34 @@ function addWaterfrontRoad(graph, cityLayers, baseCost) {
   const smooth = smoothPath(simplifyPath(result.path, 3.0), cs, 1);
   if (smooth.length < 2) return;
 
-  const sn = graph.addNode(smooth[0].x, smooth[0].z, { type: 'waterfront' });
-  const en = graph.addNode(smooth[smooth.length - 1].x, smooth[smooth.length - 1].z, { type: 'waterfront' });
+  // Snap endpoints to existing nodes if close enough, to avoid duplicate geometry
+  const snapThresh = cs * 3;
+  const existingNodeIds = new Set(graph.nodes.keys());
+
+  const sn = snapOrCreateNode(graph, smooth[0].x, smooth[0].z, snapThresh, 'waterfront');
+  const en = snapOrCreateNode(graph, smooth[smooth.length - 1].x, smooth[smooth.length - 1].z, snapThresh, 'waterfront');
+  if (sn === en) return;
+
+  const snSnapped = existingNodeIds.has(sn);
+  const enSnapped = existingNodeIds.has(en);
+
   graph.addEdge(sn, en, { points: smooth.slice(1, -1), width: 14, hierarchy: 'structural' });
 
-  // Connect endpoints to nearest existing road node
-  for (const wfId of [sn, en]) {
+  // Stamp waterfront edge onto occupancy so connectors see it
+  const occupancy = cityLayers.getData('occupancy');
+  if (occupancy) {
+    for (const edgeId of graph.incidentEdges(sn)) {
+      stampEdge(graph, edgeId, occupancy);
+    }
+    for (const edgeId of graph.incidentEdges(en)) {
+      stampEdge(graph, edgeId, occupancy);
+    }
+  }
+
+  // Connect endpoints to nearest existing road node — skip if already snapped
+  for (const [wfId, wasSnapped] of [[sn, snSnapped], [en, enSnapped]]) {
+    if (wasSnapped) continue; // already connected to existing network
+
     const wf = graph.getNode(wfId);
     let bestId = null, bestDist = Infinity;
     for (const [id, node] of graph.nodes) {
@@ -472,10 +512,18 @@ function addWaterfrontRoad(graph, cityLayers, baseCost) {
       );
       if (r) {
         const sm = smoothPath(simplifyPath(r.path, 3.0), cs, 1);
-        graph.addEdge(wfId, bestId, { points: sm.slice(1, -1), width: 8, hierarchy: 'structural' });
+        const edgeId = graph.addEdge(wfId, bestId, { points: sm.slice(1, -1), width: 8, hierarchy: 'structural' });
+        if (occupancy) stampEdge(graph, edgeId, occupancy);
       }
     }
   }
+}
+
+/** Snap to an existing node if within threshold, otherwise create a new one. */
+function snapOrCreateNode(graph, x, z, threshold, type) {
+  const nearest = graph.nearestNode(x, z);
+  if (nearest && nearest.dist < threshold) return nearest.id;
+  return graph.addNode(x, z, { type });
 }
 
 function addFallbackRoads(graph, seedX, seedZ, baseCost, params, rng) {

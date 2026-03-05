@@ -5,6 +5,7 @@
 
 import { distance2D } from '../core/math.js';
 import { findPath, terrainCostFunction, simplifyPath, smoothPath } from '../core/pathfinding.js';
+import { wrapCostWithOccupancy } from './roadOccupancy.js';
 
 /**
  * Close dead ends and connect disconnected components.
@@ -27,7 +28,9 @@ export function closeLoops(graph, maxConnectDist = 500, cityLayers = null) {
   const h = params?.height ?? 0;
   const cs = params?.cellSize ?? 10;
   const waterMask = cityLayers?.getGrid('waterMask');
-  const costFn = elevation ? terrainCostFunction(elevation, { waterGrid: waterMask }) : null;
+  const baseCostFn = elevation ? terrainCostFunction(elevation, { waterGrid: waterMask }) : null;
+  const occupancy = cityLayers?.getData('occupancy');
+  const costFn = baseCostFn && occupancy ? wrapCostWithOccupancy(baseCostFn, occupancy, cs) : baseCostFn;
 
   for (const deadId of deadEnds) {
     const node = graph.getNode(deadId);
@@ -47,28 +50,54 @@ export function closeLoops(graph, maxConnectDist = 500, cityLayers = null) {
       }
     }
 
-    if (bestId !== null) {
-      // Try pathfinding for the connection
-      if (costFn && w > 0 && h > 0) {
-        const startGx = Math.round(node.x / cs);
-        const startGz = Math.round(node.z / cs);
-        const other = graph.getNode(bestId);
-        const endGx = Math.round(other.x / cs);
-        const endGz = Math.round(other.z / cs);
+    if (bestId === null) continue;
 
-        const result = findPath(startGx, startGz, endGx, endGz, w, h, costFn);
-        if (result) {
-          const simplified = simplifyPath(result.path, 1.0);
-          const smooth = smoothPath(simplified, cs);
-          const intermediates = smooth.slice(1, -1);
-          graph.addEdge(deadId, bestId, { points: intermediates, width: 9, hierarchy: 'local' });
-          continue;
+    // Skip if already reachable through the graph — adding a shortcut would
+    // just create a parallel road on top of existing edges
+    if (bfsReachable(graph, deadId, bestId, 6)) continue;
+
+    // Try pathfinding for the connection
+    if (costFn && w > 0 && h > 0) {
+      const startGx = Math.round(node.x / cs);
+      const startGz = Math.round(node.z / cs);
+      const other = graph.getNode(bestId);
+      const endGx = Math.round(other.x / cs);
+      const endGz = Math.round(other.z / cs);
+
+      const result = findPath(startGx, startGz, endGx, endGz, w, h, costFn);
+      if (result) {
+        const simplified = simplifyPath(result.path, 1.0);
+        const smooth = smoothPath(simplified, cs);
+        const intermediates = smooth.slice(1, -1);
+        graph.addEdge(deadId, bestId, { points: intermediates, width: 9, hierarchy: 'local' });
+        continue;
+      }
+    }
+    // Fallback: straight line
+    graph.addEdge(deadId, bestId, { width: 9, hierarchy: 'local' });
+  }
+}
+
+/**
+ * BFS check: can we reach `target` from `source` within `maxHops` graph hops?
+ */
+function bfsReachable(graph, source, target, maxHops) {
+  const visited = new Set([source]);
+  let frontier = [source];
+  for (let hop = 0; hop < maxHops && frontier.length > 0; hop++) {
+    const next = [];
+    for (const id of frontier) {
+      for (const neighbor of graph.neighbors(id)) {
+        if (neighbor === target) return true;
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor);
+          next.push(neighbor);
         }
       }
-      // Fallback: straight line
-      graph.addEdge(deadId, bestId, { width: 9, hierarchy: 'local' });
     }
+    frontier = next;
   }
+  return false;
 }
 
 /**
@@ -85,7 +114,9 @@ function connectComponents(graph, cityLayers = null) {
   const h = params?.height ?? 0;
   const cs = params?.cellSize ?? 10;
   const waterMask = cityLayers?.getGrid('waterMask');
-  const costFn = elevation ? terrainCostFunction(elevation, { waterGrid: waterMask }) : null;
+  const baseCostFn = elevation ? terrainCostFunction(elevation, { waterGrid: waterMask }) : null;
+  const occupancy = cityLayers?.getData('occupancy');
+  const costFn = baseCostFn && occupancy ? wrapCostWithOccupancy(baseCostFn, occupancy, cs) : baseCostFn;
 
   // Find connected components
   const visited = new Set();

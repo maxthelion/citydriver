@@ -14,6 +14,7 @@
  */
 
 import { distance2D } from '../core/math.js';
+import { stampPolyOnGrid, stampPolylineOnGrid, stampCircleOnGrid, OCCUPANCY_ROAD, OCCUPANCY_JUNCTION } from './roadOccupancy.js';
 
 // -- Plot dimension tables by neighborhood type --
 
@@ -131,15 +132,39 @@ export function generateStreetsAndPlots(cityLayers, graph, rng) {
   const availH = Math.ceil((h * cs) / RES);
   const avail = new Uint8Array(availW * availH); // 0 = available
 
+  // Seed from occupancy grid: map road/junction cells to avail value 2
+  const occupancy = cityLayers.getData('occupancy');
+  if (occupancy && occupancy.width === availW && occupancy.height === availH) {
+    for (let i = 0; i < avail.length; i++) {
+      const v = occupancy.data[i];
+      if (v === OCCUPANCY_ROAD || v === OCCUPANCY_JUNCTION) avail[i] = 2;
+    }
+  } else {
+    // Fallback: stamp road corridors from graph (no occupancy grid available)
+    const occFallback = { data: avail, width: availW, height: availH, res: RES };
+    for (const [edgeId, edge] of graph.edges) {
+      const polyline = graph.edgePolyline(edgeId);
+      const halfW2 = ((edge.width || 12) / 2) + 2;
+      stampPolylineOnGrid(polyline, halfW2, occFallback, 2);
+    }
+    for (const [nodeId, node] of graph.nodes) {
+      if (graph.neighbors(nodeId).length >= 3) {
+        stampCircleOnGrid(node.x, node.z, 15, occFallback, 2);
+      }
+    }
+  }
+
   // Mark water as unavailable — use smooth polygons if available, fall back to grid
   const waterPolygons = cityLayers.getData('waterPolygons');
+  const availAsOcc = { data: avail, width: availW, height: availH, res: RES };
   if (waterPolygons && waterPolygons.length > 0) {
     for (const poly of waterPolygons) {
-      stampPolyOnAvail(poly, avail, availW, availH, RES, 1);
+      stampPolyOnGrid(poly, availAsOcc, 1);
     }
   } else {
     for (let az = 0; az < availH; az++) {
       for (let ax = 0; ax < availW; ax++) {
+        if (avail[az * availW + ax] !== 0) continue; // don't overwrite roads
         const wx = ax * RES, wz = az * RES;
         const gx = Math.round(wx / cs), gz = Math.round(wz / cs);
         if (gx < 0 || gx >= w || gz < 0 || gz >= h) { avail[az * availW + ax] = 1; continue; }
@@ -151,6 +176,7 @@ export function generateStreetsAndPlots(cityLayers, graph, rng) {
   // Also mark out-of-bounds cells
   for (let az = 0; az < availH; az++) {
     for (let ax = 0; ax < availW; ax++) {
+      if (avail[az * availW + ax] !== 0) continue;
       const wx = ax * RES, wz = az * RES;
       const gx = Math.round(wx / cs), gz = Math.round(wz / cs);
       if (gx < 0 || gx >= w || gz < 0 || gz >= h) avail[az * availW + ax] = 1;
@@ -169,22 +195,6 @@ export function generateStreetsAndPlots(cityLayers, graph, rng) {
           if (avail[bz * availW + bx] === 0) avail[bz * availW + bx] = 1;
         }
       }
-    }
-  }
-
-  // Mark road corridors as unavailable (stamp each edge polyline with its width)
-  for (const [edgeId, edge] of graph.edges) {
-    const polyline = graph.edgePolyline(edgeId);
-    const halfW = ((edge.width || 12) / 2) + 2; // +2m buffer
-    stampPolylineOnAvail(polyline, halfW, avail, availW, availH, RES, 2);
-  }
-
-  // Extra buffer around junction nodes (nodes with 3+ edges)
-  for (const [nodeId, node] of graph.nodes) {
-    const degree = graph.neighbors(nodeId).length;
-    if (degree >= 3) {
-      const junctionRadius = 15; // generous clearing around junctions
-      stampCircleOnAvail(node.x, node.z, junctionRadius, avail, availW, availH, RES, 2);
     }
   }
 

@@ -16,6 +16,7 @@ import { generateBuildings } from './generateBuildings.js';
 import { generateAmenities } from './generateAmenities.js';
 import { generateCityLandCover } from './generateLandCover.js';
 import { extractWaterPolygons } from './extractWaterPolygons.js';
+import { createOccupancyGrid, stampEdge, stampJunction, stampPlot } from './roadOccupancy.js';
 
 const POPULATION_BY_TIER = { 1: 50000, 2: 10000, 3: 2000 };
 
@@ -56,8 +57,23 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   const waterPolygons = extractWaterPolygons(cityLayers);
   cityLayers.setData('waterPolygons', waterPolygons);
 
+  // Create persistent occupancy grid
+  const occupancy = createOccupancyGrid(cityLayers.getData('params'));
+  cityLayers.setData('occupancy', occupancy);
+
   // C3: Anchor routes (inherited regional roads)
   const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'));
+
+  // Stamp all anchor route edges + junctions onto occupancy
+  for (const edgeId of roadGraph.edges.keys()) {
+    stampEdge(roadGraph, edgeId, occupancy);
+  }
+  for (const [nodeId, node] of roadGraph.nodes) {
+    if (roadGraph.neighbors(nodeId).length >= 3) {
+      stampJunction(node.x, node.z, 15, occupancy);
+    }
+  }
+
   let prevEdges = new Set();
   let curEdges = new Set(roadGraph.edges.keys());
   const structuralEdges = new Set();
@@ -111,6 +127,12 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   // C7: Streets and plots (merged, frontage-first)
   const { plots, newEdgeIds: streetPlotEdges } = generateStreetsAndPlots(cityLayers, roadGraph, rng.fork('streetsAndPlots'));
   cityLayers.setData('plots', [...institutionalPlots, ...plots]);
+
+  // Stamp plots onto occupancy so later roads route around them
+  for (const p of plots) {
+    if (p.vertices) stampPlot(p.vertices, occupancy);
+  }
+
   curEdges = new Set(roadGraph.edges.keys());
   steps.push({
     name: 'Streets + Plots', render: 'roads',
@@ -124,7 +146,12 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   prevEdges = new Set(curEdges);
 
   // C8: Loop closure (lightweight safety net)
+  const preLoopEdges = new Set(roadGraph.edges.keys());
   closeLoops(roadGraph, 500, cityLayers);
+  // Stamp new loop-closure edges onto occupancy
+  for (const edgeId of roadGraph.edges.keys()) {
+    if (!preLoopEdges.has(edgeId)) stampEdge(roadGraph, edgeId, occupancy);
+  }
   curEdges = new Set(roadGraph.edges.keys());
   steps.push({
     name: 'Loop Closure', render: 'roads',

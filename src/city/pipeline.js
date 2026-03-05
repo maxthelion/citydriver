@@ -18,6 +18,7 @@ import { generateAmenities } from './generateAmenities.js';
 import { generateCityLandCover } from './generateLandCover.js';
 import { extractWaterPolygons } from './extractWaterPolygons.js';
 import { getCityValidators, runValidators } from '../validators/cityValidators.js';
+import { createOccupancyGrid, stampEdge, stampJunction, stampPlot } from './roadOccupancy.js';
 
 /** Target population by settlement tier. */
 const POPULATION_BY_TIER = {
@@ -56,8 +57,22 @@ export function generateCity(regionalLayers, settlement, rng, options = {}) {
   const waterPolygons = extractWaterPolygons(cityLayers);
   cityLayers.setData('waterPolygons', waterPolygons);
 
+  // Create persistent occupancy grid
+  const occupancy = createOccupancyGrid(cityLayers.getData('params'));
+  cityLayers.setData('occupancy', occupancy);
+
   // C3. Anchor routes (inherited regional roads)
   const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'));
+
+  // Stamp all anchor route edges + junctions onto occupancy
+  for (const edgeId of roadGraph.edges.keys()) {
+    stampEdge(roadGraph, edgeId, occupancy);
+  }
+  for (const [nodeId, node] of roadGraph.nodes) {
+    if (roadGraph.neighbors(nodeId).length >= 3) {
+      stampJunction(node.x, node.z, 15, occupancy);
+    }
+  }
 
   // C3b. River crossings (bridge points)
   const { bridgeGrid, bridges } = identifyRiverCrossings(cityLayers);
@@ -82,8 +97,18 @@ export function generateCity(regionalLayers, settlement, rng, options = {}) {
   const { plots } = generateStreetsAndPlots(cityLayers, roadGraph, rng.fork('streetsAndPlots'));
   cityLayers.setData('plots', [...institutionalPlots, ...plots]);
 
+  // Stamp plots onto occupancy so later roads route around them
+  for (const p of plots) {
+    if (p.vertices) stampPlot(p.vertices, occupancy);
+  }
+
   // C8. Loop closure (lightweight safety net)
+  const preLoopEdges = new Set(roadGraph.edges.keys());
   closeLoops(roadGraph, 500, cityLayers);
+  // Stamp new loop-closure edges onto occupancy
+  for (const edgeId of roadGraph.edges.keys()) {
+    if (!preLoopEdges.has(edgeId)) stampEdge(roadGraph, edgeId, occupancy);
+  }
 
   // Store road graph
   cityLayers.setData('roadGraph', roadGraph);
