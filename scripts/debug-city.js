@@ -31,6 +31,7 @@ function getArg(name) {
 }
 
 const seed = Number(getArg('--seed')) || Math.floor(Math.random() * 100000);
+const stopAfter = getArg('--stop-after');
 const outDir = getArg('--out') || `debug-${seed}`;
 
 console.log(`Seed: ${seed}`);
@@ -62,7 +63,7 @@ console.log('Generating city...');
 const radiusByTier = { 1: 40, 2: 30, 3: 20 };
 const cityRadius = radiusByTier[settlement.tier] ?? 20;
 const { cityLayers, roadGraph, steps } = generateCityStepByStep(
-  regionalLayers, settlement, rng.fork('city'), { cityRadius, cityCellSize: 10 },
+  regionalLayers, settlement, rng.fork('city'), { cityRadius, cityCellSize: 10, stopAfter },
 );
 
 const params = cityLayers.getData('params');
