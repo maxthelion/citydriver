@@ -225,7 +225,7 @@ function tryPlaceInstitution(candidate, spec, type, elevation, waterMask, slope,
   const angles = [0, Math.PI / 4, Math.PI / 2, Math.PI * 3 / 4];
 
   // If near a road, align to the nearest road direction
-  const nearestEdgeDir = findNearestRoadDirection(x, z, roadGraph, cs * 5);
+  const nearestEdgeDir = findNearestRoadDirection(x, z, roadGraph, cs * 15);
   if (nearestEdgeDir) {
     angles.unshift(nearestEdgeDir.angle);
   }
@@ -269,6 +269,7 @@ function tryPlaceInstitution(candidate, spec, type, elevation, waterMask, slope,
       vertices: corners,
       area: spec.width * spec.depth,
       centroid,
+      frontageDirection: { x: cos, z: sin }, // along width (f0→f1)
       frontageWidth: spec.width,
       depth: spec.depth,
       setback: 3,
@@ -291,21 +292,27 @@ function findNearestRoadDirection(x, z, roadGraph, maxDist) {
   let bestDist = maxDist;
   let bestAngle = null;
 
-  for (const [, edge] of roadGraph.edges) {
-    const fromNode = roadGraph.getNode(edge.from);
-    const toNode = roadGraph.getNode(edge.to);
-    if (!fromNode || !toNode) continue;
-
-    const mx = (fromNode.x + toNode.x) / 2;
-    const mz = (fromNode.z + toNode.z) / 2;
-    const d = distance2D(x, z, mx, mz);
-    if (d < bestDist) {
-      bestDist = d;
-      bestAngle = Math.atan2(toNode.z - fromNode.z, toNode.x - fromNode.x);
+  for (const [edgeId] of roadGraph.edges) {
+    const polyline = roadGraph.edgePolyline(edgeId);
+    for (let i = 0; i < polyline.length - 1; i++) {
+      const a = polyline[i], b = polyline[i + 1];
+      const d = pointToSegmentDist(x, z, a.x, a.z, b.x, b.z);
+      if (d < bestDist) {
+        bestDist = d;
+        bestAngle = Math.atan2(b.z - a.z, b.x - a.x);
+      }
     }
   }
 
   return bestAngle !== null ? { angle: bestAngle } : null;
+}
+
+function pointToSegmentDist(px, pz, ax, az, bx, bz) {
+  const abx = bx - ax, abz = bz - az;
+  const len2 = abx * abx + abz * abz;
+  if (len2 < 1e-10) return distance2D(px, pz, ax, az);
+  const t = Math.max(0, Math.min(1, ((px - ax) * abx + (pz - az) * abz) / len2));
+  return distance2D(px, pz, ax + t * abx, az + t * abz);
 }
 
 function isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h) {
