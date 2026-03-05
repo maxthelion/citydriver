@@ -105,64 +105,63 @@ export function generateRoads(params, settlements, elevation, slope, waterMask, 
 }
 
 /**
- * Build connection list from settlements based on tier hierarchy.
+ * Build connection list using K-nearest-neighbor approach.
+ * Each settlement connects to its closest neighbors. Hierarchy is determined
+ * by the tiers of the endpoints. Pairs are deduplicated.
  */
 function buildConnections(settlements, gridWidth) {
+  // Only connect settlements that should have roads (tier <= 4)
+  const routable = settlements.filter(s => s.tier <= 4);
+  if (routable.length < 2) return [];
+
+  // How many neighbors each tier connects to
+  const neighborsForTier = { 1: 5, 2: 4, 3: 3, 4: 2 };
+  // Max distance for connections by tier
+  const maxDistForTier = {
+    1: gridWidth * 0.8,
+    2: gridWidth * 0.5,
+    3: gridWidth * 0.3,
+    4: 30,
+  };
+
+  const pairSet = new Set();
   const connections = [];
-  const tier1 = settlements.filter(s => s.tier === 1);
-  const tier2 = settlements.filter(s => s.tier === 2);
-  const tier3 = settlements.filter(s => s.tier === 3);
-  const tier4 = settlements.filter(s => s.tier === 4);
 
-  // Tier 1 to all tier 2 (arterial)
-  for (const a of tier1) {
-    for (const b of tier2) {
-      connections.push({ from: a, to: b, hierarchy: 'arterial' });
-    }
+  function addConnection(a, b) {
+    // Deduplicate: use sorted coordinate pair as key
+    const keyA = `${a.gx},${a.gz}`;
+    const keyB = `${b.gx},${b.gz}`;
+    const pairKey = keyA < keyB ? `${keyA}-${keyB}` : `${keyB}-${keyA}`;
+    if (pairSet.has(pairKey)) return;
+    pairSet.add(pairKey);
+
+    // Hierarchy based on the highest (most important) tier of the pair
+    const minTier = Math.min(a.tier, b.tier);
+    let hierarchy;
+    if (minTier <= 2) hierarchy = 'arterial';
+    else if (minTier === 3) hierarchy = 'collector';
+    else hierarchy = 'local';
+
+    connections.push({ from: a, to: b, hierarchy });
   }
 
-  // Tier 2 to each other if within range (arterial)
-  for (let i = 0; i < tier2.length; i++) {
-    for (let j = i + 1; j < tier2.length; j++) {
-      const dist = distance2D(tier2[i].gx, tier2[i].gz, tier2[j].gx, tier2[j].gz);
-      if (dist < gridWidth * 0.6) {
-        connections.push({ from: tier2[i], to: tier2[j], hierarchy: 'arterial' });
-      }
+  // For each settlement, connect to K nearest neighbors
+  for (const s of routable) {
+    const k = neighborsForTier[s.tier] ?? 2;
+    const maxDist = maxDistForTier[s.tier] ?? 30;
+
+    // Find K nearest from all routable settlements
+    const candidates = routable
+      .filter(c => c !== s)
+      .map(c => ({ settlement: c, dist: distance2D(s.gx, s.gz, c.gx, c.gz) }))
+      .filter(c => c.dist <= maxDist)
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, k);
+
+    for (const c of candidates) {
+      addConnection(s, c.settlement);
     }
   }
-
-  // Tier 3 to nearest higher-tier (collector)
-  const higherTier = [...tier1, ...tier2];
-  for (const village of tier3) {
-    const nearest = findNearest(village, higherTier);
-    if (nearest) {
-      connections.push({ from: village, to: nearest, hierarchy: 'collector' });
-    }
-  }
-
-  // Tier 4 (hamlets) to nearest settlement of any tier within range (local)
-  const allHigher = [...tier1, ...tier2, ...tier3];
-  for (const hamlet of tier4) {
-    const nearest = findNearest(hamlet, allHigher, 40); // Max 40 cells
-    if (nearest) {
-      connections.push({ from: hamlet, to: nearest, hierarchy: 'local' });
-    }
-  }
-
-  // Tier 5 (farms) get no roads — they're just map markers
 
   return connections;
-}
-
-function findNearest(settlement, candidates, maxDist = Infinity) {
-  let nearest = null;
-  let nearestDist = Infinity;
-  for (const c of candidates) {
-    const d = distance2D(settlement.gx, settlement.gz, c.gx, c.gz);
-    if (d < nearestDist && d < maxDist) {
-      nearestDist = d;
-      nearest = c;
-    }
-  }
-  return nearest;
 }
