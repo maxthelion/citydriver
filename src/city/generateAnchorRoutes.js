@@ -1,7 +1,14 @@
 /**
- * B2. Anchor routes — inherit regional roads scaled to city resolution.
- * Regional roads are mapped directly (no re-pathfinding), smoothed, and
- * clipped at the city boundary. Adds waterfront structural roads.
+ * C3. Anchor routes — inherit regional roads as a merged network.
+ *
+ * Instead of adding each regional road as an independent edge, we:
+ *   1. Pathfind all roads onto a shared grid (with road-reuse discount)
+ *   2. Build a cell-level usage map (which cells are used by any road)
+ *   3. Extract the network as connected segments with junctions where
+ *      roads meet, merge, or split
+ *   4. Convert segments to graph edges
+ *
+ * This guarantees no overlapping roads by construction.
  */
 
 import { PlanarGraph } from '../core/PlanarGraph.js';
@@ -9,8 +16,6 @@ import { Grid2D } from '../core/Grid2D.js';
 import { findPath, terrainCostFunction, simplifyPath, smoothPath } from '../core/pathfinding.js';
 
 /**
- * Generate the initial anchor road network by inheriting regional roads.
- *
  * @param {import('../core/LayerStack.js').LayerStack} cityLayers
  * @param {import('../core/rng.js').SeededRandom} rng
  * @returns {PlanarGraph}
@@ -31,279 +36,269 @@ export function generateAnchorRoutes(cityLayers, rng) {
   const baseCost = terrainCostFunction(elevation, { waterGrid: waterMask, seaLevel });
   const regionalRoads = cityLayers.getData('regionalRoads') || [];
 
-  // Shared node lookup: regional grid key → graph node ID.
-  // Roads sharing a settlement endpoint share the same node.
-  const sharedNodes = new Map();
+  // --- Phase 1: Pathfind all roads onto a shared grid ---
 
-  // Track existing road cells so later roads prefer sharing established routes
-  const roadGrid = new Grid2D(w, h, { type: 'uint8' });
+  // Usage grid: how many roads use each cell (0 = no road)
+  const usageGrid = new Grid2D(w, h, { type: 'uint8' });
+  // Hierarchy grid: highest hierarchy touching each cell (0=none, 1=arterial, 2=collector, 3=structural)
+  const hierarchyGrid = new Grid2D(w, h, { type: 'uint8' });
 
-  // 1. Inherit arterial and collector regional roads only (skip local tracks)
-  for (const road of regionalRoads) {
-    if (road.hierarchy === 'local') continue;
-    addRegionalRoad(graph, road, sharedNodes, params, elevation, waterMask, roadGrid);
+  const HIER_RANK = { arterial: 1, collector: 2, structural: 3 };
+
+  // Cost function that strongly rewards reusing existing road cells
+  const sharedCost = (fromGx, fromGz, toGx, toGz) => {
+    const dx = toGx - fromGx;
+    const dz = toGz - fromGz;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const fromH = elevation.get(fromGx, fromGz);
+    const toH = elevation.get(toGx, toGz);
+    const slope = Math.abs(toH - fromH) / dist;
+    let c = dist + slope * 10;
+
+    if (waterMask && waterMask.get(toGx, toGz) > 0) c += 50;
+    if (seaLevel !== null && elevation.get(toGx, toGz) < seaLevel) c += 50;
+
+    // Strong discount for reusing existing road cells
+    if (usageGrid.get(toGx, toGz) > 0) c *= 0.15;
+
+    return c;
+  };
+
+  // Pathfind each regional road and stamp onto usage grid
+  const allPaths = []; // array of { cells: [{gx,gz}], hierarchy }
+
+  // Sort: arterials first (they define the primary network others merge into)
+  const sortedRoads = regionalRoads
+    .filter(r => r.hierarchy !== 'local')
+    .sort((a, b) => (HIER_RANK[a.hierarchy] || 9) - (HIER_RANK[b.hierarchy] || 9));
+
+  for (const road of sortedRoads) {
+    const path = pathfindRegionalRoad(road, params, elevation, waterMask, sharedCost);
+    if (!path || path.length < 2) continue;
+
+    const hierarchy = road.hierarchy || 'arterial';
+    const rank = HIER_RANK[hierarchy] || 9;
+
+    // Stamp onto usage grid
+    for (const cell of path) {
+      const prev = usageGrid.get(cell.gx, cell.gz);
+      usageGrid.set(cell.gx, cell.gz, prev + 1);
+      const prevH = hierarchyGrid.get(cell.gx, cell.gz);
+      if (prevH === 0 || rank < prevH) {
+        hierarchyGrid.set(cell.gx, cell.gz, rank);
+      }
+    }
+
+    allPaths.push({ cells: path, hierarchy });
   }
 
-  // 2. Place seed and connect to nearest road
+  // --- Phase 2: Extract network from usage grid ---
+
+  // Find junction cells: cells with road usage that have != 2 road neighbours
+  // (endpoints have 1 neighbour, junctions have 3+)
+  const junctionSet = new Set(); // "gx,gz" strings
+
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      if (usageGrid.get(gx, gz) === 0) continue;
+
+      let roadNeighbors = 0;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+        const nx = gx + dx, nz = gz + dz;
+        if (nx >= 0 && nx < w && nz >= 0 && nz < h && usageGrid.get(nx, nz) > 0) {
+          roadNeighbors++;
+        }
+      }
+
+      // Junction if: endpoint (<=1 neighbor), branch point (>=3 neighbors),
+      // or multiple roads converge (usage > 1 and neighbors suggest branching)
+      if (roadNeighbors !== 2 || usageGrid.get(gx, gz) > 1) {
+        // For high-usage cells, only mark as junction if neighbors change usage count
+        // (i.e., this is where roads actually merge/split)
+        if (usageGrid.get(gx, gz) > 1) {
+          let usageChanges = false;
+          for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = gx + dx, nz = gz + dz;
+            if (nx >= 0 && nx < w && nz >= 0 && nz < h) {
+              if (usageGrid.get(nx, nz) > 0 && usageGrid.get(nx, nz) !== usageGrid.get(gx, gz)) {
+                usageChanges = true;
+                break;
+              }
+            }
+          }
+          if (usageChanges || roadNeighbors !== 2) {
+            junctionSet.add(`${gx},${gz}`);
+          }
+        } else {
+          junctionSet.add(`${gx},${gz}`);
+        }
+      }
+    }
+  }
+
+  // --- Phase 3: Trace segments between junctions ---
+
+  const visited = new Grid2D(w, h, { type: 'uint8' });
+  const segments = []; // array of { cells: [{gx,gz}], hierarchy }
+
+  for (const jKey of junctionSet) {
+    const [jgx, jgz] = jKey.split(',').map(Number);
+
+    // Walk in each direction from this junction
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+      const nx = jgx + dx, nz = jgz + dz;
+      if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
+      if (usageGrid.get(nx, nz) === 0) continue;
+
+      // Check if we already traced this direction
+      const edgeKey = `${jgx},${jgz}->${nx},${nz}`;
+      if (visited.get(nx, nz) && !junctionSet.has(`${nx},${nz}`)) continue;
+
+      // Trace along road cells until we hit another junction or dead end
+      const segment = [{ gx: jgx, gz: jgz }];
+      let cx = nx, cz = nz;
+      let px = jgx, pz = jgz;
+
+      while (true) {
+        segment.push({ gx: cx, gz: cz });
+
+        if (junctionSet.has(`${cx},${cz}`)) break; // reached another junction
+
+        // Find next unvisited road neighbor (not the one we came from)
+        let found = false;
+        for (const [ddx, ddz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+          const nnx = cx + ddx, nnz = cz + ddz;
+          if (nnx === px && nnz === pz) continue; // don't go back
+          if (nnx < 0 || nnx >= w || nnz < 0 || nnz >= h) continue;
+          if (usageGrid.get(nnx, nnz) === 0) continue;
+
+          px = cx;
+          pz = cz;
+          cx = nnx;
+          cz = nnz;
+          found = true;
+          break;
+        }
+
+        if (!found) break; // dead end
+      }
+
+      if (segment.length < 2) continue;
+
+      // Check this segment isn't a duplicate (reverse of already traced)
+      const startKey = `${segment[0].gx},${segment[0].gz}`;
+      const endKey = `${segment[segment.length - 1].gx},${segment[segment.length - 1].gz}`;
+      const segKey = startKey < endKey ? `${startKey}|${endKey}` : `${endKey}|${startKey}`;
+
+      if (!segments.some(s => {
+        const sk = `${s.cells[0].gx},${s.cells[0].gz}`;
+        const ek = `${s.cells[s.cells.length - 1].gx},${s.cells[s.cells.length - 1].gz}`;
+        const k = sk < ek ? `${sk}|${ek}` : `${ek}|${sk}`;
+        return k === segKey;
+      })) {
+        // Determine hierarchy from the cells in this segment
+        let bestHier = 9;
+        for (const cell of segment) {
+          const h = hierarchyGrid.get(cell.gx, cell.gz);
+          if (h > 0 && h < bestHier) bestHier = h;
+        }
+        const hierarchy = bestHier === 1 ? 'arterial' : bestHier === 2 ? 'collector' : 'structural';
+
+        segments.push({ cells: segment, hierarchy });
+      }
+    }
+  }
+
+  // --- Phase 4: Convert segments to graph edges ---
+
+  const nodeMap = new Map(); // "gx,gz" -> nodeId
+
+  function getNode(gx, gz) {
+    const key = `${gx},${gz}`;
+    if (nodeMap.has(key)) return nodeMap.get(key);
+    const id = graph.addNode(gx * cs, gz * cs, { type: 'inherited' });
+    nodeMap.set(key, id);
+    return id;
+  }
+
+  for (const seg of segments) {
+    if (seg.cells.length < 2) continue;
+
+    const startCell = seg.cells[0];
+    const endCell = seg.cells[seg.cells.length - 1];
+
+    const startNode = getNode(startCell.gx, startCell.gz);
+    const endNode = getNode(endCell.gx, endCell.gz);
+    if (startNode === endNode) continue;
+    if (graph.neighbors(startNode).includes(endNode)) continue;
+
+    // Simplify and smooth the segment
+    const simplified = simplifyPath(seg.cells, 3.0);
+    const smooth = smoothPath(simplified, cs, 1);
+    if (smooth.length < 2) continue;
+
+    const roadWidth = seg.hierarchy === 'arterial' ? 16 : seg.hierarchy === 'collector' ? 12 : 14;
+
+    graph.addEdge(startNode, endNode, {
+      points: smooth.slice(1, -1),
+      width: roadWidth,
+      hierarchy: seg.hierarchy,
+    });
+  }
+
+  // --- Phase 5: Waterfront road + seed connection ---
+
   const seedX = Math.floor(w / 2) * cs;
   const seedZ = Math.floor(h / 2) * cs;
   connectSeed(graph, seedX, seedZ, baseCost, params);
-
-  // 3. Waterfront road (limited, near center)
   addWaterfrontRoad(graph, cityLayers, baseCost);
 
-  // 4. Fallback: if no regional roads, add 2 simple roads from seed
-  if (regionalRoads.length === 0) {
+  if (graph.edges.size === 0) {
     addFallbackRoads(graph, seedX, seedZ, baseCost, params, rng);
   }
 
   return graph;
 }
 
+// --- Helpers ---
+
 /**
- * Add one regional road to the graph. Converts regional path to city coords,
- * clips at boundary, then re-pathfinds at city resolution within a corridor
- * around the regional centerline. This gives terrain-responsive detail while
- * keeping the broad route faithful to the regional model.
+ * Pathfind a regional road through the city grid, returning grid-cell path.
  */
-function addRegionalRoad(graph, road, sharedNodes, params, elevation, waterMask, roadGrid) {
+function pathfindRegionalRoad(road, params, elevation, waterMask, costFn) {
   const { width: w, height: h, cellSize: cs, regionalCellSize, regionalMinGx, regionalMinGz, seaLevel } = params;
   const rcs = regionalCellSize || 50;
   const maxX = (w - 1) * cs;
   const maxZ = (h - 1) * cs;
 
-  if (!road.path || road.path.length < 2) return;
+  if (!road.path || road.path.length < 2) return null;
 
-  // Use raw (unsimplified) path for full terrain-following detail
   const sourcePath = road.rawPath || road.path;
 
-  // Convert regional path to city-local world coords
+  // Convert to city-local world coords and clip
   const worldPts = sourcePath.map(p => ({
     x: (p.gx - regionalMinGx) * rcs,
     z: (p.gz - regionalMinGz) * rcs,
-    key: `${p.gx},${p.gz}`,
   }));
 
-  // Clip to city boundary, interpolating entry/exit crossing points
   const clipped = clipPathToBounds(worldPts, maxX, maxZ);
-  if (clipped.length < 2) return;
+  if (clipped.length < 2) return null;
 
-  const roadWidth = road.hierarchy === 'arterial' ? 16 : 12;
-  const hierarchy = road.hierarchy || 'arterial';
+  const startGx = clamp(Math.round(clipped[0].x / cs), 0, w - 1);
+  const startGz = clamp(Math.round(clipped[0].z / cs), 0, h - 1);
+  const endGx = clamp(Math.round(clipped[clipped.length - 1].x / cs), 0, w - 1);
+  const endGz = clamp(Math.round(clipped[clipped.length - 1].z / cs), 0, h - 1);
 
-  // Build a distance field from the regional centerline for corridor-constrained pathfinding.
-  // For each city grid cell, compute min distance to the regional path segments.
-  const corridorRadius = 10; // city grid cells (~100m at 10m cellSize)
-  const corridorGrid = buildCorridorDistanceGrid(clipped, w, h, cs, corridorRadius);
+  if (startGx === endGx && startGz === endGz) return null;
 
-  // Corridor-constrained cost: normal terrain cost + penalty for distance from centerline
-  const corridorCost = (fromGx, fromGz, toGx, toGz) => {
-    const dist = corridorGrid.get(toGx, toGz);
-    if (dist > corridorRadius) return Infinity; // outside corridor entirely
-
-    // Base terrain cost (use waterPenalty not seaLevel so bridges are possible)
-    const dx = toGx - fromGx;
-    const dz = toGz - fromGz;
-    const baseDist = Math.sqrt(dx * dx + dz * dz);
-    const fromH = elevation.get(fromGx, fromGz);
-    const toH = elevation.get(toGx, toGz);
-    const slope = Math.abs(toH - fromH) / baseDist;
-    let c = baseDist + slope * 10;
-
-    if (waterMask && waterMask.get(toGx, toGz) > 0) c += 50;
-    if (seaLevel !== null && elevation.get(toGx, toGz) < seaLevel) c += 50;
-
-    // Discount for reusing existing road cells (encourages road sharing)
-    if (roadGrid.get(toGx, toGz) > 0) c *= 0.3;
-
-    // Quadratic penalty for straying from centerline
-    const t = dist / corridorRadius; // 0 at center, 1 at edge
-    c *= 1.0 + t * t * 4.0;
-
-    return c;
-  };
-
-  // Convert clipped start/end to grid coords
-  const startGx = Math.round(clipped[0].x / cs);
-  const startGz = Math.round(clipped[0].z / cs);
-  const endGx = Math.round(clipped[clipped.length - 1].x / cs);
-  const endGz = Math.round(clipped[clipped.length - 1].z / cs);
-
-  // Clamp to grid bounds
-  const clampGx = gx => Math.max(0, Math.min(w - 1, gx));
-  const clampGz = gz => Math.max(0, Math.min(h - 1, gz));
-
-  const result = findPath(
-    clampGx(startGx), clampGz(startGz),
-    clampGx(endGx), clampGz(endGz),
-    w, h, corridorCost,
-  );
-
-  if (!result) {
-    // Fallback: use the regional path directly if corridor pathfinding fails
-    addRegionalRoadDirect(graph, road, clipped, sharedNodes, roadWidth, hierarchy);
-    return;
-  }
-
-  // Stamp raw path cells onto roadGrid so later roads prefer sharing this route
-  for (const p of result.path) {
-    roadGrid.set(p.gx, p.gz, 1);
-  }
-
-  // Aggressively simplify within the city — roads should be straight
-  const simplified = simplifyPath(result.path, 4.0);
-  const smooth = smoothPath(simplified, cs, 1); // single smoothing pass
-  if (smooth.length < 2) return;
-
-  // Place nodes at start and end; everything else is polyline intermediates
-  const startPos = { x: smooth[0].x, z: smooth[0].z, key: clipped[0].key };
-  const endPos = { x: smooth[smooth.length - 1].x, z: smooth[smooth.length - 1].z, key: clipped[clipped.length - 1].key };
-
-  const startNode = getOrCreateNode(graph, sharedNodes, startPos, cs);
-  const endNode = getOrCreateNode(graph, sharedNodes, endPos, cs);
-  if (startNode === endNode) return;
-
-  // Skip if edge already exists between these nodes
-  if (graph.neighbors(startNode).includes(endNode)) return;
-
-  // Skip if a near-parallel edge already covers this corridor
-  if (hasParallelEdge(graph, startNode, endNode, cs * 8)) return;
-
-  graph.addEdge(startNode, endNode, {
-    points: smooth.slice(1, -1),
-    width: roadWidth,
-    hierarchy,
-  });
+  const result = findPath(startGx, startGz, endGx, endGz, w, h, costFn);
+  return result ? result.path : null;
 }
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 /**
- * Fallback: add regional road directly without re-pathfinding (used when corridor
- * pathfinding fails, e.g. if start/end are in water at city resolution).
- */
-function addRegionalRoadDirect(graph, road, clipped, sharedNodes, roadWidth, hierarchy, cs = 10) {
-  const startNode = getOrCreateNode(graph, sharedNodes, clipped[0], cs);
-  const endNode = getOrCreateNode(graph, sharedNodes, clipped[clipped.length - 1], cs);
-  if (startNode === endNode) return;
-  if (graph.neighbors(startNode).includes(endNode)) return;
-
-  const intermediates = [];
-  for (let i = 1; i < clipped.length - 1; i++) {
-    intermediates.push({ x: clipped[i].x, z: clipped[i].z });
-  }
-
-  graph.addEdge(startNode, endNode, {
-    points: intermediates,
-    width: roadWidth,
-    hierarchy,
-  });
-}
-
-/**
- * Build a grid where each cell stores its distance (in grid cells) to the nearest
- * point on the regional centerline. Only fills cells within corridorRadius.
- */
-function buildCorridorDistanceGrid(clippedWorldPts, gridW, gridH, cs, corridorRadius) {
-  const grid = new Grid2D(gridW, gridH, { type: 'float32', fill: corridorRadius + 1 });
-
-  // Rasterize centerline segments and BFS outward
-  const queue = [];
-
-  for (let i = 0; i < clippedWorldPts.length - 1; i++) {
-    const ax = clippedWorldPts[i].x / cs;
-    const az = clippedWorldPts[i].z / cs;
-    const bx = clippedWorldPts[i + 1].x / cs;
-    const bz = clippedWorldPts[i + 1].z / cs;
-
-    // Walk along the segment, marking cells at distance 0
-    const segLen = Math.sqrt((bx - ax) ** 2 + (bz - az) ** 2);
-    const steps = Math.max(1, Math.ceil(segLen));
-    for (let s = 0; s <= steps; s++) {
-      const t = s / steps;
-      const gx = Math.round(ax + (bx - ax) * t);
-      const gz = Math.round(az + (bz - az) * t);
-      if (gx < 0 || gx >= gridW || gz < 0 || gz >= gridH) continue;
-      if (grid.get(gx, gz) === 0) continue; // already marked
-      grid.set(gx, gz, 0);
-      queue.push(gx, gz);
-    }
-  }
-
-  // BFS to fill distance field up to corridorRadius
-  let head = 0;
-  while (head < queue.length) {
-    const cx = queue[head++];
-    const cz = queue[head++];
-    const cd = grid.get(cx, cz);
-    if (cd >= corridorRadius) continue;
-
-    for (let dz = -1; dz <= 1; dz++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        if (dx === 0 && dz === 0) continue;
-        const nx = cx + dx;
-        const nz = cz + dz;
-        if (nx < 0 || nx >= gridW || nz < 0 || nz >= gridH) continue;
-        const nd = cd + (dx !== 0 && dz !== 0 ? 1.414 : 1.0);
-        if (nd < grid.get(nx, nz)) {
-          grid.set(nx, nz, nd);
-          queue.push(nx, nz);
-        }
-      }
-    }
-  }
-
-  return grid;
-}
-
-/**
- * Check if the graph already has an edge running parallel and close to the
- * line from startNode to endNode. Prevents double-roads in shared corridors.
- */
-function hasParallelEdge(graph, startNode, endNode, maxDist) {
-  const a = graph.getNode(startNode);
-  const b = graph.getNode(endNode);
-  const mx = (a.x + b.x) / 2;
-  const mz = (a.z + b.z) / 2;
-  const angle = Math.atan2(b.z - a.z, b.x - a.x);
-
-  for (const [, edge] of graph.edges) {
-    const f = graph.getNode(edge.from);
-    const t = graph.getNode(edge.to);
-    if (!f || !t) continue;
-
-    // Check midpoint proximity
-    const emx = (f.x + t.x) / 2;
-    const emz = (f.z + t.z) / 2;
-    const d = Math.sqrt((mx - emx) ** 2 + (mz - emz) ** 2);
-    if (d > maxDist) continue;
-
-    // Check angle similarity (within 20°)
-    const eAngle = Math.atan2(t.z - f.z, t.x - f.x);
-    let adiff = Math.abs(angle - eAngle);
-    if (adiff > Math.PI) adiff = 2 * Math.PI - adiff;
-    if (adiff > Math.PI / 2) adiff = Math.PI - adiff; // handle opposite direction
-    if (adiff < Math.PI / 9) return true; // ~20°
-  }
-  return false;
-}
-
-function getOrCreateNode(graph, sharedNodes, pos, cs = 10) {
-  if (pos.key && sharedNodes.has(pos.key)) {
-    return sharedNodes.get(pos.key);
-  }
-  // Also snap to any nearby existing node (within 3 cell widths)
-  const nearest = graph.nearestNode(pos.x, pos.z);
-  if (nearest && nearest.dist < cs * 3) {
-    if (pos.key) sharedNodes.set(pos.key, nearest.id);
-    return nearest.id;
-  }
-  const id = graph.addNode(pos.x, pos.z, { type: 'inherited' });
-  if (pos.key) sharedNodes.set(pos.key, id);
-  return id;
-}
-
-/**
- * Clip a world-coord path to the city rectangle [0,maxX] × [0,maxZ].
- * Interpolates crossing points where the path enters/exits the boundary.
+ * Clip a world-coord path to [0, maxX] x [0, maxZ].
  */
 function clipPathToBounds(worldPts, maxX, maxZ) {
   const result = [];
@@ -319,88 +314,45 @@ function clipPathToBounds(worldPts, maxX, maxZ) {
 
       if (!prevIn && curIn) {
         const entry = interpolateBoundaryCrossing(prev, cur, maxX, maxZ);
-        if (entry) {
-          entry.key = `boundary_${Math.round(entry.x)}_${Math.round(entry.z)}`;
-          result.push(entry);
-        }
+        if (entry) result.push(entry);
       }
       if (prevIn && !curIn) {
         const exit = interpolateBoundaryCrossing(cur, prev, maxX, maxZ);
-        if (exit) {
-          exit.key = `boundary_${Math.round(exit.x)}_${Math.round(exit.z)}`;
-          result.push(exit);
-        }
-        break; // Road has left the city
+        if (exit) result.push(exit);
+        break;
       }
     }
 
-    if (curIn) {
-      result.push(cur);
-    }
+    if (curIn) result.push(cur);
   }
 
   return result;
 }
 
-/**
- * Find the point where a line segment from outside to inside crosses the city boundary.
- * Uses Liang-Barsky line clipping. Returns {x, z} on the boundary.
- */
 function interpolateBoundaryCrossing(outside, inside, maxX, maxZ) {
   const dx = inside.x - outside.x;
   const dz = inside.z - outside.z;
-  let tMin = 0;
-  let tMax = 1;
+  let tMin = 0, tMax = 1;
 
-  const clips = [
+  for (const { p, q } of [
     { p: -dx, q: outside.x },
     { p: dx, q: maxX - outside.x },
     { p: -dz, q: outside.z },
     { p: dz, q: maxZ - outside.z },
-  ];
-
-  for (const { p, q } of clips) {
+  ]) {
     if (Math.abs(p) < 1e-10) continue;
     const t = q / p;
-    if (p < 0) {
-      if (t > tMin) tMin = t;
-    } else {
-      if (t < tMax) tMax = t;
-    }
+    if (p < 0) { if (t > tMin) tMin = t; }
+    else { if (t < tMax) tMax = t; }
   }
 
   if (tMin > tMax) return null;
-
   return {
-    x: Math.max(0, Math.min(maxX, outside.x + tMin * dx)),
-    z: Math.max(0, Math.min(maxZ, outside.z + tMin * dz)),
+    x: clamp(outside.x + tMin * dx, 0, maxX),
+    z: clamp(outside.z + tMin * dz, 0, maxZ),
   };
 }
 
-/**
- * Spiral-search outward from a grid cell until a land cell is found.
- * Returns {gx, gz} or null if no land within radius 15.
- */
-function snapToLand(gx, gz, elevationGrid, waterMask, seaLevel, w, h) {
-  for (let r = 1; r <= 15; r++) {
-    for (let dx = -r; dx <= r; dx++) {
-      for (let dz = -r; dz <= r; dz++) {
-        if (Math.abs(dx) !== r && Math.abs(dz) !== r) continue; // perimeter only
-        const nx = gx + dx;
-        const nz = gz + dz;
-        if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
-        const onLand = elevationGrid.get(nx, nz) >= seaLevel &&
-                       !(waterMask && waterMask.get(nx, nz) > 0);
-        if (onLand) return { gx: nx, gz: nz };
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * Connect the city seed to the nearest inherited road.
- */
 function connectSeed(graph, seedX, seedZ, baseCost, params) {
   const { width, height, cellSize: cs } = params;
 
@@ -415,26 +367,20 @@ function connectSeed(graph, seedX, seedZ, baseCost, params) {
     return;
   }
 
-  // If seed is already very close to an inherited road node, snap to it
   if (nearest.dist < cs * 5) {
-    const node = graph.getNode(nearest.id);
-    node.attrs.type = 'seed';
+    graph.getNode(nearest.id).attrs.type = 'seed';
     return;
   }
 
-  // Otherwise, pathfind a spur from seed to nearest node
   const seedNode = graph.addNode(seedX, seedZ, { type: 'seed' });
-  const targetNode = graph.getNode(nearest.id);
-
-  const seedGx = Math.round(seedX / cs);
-  const seedGz = Math.round(seedZ / cs);
-  const targetGx = Math.round(targetNode.x / cs);
-  const targetGz = Math.round(targetNode.z / cs);
-
-  const result = findPath(seedGx, seedGz, targetGx, targetGz, width, height, baseCost);
+  const target = graph.getNode(nearest.id);
+  const result = findPath(
+    Math.round(seedX / cs), Math.round(seedZ / cs),
+    Math.round(target.x / cs), Math.round(target.z / cs),
+    width, height, baseCost,
+  );
   if (result) {
-    const simplified = simplifyPath(result.path, 4.0);
-    const smooth = smoothPath(simplified, cs, 1);
+    const smooth = smoothPath(simplifyPath(result.path, 3.0), cs, 1);
     graph.addEdge(seedNode, nearest.id, {
       points: smooth.slice(1, -1),
       width: 16,
@@ -443,9 +389,6 @@ function connectSeed(graph, seedX, seedZ, baseCost, params) {
   }
 }
 
-/**
- * Add a short waterfront promenade road near the city center (if coastal).
- */
 function addWaterfrontRoad(graph, cityLayers, baseCost) {
   const params = cityLayers.getData('params');
   const elevation = cityLayers.getGrid('elevation');
@@ -457,7 +400,6 @@ function addWaterfrontRoad(graph, cityLayers, baseCost) {
   const centerZ = Math.floor(height / 2);
   const maxRadius = Math.floor(Math.min(width, height) * 0.25);
 
-  // Find waterfront cells near the city center
   const waterfrontCells = [];
   for (let gz = centerZ - maxRadius; gz <= centerZ + maxRadius; gz++) {
     for (let gx = centerX - maxRadius; gx <= centerX + maxRadius; gx++) {
@@ -465,153 +407,109 @@ function addWaterfrontRoad(graph, cityLayers, baseCost) {
       if (elevation.get(gx, gz) < seaLevel) continue;
       if (waterMask && waterMask.get(gx, gz) > 0) continue;
 
-      let adjacentWater = false;
+      let adj = false;
       for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-        const nx = gx + dx;
-        const nz = gz + dz;
-        if (elevation.get(nx, nz) < seaLevel ||
-            (waterMask && waterMask.get(nx, nz) > 0)) {
-          adjacentWater = true;
+        const nx = gx + dx, nz = gz + dz;
+        if (elevation.get(nx, nz) < seaLevel || (waterMask && waterMask.get(nx, nz) > 0)) {
+          adj = true;
           break;
         }
       }
-      if (adjacentWater) waterfrontCells.push({ gx, gz });
+      if (adj) waterfrontCells.push({ gx, gz });
     }
   }
 
   if (waterfrontCells.length < 4) return;
 
-  // Pick two endpoints roughly at opposite ends of the waterfront
-  waterfrontCells.sort((a, b) => {
-    const angleA = Math.atan2(a.gz - centerZ, a.gx - centerX);
-    const angleB = Math.atan2(b.gz - centerZ, b.gx - centerX);
-    return angleA - angleB;
-  });
+  waterfrontCells.sort((a, b) =>
+    Math.atan2(a.gz - centerZ, a.gx - centerX) - Math.atan2(b.gz - centerZ, b.gx - centerX));
 
   const startCell = waterfrontCells[0];
   const endCell = waterfrontCells[Math.floor(waterfrontCells.length / 2)];
 
-  const waterfrontCost = createWaterfrontCostFunction(baseCost, elevation, waterMask, seaLevel, width, height);
-  const result = findPath(startCell.gx, startCell.gz, endCell.gx, endCell.gz, width, height, waterfrontCost);
-  if (!result) return;
-
-  const simplified = simplifyPath(result.path, 4.0);
-  const smooth = smoothPath(simplified, cs, 1);
-  if (smooth.length < 2) return;
-
-  // Add as a single edge with polyline intermediates
-  const startNode = graph.addNode(smooth[0].x, smooth[0].z, { type: 'waterfront' });
-  const endNode = graph.addNode(smooth[smooth.length - 1].x, smooth[smooth.length - 1].z, { type: 'waterfront' });
-  graph.addEdge(startNode, endNode, {
-    points: smooth.slice(1, -1),
-    width: 14,
-    hierarchy: 'structural',
-  });
-
-  // Connect waterfront endpoints to nearest road nodes via pathfinding
-  for (const wfNodeId of [startNode, endNode]) {
-    const wfPos = graph.getNode(wfNodeId);
-    let nearestId = null;
-    let nearestDist = Infinity;
-    for (const [id, node] of graph.nodes) {
-      if (id === startNode || id === endNode) continue;
-      const dx = node.x - wfPos.x;
-      const dz = node.z - wfPos.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist < nearestDist) { nearestDist = dist; nearestId = id; }
-    }
-    if (nearestId !== null && nearestDist < cs * 30) {
-      const target = graph.getNode(nearestId);
-      const wGx = Math.round(wfPos.x / cs);
-      const wGz = Math.round(wfPos.z / cs);
-      const tGx = Math.round(target.x / cs);
-      const tGz = Math.round(target.z / cs);
-      const connResult = findPath(wGx, wGz, tGx, tGz, width, height, baseCost);
-      if (connResult) {
-        const connSmooth = smoothPath(simplifyPath(connResult.path, 4.0), cs, 1);
-        graph.addEdge(wfNodeId, nearestId, {
-          points: connSmooth.slice(1, -1),
-          width: 8,
-          hierarchy: 'structural',
-        });
-      }
-    }
-  }
-}
-
-function createWaterfrontCostFunction(baseCost, elevation, waterMask, seaLevel, w, h) {
-  return function waterfrontCost(fromGx, fromGz, toGx, toGz) {
-    let c = baseCost(fromGx, fromGz, toGx, toGz);
+  const wfCost = (fgx, fgz, tgx, tgz) => {
+    let c = baseCost(fgx, fgz, tgx, tgz);
     if (!isFinite(c)) return c;
-
-    let minWaterDist = Infinity;
-    const searchRadius = 4;
-    for (let dz = -searchRadius; dz <= searchRadius; dz++) {
-      for (let dx = -searchRadius; dx <= searchRadius; dx++) {
-        const nx = toGx + dx;
-        const nz = toGz + dz;
-        if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
-        if (elevation.get(nx, nz) < seaLevel ||
-            (waterMask && waterMask.get(nx, nz) > 0)) {
-          const dist = Math.sqrt(dx * dx + dz * dz);
-          if (dist < minWaterDist) minWaterDist = dist;
+    let minD = Infinity;
+    for (let dz = -4; dz <= 4; dz++) {
+      for (let dx = -4; dx <= 4; dx++) {
+        const nx = tgx + dx, nz = tgz + dz;
+        if (nx < 0 || nx >= width || nz < 0 || nz >= height) continue;
+        if (elevation.get(nx, nz) < seaLevel || (waterMask && waterMask.get(nx, nz) > 0)) {
+          minD = Math.min(minD, Math.sqrt(dx * dx + dz * dz));
         }
       }
     }
-
-    if (minWaterDist <= searchRadius) {
-      c *= 0.3 + (minWaterDist / searchRadius) * 1.0;
-    } else {
-      c *= 3.0;
-    }
+    c *= minD <= 4 ? (0.3 + (minD / 4)) : 3.0;
     return c;
   };
+
+  const result = findPath(startCell.gx, startCell.gz, endCell.gx, endCell.gz, width, height, wfCost);
+  if (!result) return;
+
+  const smooth = smoothPath(simplifyPath(result.path, 3.0), cs, 1);
+  if (smooth.length < 2) return;
+
+  const sn = graph.addNode(smooth[0].x, smooth[0].z, { type: 'waterfront' });
+  const en = graph.addNode(smooth[smooth.length - 1].x, smooth[smooth.length - 1].z, { type: 'waterfront' });
+  graph.addEdge(sn, en, { points: smooth.slice(1, -1), width: 14, hierarchy: 'structural' });
+
+  // Connect endpoints to nearest existing road node
+  for (const wfId of [sn, en]) {
+    const wf = graph.getNode(wfId);
+    let bestId = null, bestDist = Infinity;
+    for (const [id, node] of graph.nodes) {
+      if (id === sn || id === en) continue;
+      const d = Math.sqrt((node.x - wf.x) ** 2 + (node.z - wf.z) ** 2);
+      if (d < bestDist) { bestDist = d; bestId = id; }
+    }
+    if (bestId !== null && bestDist < cs * 30) {
+      const t = graph.getNode(bestId);
+      const r = findPath(
+        Math.round(wf.x / cs), Math.round(wf.z / cs),
+        Math.round(t.x / cs), Math.round(t.z / cs),
+        width, height, baseCost,
+      );
+      if (r) {
+        const sm = smoothPath(simplifyPath(r.path, 3.0), cs, 1);
+        graph.addEdge(wfId, bestId, { points: sm.slice(1, -1), width: 8, hierarchy: 'structural' });
+      }
+    }
+  }
 }
 
 function addFallbackRoads(graph, seedX, seedZ, baseCost, params, rng) {
   const { width, height, cellSize: cs } = params;
   const margin = cs * 5;
 
-  const allDirs = [
-    { x: seedX, z: margin, dir: 'north' },
-    { x: seedX, z: (height - 5) * cs, dir: 'south' },
-    { x: margin, z: seedZ, dir: 'west' },
-    { x: (width - 5) * cs, z: seedZ, dir: 'east' },
+  const dirs = [
+    { x: seedX, z: margin },
+    { x: seedX, z: (height - 5) * cs },
+    { x: margin, z: seedZ },
+    { x: (width - 5) * cs, z: seedZ },
   ];
 
-  for (let i = allDirs.length - 1; i > 0; i--) {
+  for (let i = dirs.length - 1; i > 0; i--) {
     const j = Math.floor(rng.next() * (i + 1));
-    [allDirs[i], allDirs[j]] = [allDirs[j], allDirs[i]];
+    [dirs[i], dirs[j]] = [dirs[j], dirs[i]];
   }
-  const chosen = allDirs.slice(0, 2);
 
   let seedNode = null;
   for (const [id, node] of graph.nodes) {
     if (node.attrs.type === 'seed') { seedNode = id; break; }
   }
-  if (seedNode === null) {
-    seedNode = graph.addNode(seedX, seedZ, { type: 'seed' });
-  }
+  if (!seedNode) seedNode = graph.addNode(seedX, seedZ, { type: 'seed' });
 
-  const seedGx = Math.round(seedX / cs);
-  const seedGz = Math.round(seedZ / cs);
-
-  for (const d of chosen) {
-    const dGx = Math.round(d.x / cs);
-    const dGz = Math.round(d.z / cs);
-    const result = findPath(seedGx, seedGz, dGx, dGz, width, height, baseCost);
+  for (const d of dirs.slice(0, 2)) {
+    const result = findPath(
+      Math.round(seedX / cs), Math.round(seedZ / cs),
+      Math.round(d.x / cs), Math.round(d.z / cs),
+      width, height, baseCost,
+    );
     if (result) {
-      const simplified = simplifyPath(result.path, 4.0);
-      const smooth = smoothPath(simplified, cs, 1);
-      const node = graph.addNode(smooth[smooth.length - 1].x, smooth[smooth.length - 1].z, {
-        type: 'entry',
-        direction: d.dir,
-      });
-      graph.addEdge(seedNode, node, {
-        points: smooth.slice(1, -1),
-        width: 12,
-        hierarchy: 'arterial',
-      });
+      const smooth = smoothPath(simplifyPath(result.path, 3.0), cs, 1);
+      const node = graph.addNode(smooth[smooth.length - 1].x, smooth[smooth.length - 1].z, { type: 'entry' });
+      graph.addEdge(seedNode, node, { points: smooth.slice(1, -1), width: 12, hierarchy: 'arterial' });
     }
   }
 }
