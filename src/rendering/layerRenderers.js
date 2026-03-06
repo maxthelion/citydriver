@@ -237,12 +237,24 @@ export function renderRiversLayer(state) {
   const { cityLayers } = state;
   const params = cityLayers.getData('params');
   const w = params.width, h = params.height;
+  const cs = params.cellSize;
+  const waterType = cityLayers.getGrid('waterType');
   const waterMask = cityLayers.getGrid('waterMask');
 
   const buf = createBuffer(w, h);
 
-  // Water mask overlay
-  if (waterMask) {
+  // Water overlay colored by type
+  if (waterType) {
+    for (let gz = 0; gz < h; gz++) {
+      for (let gx = 0; gx < w; gx++) {
+        const t = waterType.get(gx, gz);
+        if (t === 1) setPixel(buf, gx, gz, 20, 60, 180, 180);      // sea: deep blue
+        else if (t === 2) setPixel(buf, gx, gz, 40, 120, 180, 160); // lake: teal
+        else if (t === 3) setPixel(buf, gx, gz, 50, 100, 200, 160); // river: medium blue
+      }
+    }
+  } else if (waterMask) {
+    // Fallback to unclassified water mask
     for (let gz = 0; gz < h; gz++) {
       for (let gx = 0; gx < w; gx++) {
         if (waterMask.get(gx, gz) > 0) {
@@ -252,28 +264,23 @@ export function renderRiversLayer(state) {
     }
   }
 
-  // River polylines from regional data
-  const regionalLayers = cityLayers.getData('regionalLayers');
-  const rivers = regionalLayers?.getData('rivers');
-  if (rivers) {
-    const rcs = params.regionalCellSize || 50;
-    const minGx = params.regionalMinGx || 0;
-    const minGz = params.regionalMinGz || 0;
-    const cs = params.cellSize;
-
-    function drawRiverSeg(seg) {
-      if (seg.cells && seg.cells.length >= 2) {
-        for (let i = 0; i < seg.cells.length - 1; i++) {
-          const ax = ((seg.cells[i].gx - minGx) * rcs) / cs;
-          const az = ((seg.cells[i].gz - minGz) * rcs) / cs;
-          const bx = ((seg.cells[i + 1].gx - minGx) * rcs) / cs;
-          const bz = ((seg.cells[i + 1].gz - minGz) * rcs) / cs;
-          drawThickLine(buf, ax, az, bx, bz, 50, 120, 220, 2);
-        }
+  // Smooth variable-width river polylines from imported paths
+  const riverPaths = cityLayers.getData('riverPaths');
+  if (riverPaths) {
+    for (const path of riverPaths) {
+      const pts = path.points;
+      if (pts.length < 2) continue;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i];
+        const b = pts[i + 1];
+        const thickness = Math.max(1, Math.round((a.width + b.width) / 2 / cs));
+        drawThickLine(buf,
+          a.x / cs, a.z / cs,
+          b.x / cs, b.z / cs,
+          50, 120, 220, thickness,
+        );
       }
-      for (const child of (seg.children || [])) drawRiverSeg(child);
     }
-    for (const root of rivers) drawRiverSeg(root);
   }
 
   return buf;

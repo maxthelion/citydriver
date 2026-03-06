@@ -64,10 +64,19 @@ export function buildCityWaterMesh(cityLayers) {
  * @returns {THREE.Group}
  */
 export function buildRiverMeshes(cityLayers) {
-  const rivers = cityLayers.getData('rivers');
   const params = cityLayers.getData('params');
   const elevation = cityLayers.getGrid('elevation');
-  if (!rivers || !params || !elevation) return new THREE.Group();
+  if (!params || !elevation) return new THREE.Group();
+
+  // Prefer pre-imported city river paths (smooth, with width)
+  const riverPaths = cityLayers.getData('riverPaths');
+  if (riverPaths && riverPaths.length > 0) {
+    return buildRiverMeshesFromPaths(riverPaths, params, elevation);
+  }
+
+  // Fallback to regional river tree
+  const rivers = cityLayers.getData('rivers');
+  if (!rivers) return new THREE.Group();
 
   // Derive regional cell size from city params
   const regionalCellSize = params.regionalMinGx > 0
@@ -158,6 +167,64 @@ export function buildRiverMeshes(cityLayers) {
   }
 
   for (const root of rivers) processSegment(root);
+
+  if (vertices.length < 6) return new THREE.Group();
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  geom.setIndex(indices);
+  geom.computeVertexNormals();
+
+  const group = new THREE.Group();
+  group.add(new THREE.Mesh(geom, getRiverMaterial()));
+  return group;
+}
+
+/**
+ * Build river ribbon meshes from pre-imported city river paths.
+ * These are already smoothed with per-vertex width.
+ */
+function buildRiverMeshesFromPaths(riverPaths, params, elevation) {
+  const cs = params.cellSize;
+  const vertices = [];
+  const indices = [];
+
+  for (const path of riverPaths) {
+    const pts = path.points;
+    if (pts.length < 2) continue;
+
+    const baseVertex = vertices.length / 3;
+
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      const y = elevation.sample(p.x / cs, p.z / cs) + 1.0;
+      const halfWidth = p.width / 2;
+
+      let dx, dz;
+      if (i < pts.length - 1) {
+        dx = pts[i + 1].x - p.x;
+        dz = pts[i + 1].z - p.z;
+      } else {
+        dx = p.x - pts[i - 1].x;
+        dz = p.z - pts[i - 1].z;
+      }
+
+      const len = Math.sqrt(dx * dx + dz * dz) || 1;
+      const perpX = -dz / len;
+      const perpZ = dx / len;
+
+      vertices.push(
+        p.x + perpX * halfWidth, y, p.z + perpZ * halfWidth,
+        p.x - perpX * halfWidth, y, p.z - perpZ * halfWidth,
+      );
+
+      if (i > 0) {
+        const base = baseVertex + (i - 1) * 2;
+        indices.push(base, base + 1, base + 2);
+        indices.push(base + 1, base + 3, base + 2);
+      }
+    }
+  }
 
   if (vertices.length < 6) return new THREE.Group();
 

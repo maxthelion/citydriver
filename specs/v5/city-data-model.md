@@ -169,8 +169,8 @@ A new function `importRivers(cityLayers, regionalLayers)` called during city set
 | Elevation | Bilinear + Perlin detail | Grid2D float32 10m | OK | OK |
 | Slope | Recomputed from elevation | Grid2D float32 10m | OK | N/A |
 | Water (sea/coast) | Bilinear + threshold | Binary grid + smooth polygons | OK | Flat plane (gap) |
-| Water classification | **Not done** | **No sea/lake/river distinction** | **All same blue** | **All same blue** |
-| Rivers | **Not converted** | Regional tree (50m) | **Zigzag, fixed width** | Smoothed (ad-hoc) |
+| Water classification | Flood-fill from boundary | `waterType` Grid2D uint8 (0=land,1=sea,2=lake,3=river) | Color-coded by type | Flat plane (gap) |
+| Rivers | Chaikin-smoothed, width from accumulation | `riverPaths` [{points: [{x,z,width,accumulation}]}] | Smooth variable-width lines | Ribbon mesh from paths |
 | Anchor roads | Re-pathfound at 10m | PlanarGraph | OK | OK |
 | Growth roads | Pathfound at 10m | Same graph | OK | OK |
 | Terrain fields | Computed from city grids | Grid2D float32 | OK | N/A |
@@ -180,9 +180,9 @@ A new function `importRivers(cityLayers, regionalLayers)` called during city set
 The import pipeline should run in this order (dependencies flow downward):
 
 1. **Extract city context** — bilinear-sample elevation, slope, landCover to 10m (existing)
-2. **Import rivers** — smooth paths, compute widths, paint onto waterMask (new)
-3. **Classify water** — flood-fill to label sea/lake/river cells (new)
-4. **Refine terrain** — Perlin detail, recompute slope, carve channels (existing, now uses classified grid)
-5. **Extract water polygons** — marching squares on classified grid, per-type (existing, enhanced)
+2. **Import rivers** — smooth paths, compute widths, paint onto waterMask (`importRivers.js` — done)
+3. **Classify water** — flood-fill to label sea/lake/river cells (`classifyWater.js` — done)
+4. **Refine terrain** — Perlin detail, recompute slope, carve channels (existing, now uses painted waterMask)
+5. **Extract water polygons** — marching squares on classified grid, per-type (existing, enhancement pending)
 6. **Anchor routes** — re-pathfind regional roads at city resolution (existing)
-7. **Terrain fields** — gradient, water distance, attraction (existing, now water-type-aware)
+7. **Terrain fields** — gradient, water distance, attraction (existing, water-type-aware enhancement pending)

@@ -4,6 +4,8 @@
  */
 
 import { extractCityContext } from './extractCityContext.js';
+import { importRivers } from './importRivers.js';
+import { classifyWater } from './classifyWater.js';
 import { refineTerrain } from './refineTerrain.js';
 import { generateAnchorRoutes } from './generateAnchorRoutes.js';
 import { identifyRiverCrossings } from './riverCrossings.js';
@@ -34,6 +36,9 @@ export function setupCity(regionalLayers, settlement, rng, options = {}) {
 
   const tier = settlement.tier ?? 3;
   cityLayers.setData('targetPopulation', POPULATION_BY_TIER[tier] ?? 2000);
+
+  importRivers(cityLayers);
+  classifyWater(cityLayers);
 
   refineTerrain(cityLayers, rng.fork('cityTerrain'));
 
