@@ -12,11 +12,18 @@ import { SeededRandom } from '../core/rng.js';
  * Shows 3D orbit preview (left) + 2D map (right) + Regenerate/Enter buttons.
  */
 export class RegionScreen {
-  constructor(container, onEnter) {
+  constructor(container, callbacks, initialSeed) {
     this.container = container;
-    this.onEnter = onEnter; // callback(layers, settlement)
+    // Support both old-style (single function) and new-style ({ onEnter, onDebug })
+    if (typeof callbacks === 'function') {
+      this.onEnter = callbacks;
+      this.onDebug = null;
+    } else {
+      this.onEnter = callbacks.onEnter;
+      this.onDebug = callbacks.onDebug || null;
+    }
     this._layers = null;
-    this._seed = Math.floor(Math.random() * 999999);
+    this._seed = initialSeed ?? Math.floor(Math.random() * 999999);
     this._selectedSettlement = null;
 
     this._buildUI();
@@ -82,6 +89,18 @@ export class RegionScreen {
     });
     this._enterBtn.style.opacity = '0.5';
     btnRow.appendChild(this._enterBtn);
+
+    if (this.onDebug) {
+      this._debugBtn = this._makeBtn('Debug City', () => {
+        if (this._layers && this._selectedSettlement && this.onDebug) {
+          this.onDebug(this._layers, this._selectedSettlement, this._seed);
+        }
+      });
+      this._debugBtn.style.opacity = '0.5';
+      this._debugBtn.style.background = '#335';
+      btnRow.appendChild(this._debugBtn);
+    }
+
     rightPanel.appendChild(btnRow);
 
     // Score panel
@@ -118,10 +137,12 @@ export class RegionScreen {
       this._selectedSettlement = settlements[0];
       this._enterBtn.style.opacity = '1';
       this._enterBtn.disabled = false;
+      if (this._debugBtn) { this._debugBtn.style.opacity = '1'; this._debugBtn.disabled = false; }
     } else {
       this._selectedSettlement = null;
       this._enterBtn.style.opacity = '0.5';
       this._enterBtn.disabled = true;
+      if (this._debugBtn) { this._debugBtn.style.opacity = '0.5'; this._debugBtn.disabled = true; }
     }
 
     // Run validators

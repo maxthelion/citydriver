@@ -64,8 +64,10 @@ export function extractCityContext(regionalLayers, settlement, options = {}) {
     const regionalGrid = regionalLayers.getGrid(name);
     if (!regionalGrid) continue;
 
-    const isInteger = name === 'rockType' || name === 'landCover' || name === 'waterMask';
-    const type = isInteger ? 'uint8' : 'float32';
+    const isInteger = name === 'rockType' || name === 'landCover';
+    // waterMask is binary but we bilinear-sample + threshold for smooth edges
+    const smoothBinary = name === 'waterMask';
+    const type = (isInteger || smoothBinary) ? 'uint8' : 'float32';
 
     const cityGrid = new Grid2D(cityWidth, cityHeight, {
       type,
@@ -83,6 +85,10 @@ export function extractCityContext(regionalLayers, settlement, options = {}) {
         if (isInteger) {
           // Nearest-neighbor for categorical data
           cityGrid.set(cx, cz, regionalGrid.get(Math.round(rgx), Math.round(rgz)));
+        } else if (smoothBinary) {
+          // Bilinear interpolation then threshold for smooth binary boundaries
+          const v = regionalGrid.sample(rgx, rgz);
+          cityGrid.set(cx, cz, v >= 0.5 ? 1 : 0);
         } else {
           // Bilinear interpolation for continuous data
           cityGrid.set(cx, cz, regionalGrid.sample(rgx, rgz));
