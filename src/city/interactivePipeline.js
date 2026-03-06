@@ -14,6 +14,8 @@ import { generateInstitutionalPlots } from './generateInstitutionalPlots.js';
 import { extractWaterPolygons } from './extractWaterPolygons.js';
 import { createOccupancyGrid, stampEdge, stampJunction, stampPlot } from './roadOccupancy.js';
 import { Grid2D } from '../core/Grid2D.js';
+import { computeBuildability } from './buildability.js';
+import { connectNuclei } from './connectNuclei.js';
 import {
   computeGradientField,
   computeWaterDistanceField,
@@ -48,6 +50,9 @@ export function setupCity(regionalLayers, settlement, rng, options = {}) {
   const occupancy = createOccupancyGrid(cityLayers.getData('params'));
   cityLayers.setData('occupancy', occupancy);
 
+  // Initial buildability (terrain-only, no occupancy yet)
+  computeBuildability(cityLayers);
+
   const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'));
 
   for (const edgeId of roadGraph.edges.keys()) {
@@ -58,6 +63,8 @@ export function setupCity(regionalLayers, settlement, rng, options = {}) {
       stampJunction(node.x, node.z, 15, occupancy);
     }
   }
+
+  cityLayers.setData('roadGraph', roadGraph);
 
   const { bridgeGrid, bridges } = identifyRiverCrossings(cityLayers);
   cityLayers.setGrid('bridgeGrid', bridgeGrid);
@@ -84,6 +91,12 @@ export function setupCity(regionalLayers, settlement, rng, options = {}) {
   }
 
   cityLayers.setData('roadGraph', roadGraph);
+
+  // Compute buildability — the single source of truth for "can we build here?"
+  computeBuildability(cityLayers, occupancy);
+
+  // Connect all nuclei (Union-Find + MST)
+  connectNuclei(cityLayers, roadGraph, nuclei, occupancy);
 
   // Precompute terrain fields for layer rendering
   const elevation = cityLayers.getGrid('elevation');

@@ -34,6 +34,7 @@ export function seedNuclei(cityLayers, roadGraph, rng) {
   const elevation = cityLayers.getGrid('elevation');
   const slope = cityLayers.getGrid('slope');
   const waterMask = cityLayers.getGrid('waterMask');
+  const buildability = cityLayers.getGrid('buildability');
 
   if (!params || !elevation) return [];
 
@@ -83,7 +84,7 @@ export function seedNuclei(cityLayers, roadGraph, rng) {
 
   // Cap total nuclei by tier
   const tier = settlement?.tier ?? 3;
-  const maxNuclei = tier <= 1 ? 12 : tier <= 2 ? 8 : 6;
+  const maxNuclei = tier <= 1 ? 20 : tier <= 2 ? 14 : 10;
 
   // --- 3. Regional satellites within city bounds ---
   // Sort by tier (more important settlements first)
@@ -100,11 +101,10 @@ export function seedNuclei(cityLayers, roadGraph, rng) {
     const gz = Math.round(localZ / cs);
 
     if (gx < 1 || gx >= w - 1 || gz < 1 || gz >= h - 1) continue;
-    if (elevation.get(gx, gz) < seaLevel) continue;
-    if (waterMask && waterMask.get(gx, gz) > 0) continue;
+    if (buildability && buildability.get(gx, gz) < 0.1) continue;
 
     // Don't place too close to existing nuclei
-    const tooClose = nuclei.some(n => distance2D(gx, gz, n.gx, n.gz) < 8);
+    const tooClose = nuclei.some(n => distance2D(gx, gz, n.gx, n.gz) < 15);
     if (tooClose) continue;
 
     const type = classifyType(gx, gz, {
@@ -118,12 +118,12 @@ export function seedNuclei(cityLayers, roadGraph, rng) {
   // --- 4. Fill geographic niches if needed ---
   // Try placing more nuclei at good terrain sites to reach the target count.
   if (nuclei.length < maxNuclei) {
-    const candidates = findNichesSites(centerGx, centerGz, {
-      elevation, slope, waterMask, waterfrontGrid, roadCells, w, h, cs, seaLevel,
+    const candidates = findNichesSites(centerGx, centerGz, nuclei, {
+      elevation, slope, waterMask, waterfrontGrid, roadCells, w, h, cs, seaLevel, buildability,
     });
     for (const c of candidates) {
       if (nuclei.length >= maxNuclei) break;
-      const tooClose = nuclei.some(n => distance2D(c.gx, c.gz, n.gx, n.gz) < 8);
+      const tooClose = nuclei.some(n => distance2D(c.gx, c.gz, n.gx, n.gz) < 15);
       if (tooClose) continue;
 
       const type = classifyType(c.gx, c.gz, {
@@ -247,31 +247,34 @@ function classifyType(gx, gz, ctx) {
   return 'suburban';
 }
 
-function findNichesSites(centerGx, centerGz, ctx) {
-  const { elevation, slope, waterMask, w, h, seaLevel } = ctx;
+function findNichesSites(centerGx, centerGz, existingNuclei, ctx) {
+  const { w, h, buildability } = ctx;
   const candidates = [];
-  const maxR = Math.min(w, h) * 0.35;
   const step = 5;
+  const margin = 5;
 
-  for (let gz = step; gz < h - step; gz += step) {
-    for (let gx = step; gx < w - step; gx += step) {
-      if (elevation.get(gx, gz) < seaLevel) continue;
-      if (waterMask && waterMask.get(gx, gz) > 0) continue;
-      const s = slope ? slope.get(gx, gz) : 0;
-      if (s > 0.3) continue;
+  for (let gz = margin; gz < h - margin; gz += step) {
+    for (let gx = margin; gx < w - margin; gx += step) {
+      const b = buildability ? buildability.get(gx, gz) : 0;
+      if (b < 0.2) continue;
 
-      const dist = distance2D(gx, gz, centerGx, centerGz);
-      if (dist > maxR || dist < 8) continue;
+      // Minimum distance to any existing nucleus
+      let minNucDist = Infinity;
+      for (const n of existingNuclei) {
+        const d = distance2D(gx, gz, n.gx, n.gz);
+        if (d < minNucDist) minNucDist = d;
+      }
+      if (minNucDist < 15) continue;
 
-      // Score: prefer flat land near center, but accept moderate slopes
-      const slopeFactor = Math.max(0, 1 - s / 0.3);
-      const score = (1 - dist / maxR) * 0.5 + slopeFactor * 0.5;
+      // Score: buildability + spacing from existing nuclei (spread out)
+      const spacingBonus = Math.min(1, minNucDist / 30);
+      const score = b * 0.5 + spacingBonus * 0.5;
       candidates.push({ gx, gz, score });
     }
   }
 
   candidates.sort((a, b) => b.score - a.score);
-  return candidates.slice(0, 8);
+  return candidates.slice(0, 20);
 }
 
 function isNearRoad(gx, gz, roadCells, w, radius) {

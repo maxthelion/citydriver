@@ -175,6 +175,70 @@ function elevationColor(h, seaLevel, min, max) {
 
 // --- Neighborhood rendering ---
 
+const NUCLEUS_COLORS = {
+  oldTown:    [255, 80, 80],
+  waterfront: [80, 150, 255],
+  market:     [255, 180, 50],
+  hilltop:    [180, 130, 80],
+  valley:     [80, 200, 120],
+  roadside:   [180, 180, 180],
+  suburban:   [200, 180, 255],
+};
+
+export function renderNuclei(buf, nuclei, roadGraph, cellSize) {
+  if (!nuclei) return;
+  const cs = cellSize;
+
+  for (const n of nuclei) {
+    const gx = Math.round(n.x / cs);
+    const gz = Math.round(n.z / cs);
+    const c = NUCLEUS_COLORS[n.type] || [255, 255, 255];
+    const radius = n.isPrimary ? 5 : 3;
+
+    // Draw filled circle
+    for (let dz = -radius; dz <= radius; dz++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (dx * dx + dz * dz <= radius * radius) {
+          setPixel(buf, gx + dx, gz + dz, c[0], c[1], c[2]);
+        }
+      }
+    }
+
+    // Draw circle outline
+    for (let angle = 0; angle < Math.PI * 2; angle += 0.1) {
+      const px = Math.round(gx + Math.cos(angle) * (radius + 1));
+      const pz = Math.round(gz + Math.sin(angle) * (radius + 1));
+      setPixel(buf, px, pz, 255, 255, 255);
+    }
+
+    // Label: #id type Ttier pop:target
+    const label = `${n.id} ${n.type} T${n.tier}`;
+    drawLabel(buf, gx + radius + 3, gz - 3, label, c[0], c[1], c[2]);
+
+    // Draw dashed line to nearest road node
+    if (roadGraph) {
+      const nearest = roadGraph.nearestNode(n.x, n.z);
+      if (nearest) {
+        const rnx = Math.round(roadGraph.getNode(nearest.id).x / cs);
+        const rnz = Math.round(roadGraph.getNode(nearest.id).z / cs);
+        // Dashed line effect: draw every other pixel
+        const dx = rnx - gx, dz = rnz - gz;
+        const len = Math.sqrt(dx * dx + dz * dz) || 1;
+        for (let t = 0; t < len; t += 2) {
+          const px = Math.round(gx + (dx / len) * t);
+          const pz = Math.round(gz + (dz / len) * t);
+          setPixel(buf, px, pz, c[0], c[1], c[2], 180);
+        }
+      }
+    }
+
+    // Connected status indicator
+    if (!n.connected) {
+      drawLabel(buf, gx + radius + 3, gz + 5, 'disconn', 255, 80, 80);
+    }
+  }
+}
+
 const NEIGHBORHOOD_COLORS = {
   oldTown:    [255, 80, 80],
   waterfront: [80, 150, 255],
@@ -606,6 +670,11 @@ function renderTile(tileW, tileH, step, idx, cityLayers, roadGraph) {
     case 'amenities':
       renderElevationFaint(tile, elevation, seaLevel);
       renderAmenities(tile, cityLayers.getData('amenities'), cs);
+      break;
+    case 'nuclei':
+      renderElevationFaint(tile, elevation, seaLevel);
+      if (roadGraph) renderRoads(tile, roadGraph, new Set(roadGraph.edges.keys()), null, cs);
+      renderNuclei(tile, step.nuclei, roadGraph, cs);
       break;
     case 'neighborhoods':
       renderNeighborhoods(tile, elevation, seaLevel, step.neighborhoods, step.ownership);

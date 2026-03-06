@@ -3,7 +3,7 @@ import { generateCity } from '../../src/city/pipeline.js';
 import { generateRegion } from '../../src/regional/pipeline.js';
 import { SeededRandom } from '../../src/core/rng.js';
 
-describe('City Pipeline (Phases 7-8)', () => {
+describe('City Pipeline (V4)', () => {
   function makeCity(seed = 42) {
     const rng = new SeededRandom(seed);
     const regionalLayers = generateRegion({ width: 64, height: 64, cellSize: 50, coastEdges: ['west'] }, rng);
@@ -44,56 +44,30 @@ describe('City Pipeline (Phases 7-8)', () => {
     expect(graph.edges.size).toBeGreaterThan(0);
   });
 
-  it('has density field', { timeout: 15000 }, () => {
+  it('has nuclei', () => {
     const city = makeCity();
-    const density = city.getGrid('density');
-    expect(density).toBeDefined();
-
-    // Density should have values in [0, 1]
-    let hasPositive = false;
-    density.forEach((gx, gz, val) => {
-      expect(val).toBeGreaterThanOrEqual(0);
-      expect(val).toBeLessThanOrEqual(1);
-      if (val > 0) hasPositive = true;
-    });
-    expect(hasPositive).toBe(true);
+    const nuclei = city.getData('nuclei');
+    expect(nuclei).toBeDefined();
+    expect(nuclei.length).toBeGreaterThan(0);
+    // Primary nucleus should be oldTown
+    expect(nuclei[0].type).toBe('oldTown');
   });
 
-  it('density is highest near center', () => {
+  it('has occupancy grid', () => {
     const city = makeCity();
-    const density = city.getGrid('density');
-    const params = city.getData('params');
-
-    // Sample a ring near center and edges, compare averages
-    const cx = Math.floor(params.width / 2);
-    const cz = Math.floor(params.height / 2);
-    let centerSum = 0, centerN = 0;
-    let edgeSum = 0, edgeN = 0;
-    const r = 3;
-    for (let dz = -r; dz <= r; dz++) {
-      for (let dx = -r; dx <= r; dx++) {
-        const v = density.get(cx + dx, cz + dz);
-        if (v >= 0) { centerSum += v; centerN++; }
-      }
-    }
-    // Sample all edge cells
-    for (let i = 0; i < params.width; i++) {
-      edgeSum += density.get(i, 0) + density.get(i, params.height - 1);
-      edgeN += 2;
-    }
-    const centerAvg = centerN > 0 ? centerSum / centerN : 0;
-    const edgeAvg = edgeN > 0 ? edgeSum / edgeN : 0;
-
-    expect(centerAvg).toBeGreaterThanOrEqual(edgeAvg);
+    const occupancy = city.getData('occupancy');
+    expect(occupancy).toBeDefined();
+    expect(occupancy.data).toBeInstanceOf(Uint8Array);
+    expect(occupancy.width).toBeGreaterThan(0);
   });
 
-  it('road graph is connected', () => {
+  it('road graph is connected', { timeout: 15000 }, () => {
     const city = makeCity();
     const graph = city.getData('roadGraph');
     expect(graph.isConnected()).toBe(true);
   });
 
-  it('most road seeds not in water', () => {
+  it('most road seeds not in water', { timeout: 15000 }, () => {
     const city = makeCity();
     const graph = city.getData('roadGraph');
     const waterMask = city.getGrid('waterMask');
@@ -111,7 +85,6 @@ describe('City Pipeline (Phases 7-8)', () => {
         if (waterMask.get(gx, gz) > 0) seedsInWater++;
       }
     }
-    // Most seeds should be on land (allow tolerance for river crossings)
     if (totalSeeds > 2) {
       expect(seedsInWater / totalSeeds).toBeLessThan(0.5);
     }

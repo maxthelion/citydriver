@@ -7,7 +7,15 @@
 
 import { polygonArea, polygonCentroid } from '../core/math.js';
 import { getRockInfo } from '../regional/generateGeology.js';
-import { DISTRICT } from './generateDistricts.js';
+
+/** District types. */
+export const DISTRICT = {
+  COMMERCIAL: 0,
+  DENSE_RESIDENTIAL: 1,
+  SUBURBAN: 2,
+  INDUSTRIAL: 3,
+  PARKLAND: 4,
+};
 
 /**
  * Generate buildings from plots.

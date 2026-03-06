@@ -62,6 +62,7 @@ export function generateInstitutionalPlots(cityLayers, roadGraph, rng) {
   const elevation = cityLayers.getGrid('elevation');
   const waterMask = cityLayers.getGrid('waterMask');
   const slope = cityLayers.getGrid('slope');
+  const buildability = cityLayers.getGrid('buildability');
 
   if (!params || !neighborhoods || !density) return [];
 
@@ -87,7 +88,7 @@ export function generateInstitutionalPlots(cityLayers, roadGraph, rng) {
 
     const candidates = findCandidateLocations(
       type, spec, neighborhoods, density, elevation, waterMask, slope,
-      roadGraph, w, h, cs, seaLevel, claimedCells, plots, rng,
+      roadGraph, w, h, cs, seaLevel, claimedCells, plots, rng, buildability,
     );
 
     let placed = 0;
@@ -96,7 +97,7 @@ export function generateInstitutionalPlots(cityLayers, roadGraph, rng) {
 
       const plot = tryPlaceInstitution(
         candidate, spec, type, elevation, waterMask, slope,
-        seaLevel, w, h, cs, claimedCells, roadGraph, rng,
+        seaLevel, w, h, cs, claimedCells, roadGraph, rng, buildability,
       );
 
       if (plot) {
@@ -110,7 +111,7 @@ export function generateInstitutionalPlots(cityLayers, roadGraph, rng) {
   return plots;
 }
 
-function findCandidateLocations(type, spec, neighborhoods, density, elevation, waterMask, slope, roadGraph, w, h, cs, seaLevel, claimedCells, existingPlots, rng) {
+function findCandidateLocations(type, spec, neighborhoods, density, elevation, waterMask, slope, roadGraph, w, h, cs, seaLevel, claimedCells, existingPlots, rng, buildability) {
   const candidates = [];
   const centerGx = Math.floor(w / 2);
   const centerGz = Math.floor(h / 2);
@@ -126,7 +127,7 @@ function findCandidateLocations(type, spec, neighborhoods, density, elevation, w
         for (let dx = -searchRadius; dx <= searchRadius; dx += 2) {
           const gx = oldTown.gx + dx;
           const gz = oldTown.gz + dz;
-          if (!isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h)) continue;
+          if (!isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h, buildability)) continue;
           const dist = Math.sqrt(dx * dx + dz * dz);
           const score = 1.0 - dist / searchRadius;
           candidates.push({ gx, gz, x: gx * cs, z: gz * cs, score });
@@ -146,7 +147,7 @@ function findCandidateLocations(type, spec, neighborhoods, density, elevation, w
       for (const off of offsets) {
         const gx = n.gx + off.dx;
         const gz = n.gz + off.dz;
-        if (!isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h)) continue;
+        if (!isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h, buildability)) continue;
 
         // Prefer nuclei with matching types
         let score = n.importance;
@@ -167,7 +168,7 @@ function findCandidateLocations(type, spec, neighborhoods, density, elevation, w
     const step = 4;
     for (let gz = step; gz < h - step; gz += step) {
       for (let gx = step; gx < w - step; gx += step) {
-        if (!isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h)) continue;
+        if (!isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h, buildability)) continue;
 
         const d = density.get(gx, gz);
         if (d < 0.05 || d > 0.5) continue; // want edges of developed areas, not wilderness
@@ -190,7 +191,7 @@ function findCandidateLocations(type, spec, neighborhoods, density, elevation, w
     const step = 4;
     for (let gz = step; gz < h - step; gz += step) {
       for (let gx = step; gx < w - step; gx += step) {
-        if (!isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h)) continue;
+        if (!isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h, buildability)) continue;
 
         const d = density.get(gx, gz);
         if (d < 0.1 || d > 0.4) continue;
@@ -216,7 +217,7 @@ function findCandidateLocations(type, spec, neighborhoods, density, elevation, w
   return candidates;
 }
 
-function tryPlaceInstitution(candidate, spec, type, elevation, waterMask, slope, seaLevel, w, h, cs, claimedCells, roadGraph, rng) {
+function tryPlaceInstitution(candidate, spec, type, elevation, waterMask, slope, seaLevel, w, h, cs, claimedCells, roadGraph, rng, buildability) {
   const { gx, gz, x, z } = candidate;
 
   // Try several orientations to find one that fits
@@ -247,7 +248,7 @@ function tryPlaceInstitution(candidate, spec, type, elevation, waterMask, slope,
     for (const c of corners) {
       const cgx = Math.round(c.x / cs);
       const cgz = Math.round(c.z / cs);
-      if (!isBuildable(cgx, cgz, elevation, waterMask, slope, seaLevel, w, h)) {
+      if (!isBuildable(cgx, cgz, elevation, waterMask, slope, seaLevel, w, h, buildability)) {
         valid = false;
         break;
       }
@@ -258,7 +259,7 @@ function tryPlaceInstitution(candidate, spec, type, elevation, waterMask, slope,
     if (isAreaOverlapping(corners, cs, claimedCells)) continue;
 
     // Check the interior is mostly buildable
-    if (!isInteriorBuildable(corners, elevation, waterMask, slope, seaLevel, w, h, cs, 0.95)) continue;
+    if (!isInteriorBuildable(corners, elevation, waterMask, slope, seaLevel, w, h, cs, 0.95, buildability)) continue;
 
     const centroid = {
       x: (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4,
@@ -315,11 +316,13 @@ function pointToSegmentDist(px, pz, ax, az, bx, bz) {
   return distance2D(px, pz, ax + t * abx, az + t * abz);
 }
 
-function isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h) {
+function isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h, buildability) {
   if (gx < 2 || gx >= w - 2 || gz < 2 || gz >= h - 2) return false;
+  // Use buildability grid if available (single source of truth)
+  if (buildability) return buildability.get(gx, gz) > 0.1;
+  // Fallback for when buildability hasn't been computed yet
   if (elevation && elevation.get(gx, gz) < seaLevel) return false;
-  if (slope && slope.get(gx, gz) > 0.2) return false;
-  // Check cell and immediate neighbors for water (buffer against coarse grid)
+  if (slope && slope.get(gx, gz) > 0.35) return false;
   if (waterMask) {
     for (let dz = -1; dz <= 1; dz++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -330,7 +333,7 @@ function isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h) {
   return true;
 }
 
-function isInteriorBuildable(corners, elevation, waterMask, slope, seaLevel, w, h, cs, threshold) {
+function isInteriorBuildable(corners, elevation, waterMask, slope, seaLevel, w, h, cs, threshold, buildability) {
   let total = 0;
   let buildable = 0;
   const step = 5; // sample every 5m
@@ -346,7 +349,7 @@ function isInteriorBuildable(corners, elevation, waterMask, slope, seaLevel, w, 
       total++;
       const gx = Math.round(px / cs);
       const gz = Math.round(pz / cs);
-      if (isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h)) buildable++;
+      if (isBuildable(gx, gz, elevation, waterMask, slope, seaLevel, w, h, buildability)) buildable++;
     }
   }
 

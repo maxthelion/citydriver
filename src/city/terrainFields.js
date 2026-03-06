@@ -112,11 +112,11 @@ export function computeTerrainAttraction(elevation, slope, waterDistGrid, w, h, 
       // Waterfront bonus (within 10 cells)
       const waterfrontBonus = wDist < 10 ? 0.4 * (1 - wDist / 10) : 0;
 
-      // Gentle slope bonus (flat land is easy to build)
-      const slopeBonus = s < 0.05 ? 0.3 : s < 0.1 ? 0.2 : s < 0.2 ? 0.1 : 0;
+      // Gentle slope bonus (flat land is easy to build, moderate slopes can be graded)
+      const slopeBonus = s < 0.05 ? 0.3 : s < 0.1 ? 0.25 : s < 0.2 ? 0.15 : s < 0.3 ? 0.05 : 0;
 
-      // Steep slope penalty (only truly steep terrain)
-      const steepPenalty = s > 0.3 ? -0.3 : s > 0.2 ? -0.1 : 0;
+      // Steep slope penalty (only truly steep terrain is unbuildable)
+      const steepPenalty = s > 0.5 ? -0.3 : s > 0.4 ? -0.2 : s > 0.3 ? -0.1 : 0;
 
       const score = Math.max(0, Math.min(1,
         0.3 + waterfrontBonus + slopeBonus + steepPenalty));

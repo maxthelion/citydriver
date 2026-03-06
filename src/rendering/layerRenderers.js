@@ -7,6 +7,7 @@ import {
   createBuffer, setPixel, blendPixel, renderElevation,
   renderNuclei, renderRoads,
 } from './debugTiles.js';
+import { createPathCost } from '../city/pathCost.js';
 
 // Re-export drawLine, drawThickLine, drawLabel from debugTiles via local wrappers
 // since they're not exported. We replicate the minimal pieces we need.
@@ -106,7 +107,7 @@ export function renderClustersLayer(state) {
     const gx = Math.round(n.x / cs);
     const gz = Math.round(n.z / cs);
     const c = NUCLEUS_COLORS[n.type] || [255, 255, 255];
-    const radius = n.id === 0 ? 5 : 3;
+    const radius = n.id === 0 ? 3 : 2;
 
     // Filled circle
     for (let dz = -radius; dz <= radius; dz++) {
@@ -118,15 +119,11 @@ export function renderClustersLayer(state) {
     }
 
     // White outline
-    for (let angle = 0; angle < Math.PI * 2; angle += 0.1) {
+    for (let angle = 0; angle < Math.PI * 2; angle += 0.15) {
       const px = Math.round(gx + Math.cos(angle) * (radius + 1));
       const pz = Math.round(gz + Math.sin(angle) * (radius + 1));
       setPixel(buf, px, pz, 255, 255, 255);
     }
-
-    // Label
-    drawLabel(buf, gx + radius + 3, gz - 3,
-      `${n.id} ${n.type} T${n.tier}`, c[0], c[1], c[2]);
   }
 
   return buf;
@@ -291,52 +288,27 @@ export function renderRiversLayer(state) {
 // ============================================================
 
 export function renderAvailableLandLayer(state) {
-  const { cityLayers, occupancy } = state;
+  const { cityLayers } = state;
   const params = cityLayers.getData('params');
-  const elevation = cityLayers.getGrid('elevation');
-  const waterMask = cityLayers.getGrid('waterMask');
-  const slope = cityLayers.getGrid('slope');
-  const seaLevel = params.seaLevel ?? 0;
   const w = params.width, h = params.height;
-  const cs = params.cellSize;
+  const buildability = cityLayers.getGrid('buildability');
 
   const buf = createBuffer(w, h);
+  if (!buildability) return buf;
 
   for (let gz = 0; gz < h; gz++) {
     for (let gx = 0; gx < w; gx++) {
-      const elev = elevation.get(gx, gz);
-      if (elev < seaLevel) continue;
-      if (waterMask && waterMask.get(gx, gz) > 0) continue;
+      const v = buildability.get(gx, gz);
+      if (v < 0.01) continue;
 
-      const s = slope ? slope.get(gx, gz) : 0;
-
-      // Check occupancy
-      let isOccupied = false;
-      if (occupancy) {
-        const ax = Math.floor((gx * cs) / occupancy.res);
-        const az = Math.floor((gz * cs) / occupancy.res);
-        if (ax >= 0 && ax < occupancy.width && az >= 0 && az < occupancy.height) {
-          isOccupied = occupancy.data[az * occupancy.width + ax] > 0;
-        }
-      }
-
-      if (isOccupied) {
-        // Already used — dim blue
-        setPixel(buf, gx, gz, 80, 80, 200, 60);
-      } else if (s < 0.1) {
-        // Flat — bright green, easy to build
-        setPixel(buf, gx, gz, 60, 220, 80, 120);
-      } else if (s < 0.2) {
-        // Moderate — yellow-green, buildable
-        setPixel(buf, gx, gz, 160, 200, 60, 100);
-      } else if (s < 0.3) {
-        // Steep — orange, difficult but possible
-        setPixel(buf, gx, gz, 220, 160, 40, 80);
-      } else if (s < 0.5) {
-        // Very steep — red, marginal
-        setPixel(buf, gx, gz, 200, 60, 40, 50);
-      }
-      // >0.5: unbuildable, no overlay
+      // Direct visualization of the buildability grid.
+      // Bright green = highly buildable, dim red = marginal.
+      const t = Math.min(1, v);
+      const r = Math.floor(40 + (1 - t) * 180);
+      const g = Math.floor(80 + t * 160);
+      const b = 40;
+      const a = Math.floor(40 + t * 100);
+      setPixel(buf, gx, gz, r, g, b, a);
     }
   }
 
@@ -384,7 +356,94 @@ export function renderHighValueLayer(state) {
 }
 
 // ============================================================
-// Layer 8: River-roads (stub)
+// Layer 8: Path cost
+// ============================================================
+
+export function renderPathCostLayer(state) {
+  const { cityLayers } = state;
+  const params = cityLayers.getData('params');
+  const w = params.width, h = params.height;
+
+  // Use growthRoadCost-like settings (the most common preset)
+  const costFn = createPathCost(cityLayers, {
+    slopePenalty: 0,  // exclude slope — it's direction-dependent, show static cost only
+    reuseDiscount: 0.5,
+    plotPenalty: 5.0,
+  });
+
+  const buf = createBuffer(w, h);
+
+  // Sample static cost at each cell (step from left neighbor; slopePenalty=0 so direction irrelevant)
+  const raw = new Float32Array(w * h);
+  let maxFinite = 0;
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      const fromGx = gx > 0 ? gx - 1 : gx + 1;
+      const c = costFn(fromGx, gz, gx, gz);
+      raw[gz * w + gx] = c;
+      if (isFinite(c) && c > maxFinite) maxFinite = c;
+    }
+  }
+
+  // Render: white = low cost (favoured), black = high cost / impassable
+  const cap = Math.max(1, maxFinite * 0.4);
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      const c = raw[gz * w + gx];
+      if (!isFinite(c)) {
+        setPixel(buf, gx, gz, 0, 0, 0, 200);
+        continue;
+      }
+      const t = 1 - Math.min(1, c / cap);
+      const v = Math.floor(t * 255);
+      setPixel(buf, gx, gz, v, v, v, 180);
+    }
+  }
+
+  return buf;
+}
+
+// ============================================================
+// Layer: Bridges
+// ============================================================
+
+export function renderBridgesLayer(state) {
+  const { cityLayers } = state;
+  const params = cityLayers.getData('params');
+  const w = params.width, h = params.height;
+  const bridges = cityLayers.getData('bridges');
+
+  const buf = createBuffer(w, h);
+  if (!bridges || bridges.length === 0) return buf;
+
+  for (const bridge of bridges) {
+    const { startGx, startGz, endGx, endGz, width: bWidth } = bridge;
+
+    // Thick orange line from bank to bank
+    drawThickLine(buf, startGx, startGz, endGx, endGz, 255, 140, 40, 3);
+
+    // White endpoint circles (radius 2)
+    for (const [px, pz] of [[startGx, startGz], [endGx, endGz]]) {
+      for (let dz = -2; dz <= 2; dz++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          if (dx * dx + dz * dz <= 4) {
+            setPixel(buf, px + dx, pz + dz, 255, 255, 255);
+          }
+        }
+      }
+    }
+
+    // Label bridge width at midpoint
+    const midX = Math.round((startGx + endGx) / 2);
+    const midZ = Math.round((startGz + endGz) / 2);
+    drawLabel(buf, midX + 3, midZ - 3, String(bWidth ?? ''), 255, 200, 100);
+  }
+
+  return buf;
+}
+
+// ============================================================
+// Layer 9: River-roads (stub)
 // ============================================================
 
 export function renderRiverRoadsLayer(state) {
@@ -456,8 +515,10 @@ export const LAYER_NAMES = [
   'connections',
   'arterials',
   'rivers',
+  'bridges',
   'available-land',
   'high-value',
+  'path-cost',
   'river-roads',
   'promenades',
 ];
@@ -468,8 +529,10 @@ export const LAYER_RENDERERS = {
   'connections': renderConnectionsLayer,
   'arterials': renderArterialsLayer,
   'rivers': renderRiversLayer,
+  'bridges': renderBridgesLayer,
   'available-land': renderAvailableLandLayer,
   'high-value': renderHighValueLayer,
+  'path-cost': renderPathCostLayer,
   'river-roads': renderRiverRoadsLayer,
   'promenades': renderPromenadesLayer,
 };

@@ -17,6 +17,8 @@ import { generateAmenities } from './generateAmenities.js';
 import { generateCityLandCover } from './generateLandCover.js';
 import { extractWaterPolygons } from './extractWaterPolygons.js';
 import { createOccupancyGrid, stampEdge, stampJunction, stampPlot } from './roadOccupancy.js';
+import { computeBuildability } from './buildability.js';
+import { connectNuclei } from './connectNuclei.js';
 import { Grid2D } from '../core/Grid2D.js';
 
 const POPULATION_BY_TIER = { 1: 50000, 2: 10000, 3: 2000 };
@@ -71,6 +73,9 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   const occupancy = createOccupancyGrid(cityLayers.getData('params'));
   cityLayers.setData('occupancy', occupancy);
 
+  // Initial buildability (terrain-only, no occupancy yet)
+  computeBuildability(cityLayers);
+
   // C0d: Anchor routes (Phase 1-4 only)
   const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'));
 
@@ -93,7 +98,10 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   if (stop('anchor routes')) { cityLayers.setData('roadGraph', roadGraph); return { cityLayers, roadGraph, steps }; }
   prevEdges = new Set(curEdges);
 
-  // C3b: River crossings
+  // Store roadGraph early so identifyRiverCrossings can read it
+  cityLayers.setData('roadGraph', roadGraph);
+
+  // C3b: River crossings (detected where roads cross water)
   const { bridgeGrid, bridges } = identifyRiverCrossings(cityLayers);
   cityLayers.setGrid('bridgeGrid', bridgeGrid);
   cityLayers.setData('bridges', bridges);
@@ -133,6 +141,19 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   }
 
   steps.push({ name: 'Institutions', render: 'plots' });
+
+  computeBuildability(cityLayers, occupancy);
+
+  // Connect all nuclei (Union-Find + MST)
+  connectNuclei(cityLayers, roadGraph, nuclei, occupancy);
+
+  curEdges = new Set(roadGraph.edges.keys());
+  steps.push({
+    name: 'Nucleus Connections', render: 'roads',
+    edgeIds: new Set(curEdges), newEdgeIds: difference(curEdges, prevEdges),
+  });
+  prevEdges = new Set(curEdges);
+
   if (stop('institutions')) {
     cityLayers.setData('roadGraph', roadGraph);
     return { cityLayers, roadGraph, steps };

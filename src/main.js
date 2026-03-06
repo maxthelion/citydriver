@@ -9,12 +9,13 @@ let regionScreen = null;
 let cityScreen = null;
 let debugScreen = null;
 
-function backToRegion() {
+function backToRegion(seed) {
   if (cityScreen) { cityScreen.dispose(); cityScreen = null; }
   if (debugScreen) { debugScreen.dispose(); debugScreen = null; }
-  history.replaceState(null, '', location.pathname);
+  const url = seed != null ? `?seed=${seed}` : location.pathname;
+  history.replaceState(null, '', url);
   container.innerHTML = '';
-  showRegion();
+  showRegion(seed);
 }
 
 function showRegion(initialSeed) {
@@ -24,31 +25,37 @@ function showRegion(initialSeed) {
       regionScreen = null;
 
       const rng = new SeededRandom(seed || 42);
-      cityScreen = new CityScreen(container, layers, settlement, rng.fork('city'), backToRegion);
+      cityScreen = new CityScreen(container, layers, settlement, rng.fork('city'), seed, () => backToRegion(seed));
     },
     onDebug(layers, settlement, seed) {
       regionScreen.dispose();
       regionScreen = null;
 
-      debugScreen = new DebugScreen(container, layers, settlement, seed, backToRegion);
+      debugScreen = new DebugScreen(container, layers, settlement, seed, () => backToRegion(seed));
     },
   }, initialSeed);
 }
 
-// Check URL for deep-link into debug screen
-const params = new URLSearchParams(location.search);
-if (params.get('mode') === 'debug' && params.has('seed')) {
-  const seed = parseInt(params.get('seed'));
-  const gx = parseInt(params.get('gx'));
-  const gz = parseInt(params.get('gz'));
+// Check URL for deep-link into debug or city screen
+const urlParams = new URLSearchParams(location.search);
+const urlMode = urlParams.get('mode');
+const urlSeed = urlParams.has('seed') ? parseInt(urlParams.get('seed')) : undefined;
 
-  const { layers, settlement } = generateRegionFromSeed(seed, gx, gz);
+if ((urlMode === 'debug' || urlMode === 'city') && urlSeed != null) {
+  const gx = parseInt(urlParams.get('gx'));
+  const gz = parseInt(urlParams.get('gz'));
+
+  const { layers, settlement } = generateRegionFromSeed(urlSeed, gx, gz);
   if (settlement) {
-    debugScreen = new DebugScreen(container, layers, settlement, seed, backToRegion);
+    if (urlMode === 'city') {
+      const rng = new SeededRandom(urlSeed);
+      cityScreen = new CityScreen(container, layers, settlement, rng.fork('city'), urlSeed, () => backToRegion(urlSeed));
+    } else {
+      debugScreen = new DebugScreen(container, layers, settlement, urlSeed, () => backToRegion(urlSeed));
+    }
   } else {
-    showRegion(seed);
+    showRegion(urlSeed);
   }
 } else {
-  const seed = params.has('seed') ? parseInt(params.get('seed')) : undefined;
-  showRegion(seed);
+  showRegion(urlSeed);
 }

@@ -18,6 +18,8 @@ import { generateCityLandCover } from './generateLandCover.js';
 import { extractWaterPolygons } from './extractWaterPolygons.js';
 import { getCityValidators, runValidators } from '../validators/cityValidators.js';
 import { createOccupancyGrid, stampEdge, stampJunction, stampPlot } from './roadOccupancy.js';
+import { computeBuildability } from './buildability.js';
+import { connectNuclei } from './connectNuclei.js';
 import { Grid2D } from '../core/Grid2D.js';
 
 /** Target population by settlement tier. */
@@ -72,6 +74,9 @@ export function generateCity(regionalLayers, settlement, rng, options = {}) {
   const occupancy = createOccupancyGrid(cityLayers.getData('params'));
   cityLayers.setData('occupancy', occupancy);
 
+  // Initial buildability (terrain-only, no occupancy yet)
+  computeBuildability(cityLayers);
+
   // C0d. Anchor routes (Phase 1-4: shared-grid pathfinding)
   const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'));
 
@@ -85,7 +90,10 @@ export function generateCity(regionalLayers, settlement, rng, options = {}) {
     }
   }
 
-  // C3b. River crossings (bridge points)
+  // Store roadGraph early so identifyRiverCrossings can read it
+  cityLayers.setData('roadGraph', roadGraph);
+
+  // C3b. River crossings (bridge points — detected where roads cross water)
   const { bridgeGrid, bridges } = identifyRiverCrossings(cityLayers);
   cityLayers.setGrid('bridgeGrid', bridgeGrid);
   cityLayers.setData('bridges', bridges);
@@ -113,6 +121,12 @@ export function generateCity(regionalLayers, settlement, rng, options = {}) {
   for (const p of institutionalPlots) {
     if (p.vertices) stampPlot(p.vertices, occupancy);
   }
+
+  // Compute buildability — the single source of truth for "can we build here?"
+  computeBuildability(cityLayers, occupancy);
+
+  // Connect all nuclei to road network and to each other (Union-Find + MST)
+  connectNuclei(cityLayers, roadGraph, nuclei, occupancy);
 
   // ============================================================
   // Phase 1: Growth loop

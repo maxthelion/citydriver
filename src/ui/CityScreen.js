@@ -5,7 +5,6 @@ import { buildBuildingMeshes } from '../rendering/buildingMesh.js';
 import { buildRoadMeshes } from '../rendering/roadMesh.js';
 import { buildCityTerrainMesh } from '../rendering/terrainMesh.js';
 import { buildCityWaterMesh, buildRiverMeshes } from '../rendering/waterMesh.js';
-import { buildParkMeshes } from '../rendering/parkMesh.js';
 import { renderMap, drawRivers, drawRoads, drawSettlements } from '../rendering/mapRenderer.js';
 import { LoadingOverlay } from './LoadingOverlay.js';
 
@@ -18,13 +17,25 @@ export class CityScreen {
    * @param {import('../core/LayerStack.js').LayerStack} regionalLayers
    * @param {object} settlement
    * @param {import('../core/rng.js').SeededRandom} rng
+   * @param {number} seed
    * @param {function} onBack - callback when user clicks "Back to Region"
    */
-  constructor(container, regionalLayers, settlement, rng, onBack) {
+  constructor(container, regionalLayers, settlement, rng, seed, onBack) {
     this.container = container;
     this.onBack = onBack;
     this._regionalLayers = regionalLayers;
+    this._seed = seed;
     this._hud = [];
+
+    // Push seed into URL
+    if (seed != null) {
+      const params = new URLSearchParams();
+      params.set('mode', 'city');
+      params.set('seed', seed);
+      params.set('gx', settlement.gx);
+      params.set('gz', settlement.gz);
+      history.replaceState(null, '', '?' + params.toString());
+    }
 
     // Show loading overlay, generate city, then build scene
     const loading = new LoadingOverlay(container);
@@ -89,13 +100,14 @@ export class CityScreen {
       this._layers.buildings = buildingGroup;
     }
 
-    // Parks
-    const amenities = cityLayers.getData('amenities');
-    if (amenities && amenities.length > 0) {
-      const parks = buildParkMeshes(amenities, elevation);
-      this._app.add(parks);
-      this._layers.parks = parks;
-    }
+    // Parks — disabled, green disks don't look right
+    // TODO: replace with proper park geometry (trees, fenced areas, etc.)
+    // const amenities = cityLayers.getData('amenities');
+    // if (amenities && amenities.length > 0) {
+    //   const parks = buildParkMeshes(amenities, elevation);
+    //   this._app.add(parks);
+    //   this._layers.parks = parks;
+    // }
 
     // Position camera at city center, elevated
     const params = cityLayers.getData('params');
@@ -162,6 +174,7 @@ export class CityScreen {
       'position:fixed;top:200px;right:10px;background:rgba(0,0,0,0.7);color:#eee;font-family:monospace;font-size:12px;padding:10px;border-radius:4px;z-index:100;max-height:60vh;overflow-y:auto';
     const bCount = buildings ? buildings.length : 0;
     const rCount = roadGraph ? roadGraph.edges.size : 0;
+    const amenities = cityLayers.getData('amenities');
     const aCount = amenities ? amenities.length : 0;
     const population = cityLayers.getData('population') ?? 0;
     const targetPop = cityLayers.getData('targetPopulation') ?? 0;
@@ -169,6 +182,7 @@ export class CityScreen {
 
     const lines = [
       `<b>City Stats</b>`,
+      `Seed: ${this._seed ?? '—'}`,
       `Population: ${Math.round(population)} / ${targetPop}`,
       `Buildings: ${bCount}`,
       `Road segments: ${rCount}`,
