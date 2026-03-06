@@ -77,7 +77,7 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   computeBuildability(cityLayers);
 
   // C0d: Anchor routes (Phase 1-4 only)
-  const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'));
+  const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'), occupancy);
 
   // Stamp all anchor route edges + junctions onto occupancy
   for (const edgeId of roadGraph.edges.keys()) {

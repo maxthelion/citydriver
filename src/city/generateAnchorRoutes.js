@@ -1,28 +1,27 @@
 /**
  * C3. Anchor routes — inherit regional roads as a merged network.
  *
- * Instead of adding each regional road as an independent edge, we:
- *   1. Pathfind all roads onto a shared grid (with road-reuse discount)
- *   2. Build a cell-level usage map (which cells are used by any road)
- *   3. Extract the network as connected segments with junctions where
- *      roads meet, merge, or split
- *   4. Convert segments to graph edges
- *
- * This guarantees no overlapping roads by construction.
+ * Pathfinds each regional road onto the city grid with a reuse discount,
+ * then merges shared portions via mergeRoadPaths so overlapping roads
+ * produce proper junctions and shared segments.
  */
 
 import { PlanarGraph } from '../core/PlanarGraph.js';
 import { Grid2D } from '../core/Grid2D.js';
 import { findPath, simplifyPath, smoothPath } from '../core/pathfinding.js';
 import { anchorRouteCost } from './pathCost.js';
-// Note: stampEdge/stampJunction are used by the pipeline after anchor routes return.
+import { addMergedRoads } from './roadNetwork.js';
+
+const HIER_RANK = { arterial: 1, collector: 2, structural: 3 };
+const HIER_IMPORTANCE = { arterial: 0.9, collector: 0.6, structural: 0.45 };
 
 /**
  * @param {import('../core/LayerStack.js').LayerStack} cityLayers
  * @param {import('../core/rng.js').SeededRandom} rng
+ * @param {object|null} [occupancy] - occupancy grid for stamping
  * @returns {PlanarGraph}
  */
-export function generateAnchorRoutes(cityLayers, rng) {
+export function generateAnchorRoutes(cityLayers, rng, occupancy) {
   const graph = new PlanarGraph();
   const params = cityLayers.getData('params');
   const elevation = cityLayers.getGrid('elevation');
@@ -40,15 +39,15 @@ export function generateAnchorRoutes(cityLayers, rng) {
 
   // --- Phase 1: Pathfind all roads onto a shared grid ---
 
-  // Usage grid: how many roads use each cell (0 = no road)
-  const usageGrid = new Grid2D(w, h, { type: 'uint8' });
-  // Hierarchy grid: highest hierarchy touching each cell (0=none, 1=arterial, 2=collector, 3=structural)
-  const hierarchyGrid = new Grid2D(w, h, { type: 'uint8' });
+  const roadGrid = new Grid2D(w, h, { type: 'uint8' });
 
-  const HIER_RANK = { arterial: 1, collector: 2, structural: 3 };
-
-  // Cost function that strongly rewards reusing existing road cells
+  // Cost function: existing road cells get fixed low cost
   const sharedCost = (fromGx, fromGz, toGx, toGz) => {
+    if (roadGrid.get(toGx, toGz) > 0) {
+      const dx = toGx - fromGx, dz = toGz - fromGz;
+      return Math.sqrt(dx * dx + dz * dz) * 0.3;
+    }
+
     const dx = toGx - fromGx;
     const dz = toGz - fromGz;
     const dist = Math.sqrt(dx * dx + dz * dz);
@@ -60,193 +59,32 @@ export function generateAnchorRoutes(cityLayers, rng) {
     if (waterMask && waterMask.get(toGx, toGz) > 0) c += 50;
     if (seaLevel !== null && elevation.get(toGx, toGz) < seaLevel) c += 50;
 
-    // Strong discount for reusing existing road cells
-    if (usageGrid.get(toGx, toGz) > 0) c *= 0.15;
-
     return c;
   };
 
-  // Pathfind each regional road and stamp onto usage grid
-  const allPaths = []; // array of { cells: [{gx,gz}], hierarchy }
-
-  // Sort: arterials first (they define the primary network others merge into)
+  // Sort: arterials first
   const sortedRoads = regionalRoads
     .filter(r => r.hierarchy !== 'local')
     .sort((a, b) => (HIER_RANK[a.hierarchy] || 9) - (HIER_RANK[b.hierarchy] || 9));
+
+  const rawPaths = []; // { cells, rank } for mergeRoadPaths
 
   for (const road of sortedRoads) {
     const path = pathfindRegionalRoad(road, params, elevation, waterMask, sharedCost);
     if (!path || path.length < 2) continue;
 
     const hierarchy = road.hierarchy || 'arterial';
-    const rank = HIER_RANK[hierarchy] || 9;
 
-    // Stamp onto usage grid
-    for (const cell of path) {
-      const prev = usageGrid.get(cell.gx, cell.gz);
-      usageGrid.set(cell.gx, cell.gz, prev + 1);
-      const prevH = hierarchyGrid.get(cell.gx, cell.gz);
-      if (prevH === 0 || rank < prevH) {
-        hierarchyGrid.set(cell.gx, cell.gz, rank);
-      }
-    }
+    // Stamp onto road grid so later roads get reuse discount
+    for (const cell of path) roadGrid.set(cell.gx, cell.gz, 1);
 
-    allPaths.push({ cells: path, hierarchy });
+    const importance = HIER_IMPORTANCE[hierarchy] || 0.45;
+    rawPaths.push({ cells: path, importance });
   }
 
-  // --- Phase 2: Extract network from usage grid ---
+  // --- Phase 2+3: Merge shared segments + add to graph ---
 
-  // Find junction cells: cells with road usage that have != 2 road neighbours
-  // (endpoints have 1 neighbour, junctions have 3+)
-  const junctionSet = new Set(); // "gx,gz" strings
-
-  for (let gz = 0; gz < h; gz++) {
-    for (let gx = 0; gx < w; gx++) {
-      if (usageGrid.get(gx, gz) === 0) continue;
-
-      let roadNeighbors = 0;
-      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
-        const nx = gx + dx, nz = gz + dz;
-        if (nx >= 0 && nx < w && nz >= 0 && nz < h && usageGrid.get(nx, nz) > 0) {
-          roadNeighbors++;
-        }
-      }
-
-      // Junction if: endpoint (<=1 neighbor), branch point (>=3 neighbors),
-      // or multiple roads converge (usage > 1 and neighbors suggest branching)
-      if (roadNeighbors !== 2 || usageGrid.get(gx, gz) > 1) {
-        // For high-usage cells, only mark as junction if neighbors change usage count
-        // (i.e., this is where roads actually merge/split)
-        if (usageGrid.get(gx, gz) > 1) {
-          let usageChanges = false;
-          for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-            const nx = gx + dx, nz = gz + dz;
-            if (nx >= 0 && nx < w && nz >= 0 && nz < h) {
-              if (usageGrid.get(nx, nz) > 0 && usageGrid.get(nx, nz) !== usageGrid.get(gx, gz)) {
-                usageChanges = true;
-                break;
-              }
-            }
-          }
-          if (usageChanges || roadNeighbors !== 2) {
-            junctionSet.add(`${gx},${gz}`);
-          }
-        } else {
-          junctionSet.add(`${gx},${gz}`);
-        }
-      }
-    }
-  }
-
-  // --- Phase 3: Trace segments between junctions ---
-
-  const visited = new Grid2D(w, h, { type: 'uint8' });
-  const segments = []; // array of { cells: [{gx,gz}], hierarchy }
-
-  for (const jKey of junctionSet) {
-    const [jgx, jgz] = jKey.split(',').map(Number);
-
-    // Walk in each direction from this junction
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
-      const nx = jgx + dx, nz = jgz + dz;
-      if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
-      if (usageGrid.get(nx, nz) === 0) continue;
-
-      // Check if we already traced this direction
-      const edgeKey = `${jgx},${jgz}->${nx},${nz}`;
-      if (visited.get(nx, nz) && !junctionSet.has(`${nx},${nz}`)) continue;
-
-      // Trace along road cells until we hit another junction or dead end
-      const segment = [{ gx: jgx, gz: jgz }];
-      let cx = nx, cz = nz;
-      let px = jgx, pz = jgz;
-
-      while (true) {
-        segment.push({ gx: cx, gz: cz });
-
-        if (junctionSet.has(`${cx},${cz}`)) break; // reached another junction
-
-        // Find next unvisited road neighbor (not the one we came from)
-        let found = false;
-        for (const [ddx, ddz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
-          const nnx = cx + ddx, nnz = cz + ddz;
-          if (nnx === px && nnz === pz) continue; // don't go back
-          if (nnx < 0 || nnx >= w || nnz < 0 || nnz >= h) continue;
-          if (usageGrid.get(nnx, nnz) === 0) continue;
-
-          px = cx;
-          pz = cz;
-          cx = nnx;
-          cz = nnz;
-          found = true;
-          break;
-        }
-
-        if (!found) break; // dead end
-      }
-
-      if (segment.length < 2) continue;
-
-      // Check this segment isn't a duplicate (reverse of already traced)
-      const startKey = `${segment[0].gx},${segment[0].gz}`;
-      const endKey = `${segment[segment.length - 1].gx},${segment[segment.length - 1].gz}`;
-      const segKey = startKey < endKey ? `${startKey}|${endKey}` : `${endKey}|${startKey}`;
-
-      if (!segments.some(s => {
-        const sk = `${s.cells[0].gx},${s.cells[0].gz}`;
-        const ek = `${s.cells[s.cells.length - 1].gx},${s.cells[s.cells.length - 1].gz}`;
-        const k = sk < ek ? `${sk}|${ek}` : `${ek}|${sk}`;
-        return k === segKey;
-      })) {
-        // Determine hierarchy from the cells in this segment
-        let bestHier = 9;
-        for (const cell of segment) {
-          const h = hierarchyGrid.get(cell.gx, cell.gz);
-          if (h > 0 && h < bestHier) bestHier = h;
-        }
-        const hierarchy = bestHier === 1 ? 'arterial' : bestHier === 2 ? 'collector' : 'structural';
-
-        segments.push({ cells: segment, hierarchy });
-      }
-    }
-  }
-
-  // --- Phase 4: Convert segments to graph edges ---
-
-  const nodeMap = new Map(); // "gx,gz" -> nodeId
-
-  function getNode(gx, gz) {
-    const key = `${gx},${gz}`;
-    if (nodeMap.has(key)) return nodeMap.get(key);
-    const id = graph.addNode(gx * cs, gz * cs, { type: 'inherited' });
-    nodeMap.set(key, id);
-    return id;
-  }
-
-  for (const seg of segments) {
-    if (seg.cells.length < 2) continue;
-
-    const startCell = seg.cells[0];
-    const endCell = seg.cells[seg.cells.length - 1];
-
-    const startNode = getNode(startCell.gx, startCell.gz);
-    const endNode = getNode(endCell.gx, endCell.gz);
-    if (startNode === endNode) continue;
-    if (graph.neighbors(startNode).includes(endNode)) continue;
-
-    // Simplify and smooth the segment
-    const simplified = simplifyPath(seg.cells, 3.0);
-    const smooth = smoothPath(simplified, cs, 1);
-    if (smooth.length < 2) continue;
-
-    const roadWidth = seg.hierarchy === 'arterial' ? 16 : seg.hierarchy === 'collector' ? 12 : 14;
-
-    graph.addEdge(startNode, endNode, {
-      points: smooth.slice(1, -1),
-      width: roadWidth,
-      hierarchy: seg.hierarchy,
-    });
-  }
+  addMergedRoads(graph, rawPaths, cs, occupancy);
 
   // Mark the city-center seed node
   const seedX = Math.floor(w / 2) * cs;
@@ -263,20 +101,15 @@ export function generateAnchorRoutes(cityLayers, rng) {
 
 // --- Helpers ---
 
-/**
- * Pathfind a regional road through the city grid, returning grid-cell path.
- */
 function pathfindRegionalRoad(road, params, elevation, waterMask, costFn) {
-  const { width: w, height: h, cellSize: cs, regionalCellSize, regionalMinGx, regionalMinGz, seaLevel } = params;
+  const { width: w, height: h, cellSize: cs, regionalCellSize, regionalMinGx, regionalMinGz } = params;
   const rcs = regionalCellSize || 50;
   const maxX = (w - 1) * cs;
   const maxZ = (h - 1) * cs;
 
   if (!road.path || road.path.length < 2) return null;
-
   const sourcePath = road.rawPath || road.path;
 
-  // Convert to city-local world coords and clip
   const worldPts = sourcePath.map(p => ({
     x: (p.gx - regionalMinGx) * rcs,
     z: (p.gz - regionalMinGz) * rcs,
@@ -298,9 +131,6 @@ function pathfindRegionalRoad(road, params, elevation, waterMask, costFn) {
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
-/**
- * Clip a world-coord path to [0, maxX] x [0, maxZ].
- */
 function clipPathToBounds(worldPts, maxX, maxZ) {
   const result = [];
   const isInside = p => p.x >= 0 && p.x <= maxX && p.z >= 0 && p.z <= maxZ;
@@ -354,9 +184,6 @@ function interpolateBoundaryCrossing(outside, inside, maxX, maxZ) {
   };
 }
 
-/**
- * Mark (or create) the city seed node at the center of the graph.
- */
 function markSeedNode(graph, seedX, seedZ, cs) {
   if (graph.nodes.size === 0) {
     graph.addNode(seedX, seedZ, { type: 'seed' });

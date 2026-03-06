@@ -53,7 +53,7 @@ export function setupCity(regionalLayers, settlement, rng, options = {}) {
   // Initial buildability (terrain-only, no occupancy yet)
   computeBuildability(cityLayers);
 
-  const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'));
+  const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'), occupancy);
 
   for (const edgeId of roadGraph.edges.keys()) {
     stampEdge(roadGraph, edgeId, occupancy);
