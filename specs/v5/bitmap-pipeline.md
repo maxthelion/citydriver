@@ -1,6 +1,6 @@
 # V5: Unified Bitmap Pipeline
 
-## Status: In Progress
+## Status: Implemented
 
 ## Problem
 
@@ -33,27 +33,28 @@ These are set once during setup and never modified after refineTerrain completes
 
 Modified throughout the pipeline as roads and plots are stamped. Values: 0=empty, 1=road, 2=plot, 3=junction.
 
+Carries an attached reference to the buildability grid so stamp operations can incrementally update it.
+
 ### Derived Bitmap 1: buildability (float32, 0–1)
 
 **The single source of truth for "can we build here and how desirable is it?"**
 
 ```
-buildability = f(elevation, slope, waterMask, waterType, occupancy, waterDistance, edgeMargin)
+buildability = f(elevation, slope, waterMask, waterType, waterDistance, edgeMargin)
 ```
 
-Composites all contributing factors into one grid:
+Composites terrain factors into one grid:
 
 | Factor | Effect |
 |--------|--------|
 | elevation < seaLevel | 0 (hard block) |
-| waterMask > 0 | 0 (hard block) |
+| waterMask > 0 | 0 (hard block, with river-edge gradient) |
 | slope | continuous falloff: flat=1.0 → steep=0 |
-| occupancy > 0 | 0 (already used) |
 | edge margin < 3 cells | 0 (hard block) |
 | edge margin 3–8 cells | scaled down |
 | water proximity | bonus for waterfront cells |
 
-**Recomputed** after any operation that modifies occupancy (road stamping, plot stamping).
+**Computed once** from terrain during setup. After that, **incrementally updated**: stamp operations (roads, plots, junctions) zero out affected buildability cells automatically via the occupancy grid's attached buildability reference. No expensive full-grid recompute needed.
 
 **Consumed by:** nuclei seeding, institutional plot placement, growth target validation, block subdivision plot validation, the debug layer visualization.
 
@@ -62,90 +63,77 @@ Composites all contributing factors into one grid:
 **The single source of truth for "what does it cost to route through this cell?"**
 
 ```
-pathCost = f(elevation, waterMask, bridgeGrid, occupancy, buildability)
+pathCost = f(elevation, buildability, bridgeGrid, occupancy)
 ```
 
 One function, parameterized for different use cases:
 
-| Parameter | Default | Anchor Routes | Growth | Satellite | Bridge |
-|-----------|---------|---------------|--------|-----------|--------|
-| slopePenalty | 10 | 10 | 10 | 10 | 3 |
-| waterCost | Infinity | Infinity | Infinity | Infinity | ×8 |
-| allowBridges | true | true | true | true | true |
-| reuseDiscount | 0.5 | 0.15 | 0.5 | 0.15 | 0.1 |
-| plotPenalty | 5.0 | 5.0 | 5.0 | 5.0 | 5.0 |
-| lowBuildabilityPenalty | yes | no | yes | no | no |
+| Parameter | Default | Anchor Routes | Growth | Satellite | Nucleus | Shortcut | Bridge |
+|-----------|---------|---------------|--------|-----------|---------|----------|--------|
+| slopePenalty | 10 | 10 | 10 | 10 | 5 | 8 | 3 |
+| unbuildableCost | ∞ | ∞ | ∞ | ∞ | 12 | 20 | 8 |
+| reuseDiscount | 0.5 | 0.15 | 0.5 | 0.15 | 0.1 | 1.0 | 0.1 |
+| plotPenalty | 5.0 | 5.0 | 5.0 | 5.0 | 3.0 | 3.0 | 5.0 |
 
-Key change: **pathCost reads buildability** for the low-buildability penalty rather than re-deriving slope/water checks. A cell with buildability=0.1 gets a high traversal cost even if no single factor is a hard block.
+**Critical ordering:** pathCost checks occupancy *before* buildability. Road/junction cells get the reuse discount and return early, so their zeroed-out buildability doesn't block pathfinding. Plot cells get the penalty. Only genuinely unbuildable terrain (water, cliffs, edges) triggers the unbuildableCost path.
 
-### Feedback Loop
+### Incremental Update Flow
 
 ```
 Setup:
   extractCityContext → importRivers → classifyWater → refineTerrain
   → create occupancy grid
-  → computeBuildability (initial, no occupancy)
+  → computeBuildability (terrain-only, computed once)
+  → attachBuildability (wire occupancy → buildability)
+  ── from here, every stamp() zeroes buildability cells automatically ──
   → generateAnchorRoutes (using pathCost)
-  → stamp roads onto occupancy
-  → computeBuildability (with road occupancy)
+  → stamp roads onto occupancy          ← buildability updated
   → seedNuclei (reads buildability)
   → generateInstitutionalPlots (reads buildability)
-  → stamp plots onto occupancy
-  → computeBuildability (with roads + plots)
+  → stamp plots onto occupancy          ← buildability updated
+  → connectNuclei (MST + shortcuts)
+  → stamp roads onto occupancy          ← buildability updated
 
 Growth (per tick):
   → select targets (reads buildability for priority)
-  → pathfind roads (using pathCost, which reads buildability)
-  → stamp new roads onto occupancy
+  → pathfind roads (using pathCost, reads buildability + occupancy)
+  → stamp new roads onto occupancy      ← buildability updated
   → subdivide blocks into plots
-  → stamp plots onto occupancy
-  → computeBuildability (updated)
+  → stamp plots onto occupancy          ← buildability updated
   → next tick reads updated surface
 ```
 
+No full recompute at any stage. The buildability grid is always up-to-date because every stamp operation zeros the affected cells in O(affected cells).
+
 ## Implementation
 
-### Phase 1: buildability.js (consolidate)
+### buildability.js
 
-Update `computeBuildability` to include water distance bonus (from terrainFields) so it fully replaces both the old buildability check AND terrainAttraction as the "desirability" surface.
+`computeBuildability(cityLayers)` — terrain-only, no occupancy parameter. Computed once during setup. Returns the Grid2D which is then attached to the occupancy grid via `attachBuildability()`.
 
-### Phase 2: pathCost.js (new, consolidate)
+### roadOccupancy.js
 
-Create a single parameterized cost function factory that replaces:
-- `terrainCostFunction` in pathfinding.js
-- `sharedCost` in generateAnchorRoutes.js
-- `buildGrowthCostFn` in growCity.js
-- `satCost` in growCity.js
-- `bridgeCost` in growCity.js
+`attachBuildability(occupancy, buildability)` — stores a reference to the buildability grid on the occupancy object. The low-level stamp helpers (`stampPolyOnGrid`, `stampCircleOnGrid`) check for this reference and zero corresponding buildability cells as they mark occupancy cells. The mapping from 3m occupancy cells to 10m buildability cells is: `bgx = floor(ax * res / cityCS)`.
 
-### Phase 3: Migrate consumers
+### pathCost.js
 
-Replace all ad-hoc buildability checks with reads from the buildability grid:
-- `generateInstitutionalPlots.isBuildable()` → `buildability.get(gx, gz) > 0`
-- `blockSubdivision.isPlotBuildableSimple()` → `buildability.get(gx, gz) > 0`
-- `seedNuclei` validation → `buildability.get(gx, gz) > threshold`
-- `growCity` target validation → `buildability.get(gx, gz) > 0`
-- `generateLandCover` water/elevation checks → `buildability.get(gx, gz)`
+Single parameterized cost function factory. Check order:
+1. **Occupancy** — road/junction → early return with reuse discount; plot → penalty
+2. **Bridge** — bridgeGrid cells bypass unbuildable water
+3. **Buildability** — terrain suitability (b < 0.01 = unbuildable, b < 0.3 = moderate penalty)
 
-### Phase 4: Recompute points
-
-Wire `computeBuildability` at every point occupancy changes:
-- After anchor route stamping
-- After institutional plot stamping
-- After each growth tick (roads + plots stamped)
+Presets: `anchorRouteCost`, `growthRoadCost`, `satelliteCost`, `nucleusConnectionCost`, `shortcutRoadCost`, `bridgeCost`.
 
 ## Files
 
 | Action | File | Change |
 |--------|------|--------|
-| Modify | `src/city/buildability.js` | Add water distance bonus, formalize as the canonical buildability surface |
-| Create | `src/city/pathCost.js` | Single parameterized cost function factory |
-| Modify | `src/city/interactivePipeline.js` | Recompute buildability at each stage |
-| Modify | `src/city/pipeline.js` | Same |
-| Modify | `src/city/pipelineDebug.js` | Same |
-| Modify | `src/city/generateAnchorRoutes.js` | Use pathCost instead of inline cost function |
-| Modify | `src/city/growCity.js` | Use pathCost + buildability instead of 4 inline cost functions + ad-hoc checks |
-| Modify | `src/city/generateInstitutionalPlots.js` | Replace isBuildable with buildability grid read |
-| Modify | `src/city/blockSubdivision.js` | Replace isPlotBuildableSimple with buildability grid read |
-| Modify | `src/city/seedNuclei.js` | Replace elevation/water checks with buildability grid read |
-| Modify | `src/rendering/layerRenderers.js` | available-land layer directly shows buildability (already done) |
+| Done | `src/city/buildability.js` | Terrain-only computation, no occupancy parameter |
+| Done | `src/city/roadOccupancy.js` | `attachBuildability()`, incremental zeroing in stamp helpers |
+| Done | `src/city/pathCost.js` | Occupancy-first check order, parameterized presets |
+| Done | `src/city/pipeline.js` | Single `computeBuildability` + `attachBuildability`, no recomputes |
+| Done | `src/city/interactivePipeline.js` | Same |
+| Done | `src/city/pipelineDebug.js` | Same |
+| Done | `src/city/growCity.js` | No periodic recompute, stable grid reference |
+| Done | `src/city/connectNuclei.js` | No manual recompute between phases |
+| Done | `src/rendering/layerRenderers.js` | Available-land layer directly shows buildability |

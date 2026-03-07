@@ -108,10 +108,11 @@ CITY (10m cells)
      → Output: carved elevation, riverDist grid
 
   6. buildability.js
-     - Uses riverDist for soft gradient at river edges
+     - Computed once from terrain (including riverDist for soft gradient)
      - Deep channel: unbuildable (0)
      - River edge (nd 0.8-1.0): marginal (0-0.15)
      - Dry land: normal scoring with waterfront bonus
+     - Incrementally updated: stamp operations zero affected cells
 ```
 
 ## Data flow
