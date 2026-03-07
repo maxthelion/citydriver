@@ -377,11 +377,24 @@ export class CompareScreen {
 
   _updateInfo() {
     if (!this.infoDiv) return;
-    const lines = [`Tick: ${this.currentTick}`];
+    const lines = [`Tick: ${this.currentTick}`, ''];
     for (let i = 0; i < 4; i++) {
       const m = this.maps[i];
       if (m) {
-        lines.push(`${STRATEGY_NAMES[i]}: ${m.roads.length} roads`);
+        const faces = m.graph.faces();
+        const simpleFaces = faces.filter(f => f.length === new Set(f).size);
+        let totalLength = 0;
+        for (const road of m.roads) {
+          if (!road.polyline) continue;
+          for (let j = 0; j < road.polyline.length - 1; j++) {
+            const dx = road.polyline[j + 1].x - road.polyline[j].x;
+            const dz = road.polyline[j + 1].z - road.polyline[j].z;
+            totalLength += Math.sqrt(dx * dx + dz * dz);
+          }
+        }
+        lines.push(`<b>${STRATEGY_NAMES[i]}</b>`);
+        lines.push(`  ${m.roads.length} roads, ${Math.round(totalLength)}m`);
+        lines.push(`  ${simpleFaces.length} faces`);
       }
     }
     this.infoDiv.innerHTML = lines.join('<br>');
