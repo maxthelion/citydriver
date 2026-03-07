@@ -6,10 +6,23 @@ import { OffsetInfill } from '../city/strategies/offsetInfill.js';
 import { FrontagePressure } from '../city/strategies/frontagePressure.js';
 import { TriangleMergeSubdiv } from '../city/strategies/triangleMergeSubdiv.js';
 import { DesireLines } from '../city/strategies/desireLines.js';
+import { desireLinesThen } from '../city/strategies/desireLinesThen.js';
 
-const STRATEGY_CLASSES = [FaceSubdivision, OffsetInfill, FrontagePressure, TriangleMergeSubdiv, DesireLines];
+const STRATEGY_CLASSES = [
+  desireLinesThen(FaceSubdivision),
+  desireLinesThen(OffsetInfill),
+  desireLinesThen(FrontagePressure),
+  desireLinesThen(TriangleMergeSubdiv),
+  DesireLines,
+];
 
-const STRATEGY_NAMES = ['Face Subdivision', 'Offset Infill', 'Frontage Pressure', 'Triangle Merge', 'Desire Lines'];
+const STRATEGY_NAMES = [
+  'DL + Face Subdiv',
+  'DL + Offset',
+  'DL + Frontage',
+  'DL + Tri Merge',
+  'Desire Lines Only',
+];
 const DETAIL_SCALE = 4;
 const GRID_DIVISIONS = 6;
 
@@ -20,8 +33,8 @@ export class CompareScreen {
     this.settlement = settlement;
     this.seed = seed;
     this.onBack = onBack;
-    this.maps = [null, null, null, null, null];
-    this.strategies = [null, null, null, null, null];
+    this.maps = STRATEGY_CLASSES.map(() => null);
+    this.strategies = STRATEGY_CLASSES.map(() => null);
     this.currentLayerIndex = 0;
     this._selectedCell = null;
     this.currentTick = 0;
@@ -118,7 +131,8 @@ export class CompareScreen {
 
     // Grid area (2 rows x 4 cols)
     const gridArea = document.createElement('div');
-    gridArea.style.cssText = 'flex:1; display:grid; grid-template-columns:repeat(5,1fr); grid-template-rows:1fr 1fr; gap:4px; padding:4px; overflow:hidden;';
+    const cols = STRATEGY_CLASSES.length;
+    gridArea.style.cssText = `flex:1; display:grid; grid-template-columns:repeat(${cols},1fr); grid-template-rows:1fr 1fr; gap:4px; padding:4px; overflow:hidden;`;
 
     this.macroCanvases = [];
     this.microCanvases = [];
@@ -193,14 +207,14 @@ export class CompareScreen {
   _generate() {
     const rng = new SeededRandom(this.seed);
     const baseMap = setupCity(this.layers, this.settlement, rng.fork('city'));
-    this.maps = STRATEGY_CLASSES.map(() => baseMap.clone());
+    this.maps = STRATEGY_CLASSES.map((_, i) => baseMap.clone());
     this.strategies = this.maps.map((map, i) => new STRATEGY_CLASSES[i](map));
     this.currentTick = 0;
     this._selectedCell = null;
     this.tickLabel.textContent = 'Tick: 0';
 
-    // Auto-run ticks 1-6 (skeleton + cycles + several subdivision passes)
-    for (let t = 0; t < 6; t++) {
+    // Auto-run ticks 1-8 (skeleton + desire lines + subdivision passes)
+    for (let t = 0; t < 8; t++) {
       for (const s of this.strategies) s.tick();
       this.currentTick++;
     }

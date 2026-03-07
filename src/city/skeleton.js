@@ -72,7 +72,7 @@ export function buildSkeletonRoads(map) {
       source: 'skeleton',
     });
 
-    _addRoadToGraph(map, road.polyline, width, road.hierarchy);
+    addRoadToGraph(map, road.polyline, width, road.hierarchy);
   }
 
   // 5. Connect any nuclei that ended up far from the road network.
@@ -274,7 +274,7 @@ function _addExtraEdges(map, extraConnections) {
       source: 'skeleton',
     });
 
-    _addRoadToGraph(map, smoothed, width, conn.hierarchy);
+    addRoadToGraph(map, smoothed, width, conn.hierarchy);
   }
 }
 
@@ -377,7 +377,7 @@ function _connectDisconnectedNuclei(map) {
       source: 'skeleton',
     });
 
-    _addRoadToGraph(map, smoothed, width, 'local');
+    addRoadToGraph(map, smoothed, width, 'local');
   }
 }
 
@@ -388,7 +388,7 @@ function _connectDisconnectedNuclei(map) {
 /**
  * Add a smoothed road polyline to the PlanarGraph.
  */
-function _addRoadToGraph(map, polyline, width, hierarchy) {
+export function addRoadToGraph(map, polyline, width, hierarchy) {
   if (polyline.length < 2) return;
 
   const graph = map.graph;

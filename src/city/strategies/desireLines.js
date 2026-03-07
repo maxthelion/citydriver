@@ -1,4 +1,4 @@
-import { buildSkeletonRoads } from '../skeleton.js';
+import { buildSkeletonRoads, addRoadToGraph } from '../skeleton.js';
 import { findPath, simplifyPath, smoothPath } from '../../core/pathfinding.js';
 import { Grid2D } from '../../core/Grid2D.js';
 import { SeededRandom } from '../../core/rng.js';
@@ -126,6 +126,9 @@ export class DesireLines {
         importance: hierarchy === 'collector' ? 0.5 : 0.3,
         source: 'desire',
       });
+
+      // Add to graph so face-based strategies can find enclosed regions
+      addRoadToGraph(map, polyline, 6, hierarchy);
 
       // Stamp onto roadGrid for subsequent passes
       for (const cell of cells) {
