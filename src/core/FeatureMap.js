@@ -23,6 +23,52 @@ function slopeScore(slope) {
   return 0;
 }
 
+/**
+ * Separable Gaussian blur on a Float32Array treated as w×h grid.
+ * Two-pass (horizontal then vertical), O(n) per pixel via running sum.
+ */
+function _gaussianBlur2D(data, w, h, radius) {
+  // Build 1D Gaussian kernel
+  const sigma = radius / 3;
+  const kernelSize = radius * 2 + 1;
+  const kernel = new Float32Array(kernelSize);
+  let kernelSum = 0;
+  for (let i = 0; i < kernelSize; i++) {
+    const x = i - radius;
+    kernel[i] = Math.exp(-(x * x) / (2 * sigma * sigma));
+    kernelSum += kernel[i];
+  }
+  for (let i = 0; i < kernelSize; i++) kernel[i] /= kernelSum;
+
+  // Horizontal pass
+  const temp = new Float32Array(w * h);
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      let sum = 0;
+      for (let k = -radius; k <= radius; k++) {
+        const sx = Math.max(0, Math.min(w - 1, gx + k));
+        sum += data[gz * w + sx] * kernel[k + radius];
+      }
+      temp[gz * w + gx] = sum;
+    }
+  }
+
+  // Vertical pass
+  const result = new Float32Array(w * h);
+  for (let gx = 0; gx < w; gx++) {
+    for (let gz = 0; gz < h; gz++) {
+      let sum = 0;
+      for (let k = -radius; k <= radius; k++) {
+        const sz = Math.max(0, Math.min(h - 1, gz + k));
+        sum += temp[sz * w + gx] * kernel[k + radius];
+      }
+      result[gz * w + gx] = sum;
+    }
+  }
+
+  return result;
+}
+
 export class FeatureMap {
   /**
    * @param {number} width - Grid width in cells
@@ -61,6 +107,7 @@ export class FeatureMap {
     this.waterMask = new Grid2D(width, height, { ...gridOpts, type: 'uint8' });
     this.bridgeGrid = new Grid2D(width, height, { ...gridOpts, type: 'uint8' });
     this.roadGrid = new Grid2D(width, height, { ...gridOpts, type: 'uint8' });
+    this.landValue = new Grid2D(width, height, { ...gridOpts, type: 'float32' });
     this.waterType = null; // set by classifyWater
 
     // Nucleus data
@@ -90,6 +137,7 @@ export class FeatureMap {
       case 'road':
         this.roads.push(feature);
         this._stampRoad(feature);
+        this._stampRoadValue(feature);
         break;
       case 'river':
         this.rivers.push(feature);
@@ -279,7 +327,10 @@ export class FeatureMap {
         const halfW = (aWidth * (1 - t) + bWidth * t) / 2;
 
         // Stamp circle for waterMask
-        const effectiveRadius = Math.max(halfW, this.cellSize * 0.75);
+        // At fine resolution (cellSize <= 10), use actual river width — no inflation needed.
+        // At coarse resolution (cellSize > 10), inflate to cellSize*0.75 to avoid gaps.
+        const minRadius = this.cellSize > 10 ? this.cellSize * 0.75 : this.cellSize * 0.4;
+        const effectiveRadius = Math.max(halfW, minRadius);
         const cellRadius = Math.ceil(effectiveRadius / this.cellSize);
         const cgx = Math.round((px - this.originX) / this.cellSize);
         const cgz = Math.round((pz - this.originZ) / this.cellSize);
@@ -482,7 +533,8 @@ export class FeatureMap {
           const aWidth = a.width || riverHalfWidth(a.accumulation || 1) * 2;
           const bWidth = b.width || riverHalfWidth(b.accumulation || 1) * 2;
           const halfW = (aWidth * (1 - t) + bWidth * t) / 2;
-          const effectiveRadius = Math.max(halfW, this.cellSize * 0.75);
+          const minR = this.cellSize > 10 ? this.cellSize * 0.75 : this.cellSize * 0.4;
+          const effectiveRadius = Math.max(halfW, minR);
           const cellRadius = Math.ceil(effectiveRadius / this.cellSize);
           const cgx = Math.round((px - this.originX) / this.cellSize);
           const cgz = Math.round((pz - this.originZ) / this.cellSize);
@@ -572,6 +624,251 @@ export class FeatureMap {
         }
       }
     }
+  }
+
+  // --- Land value ---
+
+  /**
+   * Compute land value from terrain features and existing infrastructure.
+   * Paints high-value source points, then Gaussian blurs to spread value.
+   * Call after terrain, water, and initial roads are set up.
+   */
+  computeLandValue() {
+    const w = this.width;
+    const h = this.height;
+    const raw = new Float32Array(w * h);
+
+    // 1. Paint value sources
+
+    // Town center (if settlement is set)
+    if (this.settlement) {
+      const params = this.regionalLayers?.getData('params');
+      const rcs = params?.cellSize || 50;
+      const cx = Math.round((this.settlement.gx * rcs - this.originX) / this.cellSize);
+      const cz = Math.round((this.settlement.gz * rcs - this.originZ) / this.cellSize);
+      if (cx >= 0 && cx < w && cz >= 0 && cz < h) {
+        raw[cz * w + cx] = 1.0;
+      }
+    }
+
+    // Waterfront edges: walk waterMask boundary (land cells adjacent to water)
+    for (let gz = 1; gz < h - 1; gz++) {
+      for (let gx = 1; gx < w - 1; gx++) {
+        if (this.waterMask.get(gx, gz) > 0) continue;
+        // Check 4-connected neighbors for water
+        if (this.waterMask.get(gx - 1, gz) > 0 ||
+            this.waterMask.get(gx + 1, gz) > 0 ||
+            this.waterMask.get(gx, gz - 1) > 0 ||
+            this.waterMask.get(gx, gz + 1) > 0) {
+          raw[gz * w + gx] = Math.max(raw[gz * w + gx], 0.8);
+        }
+      }
+    }
+
+    // Hilltops: local elevation maxima (prominence above 10-cell neighborhood)
+    if (this.elevation) {
+      for (let gz = 10; gz < h - 10; gz += 2) {
+        for (let gx = 10; gx < w - 10; gx += 2) {
+          const elev = this.elevation.get(gx, gz);
+          let localMax = true;
+          let localSum = 0, localCount = 0;
+          for (let dz = -10; dz <= 10; dz += 3) {
+            for (let dx = -10; dx <= 10; dx += 3) {
+              const ne = this.elevation.get(gx + dx, gz + dz);
+              if (ne > elev) { localMax = false; }
+              localSum += ne;
+              localCount++;
+            }
+          }
+          if (!localMax) continue;
+          const prominence = elev - (localSum / localCount);
+          if (prominence > 2) {
+            const v = Math.min(1, prominence / 8) * 0.7;
+            raw[gz * w + gx] = Math.max(raw[gz * w + gx], v);
+          }
+        }
+      }
+    }
+
+    // Road junctions: cells where roads meet from 3+ directions
+    for (let gz = 3; gz < h - 3; gz++) {
+      for (let gx = 3; gx < w - 3; gx++) {
+        if (this.roadGrid.get(gx, gz) === 0) continue;
+        let dirs = 0;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          for (let r = 1; r <= 4; r++) {
+            const nx = gx + dx * r, nz = gz + dz * r;
+            if (nx >= 0 && nx < w && nz >= 0 && nz < h && this.roadGrid.get(nx, nz) > 0) {
+              dirs++;
+              break;
+            }
+          }
+        }
+        if (dirs >= 3) {
+          raw[gz * w + gx] = Math.max(raw[gz * w + gx], 0.6);
+        }
+      }
+    }
+
+    // Bridge crossings
+    for (let gz = 0; gz < h; gz++) {
+      for (let gx = 0; gx < w; gx++) {
+        if (this.bridgeGrid.get(gx, gz) > 0) {
+          raw[gz * w + gx] = Math.max(raw[gz * w + gx], 0.85);
+        }
+      }
+    }
+
+    // 2. Gaussian blur (separable, two-pass)
+    const radius = 20; // cells (~200m at 10m resolution)
+    const blurred = _gaussianBlur2D(raw, w, h, radius);
+
+    // 3. Normalize to 0-1
+    let maxVal = 0;
+    for (let i = 0; i < blurred.length; i++) {
+      if (blurred[i] > maxVal) maxVal = blurred[i];
+    }
+    if (maxVal > 0) {
+      for (let i = 0; i < blurred.length; i++) {
+        blurred[i] /= maxVal;
+      }
+    }
+
+    // 4. Write to grid
+    for (let gz = 0; gz < h; gz++) {
+      for (let gx = 0; gx < w; gx++) {
+        this.landValue.set(gx, gz, blurred[gz * w + gx]);
+      }
+    }
+  }
+
+  /**
+   * Incrementally add value from a newly added road and re-blur locally.
+   * Lighter than full recompute — just stamps junction value near the new road.
+   */
+  _stampRoadValue(feature) {
+    const polyline = feature.polyline;
+    if (!polyline || polyline.length < 2) return;
+
+    // Find cells along the road and detect junctions
+    const touched = new Set();
+    for (let i = 0; i < polyline.length - 1; i++) {
+      const a = polyline[i], b = polyline[i + 1];
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const segLen = Math.sqrt(dx * dx + dz * dz);
+      if (segLen < 0.01) continue;
+      const steps = Math.ceil(segLen / (this.cellSize * 2));
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const gx = Math.round((a.x + dx * t - this.originX) / this.cellSize);
+        const gz = Math.round((a.z + dz * t - this.originZ) / this.cellSize);
+        if (gx >= 0 && gx < this.width && gz >= 0 && gz < this.height) {
+          touched.add(`${gx},${gz}`);
+        }
+      }
+    }
+
+    // For each touched cell, check if it's become a junction and add value
+    const w = this.width, h = this.height;
+    let needsReblur = false;
+    for (const key of touched) {
+      const [gx, gz] = key.split(',').map(Number);
+      let dirs = 0;
+      for (const [ddx, ddz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        for (let r = 1; r <= 4; r++) {
+          const nx = gx + ddx * r, nz = gz + ddz * r;
+          if (nx >= 0 && nx < w && nz >= 0 && nz < h && this.roadGrid.get(nx, nz) > 0) {
+            dirs++;
+            break;
+          }
+        }
+      }
+      if (dirs >= 3) {
+        const current = this.landValue.get(gx, gz);
+        if (current < 0.5) {
+          // Stamp junction value and spread locally
+          this._spreadValue(gx, gz, 0.5, 10);
+          needsReblur = true;
+        }
+      }
+    }
+
+    // Also add value near bridge crossings on this road
+    for (const key of touched) {
+      const [gx, gz] = key.split(',').map(Number);
+      if (this.bridgeGrid.get(gx, gz) > 0) {
+        this._spreadValue(gx, gz, 0.7, 12);
+        needsReblur = true;
+      }
+    }
+  }
+
+  /**
+   * Spread a value source outward from a point with distance falloff.
+   */
+  _spreadValue(cx, cz, intensity, radius) {
+    const w = this.width, h = this.height;
+    const rSq = radius * radius;
+    for (let dz = -radius; dz <= radius; dz++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        const gx = cx + dx, gz = cz + dz;
+        if (gx < 0 || gx >= w || gz < 0 || gz >= h) continue;
+        const distSq = dx * dx + dz * dz;
+        if (distSq > rSq) continue;
+        const falloff = 1 - Math.sqrt(distSq) / radius;
+        const v = intensity * falloff * falloff; // quadratic falloff
+        const current = this.landValue.get(gx, gz);
+        if (v > current) {
+          this.landValue.set(gx, gz, v);
+        }
+      }
+    }
+  }
+
+  // --- Cloning ---
+
+  clone() {
+    const copy = new FeatureMap(this.width, this.height, this.cellSize, {
+      originX: this.originX,
+      originZ: this.originZ,
+    });
+
+    // Terrain
+    if (this.elevation) copy.elevation = this.elevation.clone();
+    if (this.slope) copy.slope = this.slope.clone();
+
+    // Derived grids
+    copy.buildability = this.buildability.clone();
+    copy.waterMask = this.waterMask.clone();
+    copy.bridgeGrid = this.bridgeGrid.clone();
+    copy.roadGrid = this.roadGrid.clone();
+    copy.landValue = this.landValue.clone();
+    if (this.waterType) copy.waterType = this.waterType.clone();
+
+    // Features (deep copy data, not object references)
+    for (const f of this.features) {
+      const fCopy = JSON.parse(JSON.stringify(f));
+      copy.features.push(fCopy);
+      switch (fCopy.type) {
+        case 'road': copy.roads.push(fCopy); break;
+        case 'river': copy.rivers.push(fCopy); break;
+        case 'plot': copy.plots.push(fCopy); break;
+        case 'building': copy.buildings.push(fCopy); break;
+      }
+    }
+
+    // Graph is fresh (strategies build their own)
+
+    // Nuclei (deep copy)
+    copy.nuclei = this.nuclei.map(n => ({ ...n }));
+
+    // Metadata
+    copy.seaLevel = this.seaLevel;
+    copy.settlement = this.settlement;
+    copy.regionalLayers = this.regionalLayers;
+    copy.rng = this.rng;
+
+    return copy;
   }
 
   // --- Geometry helpers ---

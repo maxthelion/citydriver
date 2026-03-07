@@ -147,3 +147,56 @@ describe('FeatureMap', () => {
     expect(centerElev).toBeLessThan(100);
   });
 });
+
+describe('FeatureMap.clone', () => {
+  it('creates an independent deep copy with all grids and features', () => {
+    const map = new FeatureMap(20, 20, 10, { originX: 50, originZ: 50 });
+    const elev = new Grid2D(20, 20);
+    const slope = new Grid2D(20, 20);
+    elev.set(5, 5, 100);
+    map.setTerrain(elev, slope);
+
+    map.addFeature('road', {
+      polyline: [{ x: 50, z: 50 }, { x: 250, z: 50 }],
+      width: 8,
+      hierarchy: 'arterial',
+    });
+
+    map.nuclei = [{ gx: 10, gz: 10, type: 'market', tier: 1, index: 0 }];
+
+    const clone = map.clone();
+
+    // Same dimensions and origin
+    expect(clone.width).toBe(20);
+    expect(clone.cellSize).toBe(10);
+    expect(clone.originX).toBe(50);
+
+    // Terrain copied
+    expect(clone.elevation.get(5, 5)).toBe(100);
+
+    // Features copied
+    expect(clone.roads.length).toBe(1);
+    expect(clone.features.length).toBe(1);
+
+    // Nuclei copied
+    expect(clone.nuclei.length).toBe(1);
+    expect(clone.nuclei[0].type).toBe('market');
+
+    // Grids are independent
+    clone.buildability.set(0, 0, 0.99);
+    expect(map.buildability.get(0, 0)).not.toBe(0.99);
+
+    // Features are independent
+    clone.addFeature('road', {
+      polyline: [{ x: 50, z: 100 }, { x: 250, z: 100 }],
+      width: 6,
+      hierarchy: 'local',
+    });
+    expect(clone.roads.length).toBe(2);
+    expect(map.roads.length).toBe(1);
+
+    // Nuclei are independent
+    clone.nuclei.push({ gx: 5, gz: 5, type: 'suburban', tier: 3, index: 1 });
+    expect(map.nuclei.length).toBe(1);
+  });
+});
