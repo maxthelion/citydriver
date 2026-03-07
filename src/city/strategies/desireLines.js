@@ -8,7 +8,7 @@ const OD_PAIRS_SECONDARY = 80;
 const BLUR_RADIUS = 3;
 const PRIMARY_THRESHOLD = 0.85;   // percentile
 const SECONDARY_THRESHOLD = 0.75;
-const MIN_POLYLINE_CELLS = 5;
+const MIN_POLYLINE_CELLS = 8;
 const NUCLEUS_SIGMA = 20;
 const MIN_OD_DISTANCE = 10;
 
@@ -76,36 +76,40 @@ export class DesireLines {
       }
     }
 
-    // Remove cells near existing roads (suppress parallel duplicates).
-    // Expand exclusion by 3 cells around any roadGrid cell.
-    const ROAD_EXCLUSION = 3;
+    // 5. Thin to skeleton (before road exclusion, so the skeleton is connected)
+    _thinZhangSuen(mask, w, h);
+
+    // Now remove skeleton cells that overlap existing roads (suppress parallels).
+    // But keep a 1-cell border so endpoints can still connect.
     for (let gz = 0; gz < h; gz++) {
       for (let gx = 0; gx < w; gx++) {
-        if (map.roadGrid.get(gx, gz) > 0) {
-          for (let dz = -ROAD_EXCLUSION; dz <= ROAD_EXCLUSION; dz++) {
-            for (let dx = -ROAD_EXCLUSION; dx <= ROAD_EXCLUSION; dx++) {
-              const nx = gx + dx, nz = gz + dz;
-              if (nx >= 0 && nx < w && nz >= 0 && nz < h) {
-                mask[nz * w + nx] = 0;
-              }
+        if (mask[gz * w + gx] === 0) continue;
+        // Check if this cell is within 2 cells of an existing road
+        let nearRoad = false;
+        for (let dz = -2; dz <= 2 && !nearRoad; dz++) {
+          for (let dx = -2; dx <= 2 && !nearRoad; dx++) {
+            const nx = gx + dx, nz = gz + dz;
+            if (nx >= 0 && nx < w && nz >= 0 && nz < h && map.roadGrid.get(nx, nz) > 0) {
+              nearRoad = true;
             }
           }
         }
+        if (nearRoad) mask[gz * w + gx] = 0;
       }
     }
-
-    // 5. Thin to skeleton
-    _thinZhangSuen(mask, w, h);
 
     // 6. Trace polylines
     const polylines = _tracePolylines(mask, w, h);
 
-    // 7. Simplify, smooth, add as roads
+    // 7. Extend endpoints to nearest road, simplify, smooth, add as roads
     let added = 0;
     for (const cells of polylines) {
       if (cells.length < MIN_POLYLINE_CELLS) continue;
 
-      const gridPath = cells.map(i => ({ gx: i % w, gz: (i - i % w) / w }));
+      // Extend both endpoints toward nearest existing road cell
+      const extended = _extendToRoad(cells, map.roadGrid, w, h);
+
+      const gridPath = extended.map(i => ({ gx: i % w, gz: (i - i % w) / w }));
       const simplified = simplifyPath(gridPath, 1.0);
       const worldPoints = smoothPath(simplified, map.cellSize, 2);
       if (worldPoints.length < 2) continue;
@@ -440,4 +444,75 @@ function _tracePolylines(mask, w, h) {
   }
 
   return polylines;
+}
+
+/**
+ * Extend a traced polyline (array of grid indices) so both endpoints
+ * connect to the nearest existing road cell. Walks in a straight line
+ * from each endpoint toward the closest roadGrid cell (up to 8 cells).
+ */
+function _extendToRoad(cells, roadGrid, w, h) {
+  if (cells.length < 2) return cells;
+
+  const result = [...cells];
+
+  // Extend start
+  const startExt = _walkToRoad(cells[0], cells[1], roadGrid, w, h);
+  if (startExt.length > 0) {
+    startExt.reverse();
+    result.unshift(...startExt);
+  }
+
+  // Extend end
+  const endExt = _walkToRoad(cells[cells.length - 1], cells[cells.length - 2], roadGrid, w, h);
+  if (endExt.length > 0) {
+    result.push(...endExt);
+  }
+
+  return result;
+}
+
+/**
+ * From an endpoint, walk toward the nearest road cell (up to 8 steps).
+ * Direction is away from the interior (opposite of endpoint→interior vector).
+ */
+function _walkToRoad(endIdx, interiorIdx, roadGrid, w, h) {
+  const ex = endIdx % w, ez = (endIdx - ex) / w;
+  const ix = interiorIdx % w, iz = (interiorIdx - ix) / w;
+
+  // Find nearest road cell within search radius
+  const SEARCH = 8;
+  let bestDist = Infinity, bestGx = -1, bestGz = -1;
+  for (let dz = -SEARCH; dz <= SEARCH; dz++) {
+    for (let dx = -SEARCH; dx <= SEARCH; dx++) {
+      const gx = ex + dx, gz = ez + dz;
+      if (gx < 0 || gx >= w || gz < 0 || gz >= h) continue;
+      if (roadGrid.get(gx, gz) === 0) continue;
+      const d = dx * dx + dz * dz;
+      if (d < bestDist && d > 0) { bestDist = d; bestGx = gx; bestGz = gz; }
+    }
+  }
+
+  if (bestGx < 0) return [];
+
+  // Walk from endpoint toward the road cell using Bresenham
+  const steps = [];
+  let cx = ex, cz = ez;
+  for (let i = 0; i < 12; i++) {
+    const dx = bestGx - cx, dz = bestGz - cz;
+    if (dx === 0 && dz === 0) break;
+    // Step in the dominant direction
+    const sx = dx === 0 ? 0 : (dx > 0 ? 1 : -1);
+    const sz = dz === 0 ? 0 : (dz > 0 ? 1 : -1);
+    if (Math.abs(dx) >= Math.abs(dz)) {
+      cx += sx;
+    } else {
+      cz += sz;
+    }
+    if (cx < 0 || cx >= w || cz < 0 || cz >= h) break;
+    steps.push(cz * w + cx);
+    if (roadGrid.get(cx, cz) > 0) break; // reached road
+  }
+
+  return steps;
 }
