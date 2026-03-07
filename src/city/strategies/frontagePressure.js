@@ -28,18 +28,24 @@ export class FrontagePressure {
     let added = 0;
     const roadsSnapshot = [...this.map.roads];
 
+    // Only generate back lanes from skeleton and shortcut roads (not from other back lanes)
+    // This prevents cascading spaghetti
     for (const road of roadsSnapshot) {
-      if (!this._processedBackLane.has(road.id)) {
-        this._processedBackLane.add(road.id);
-        added += this._checkBackLanes(road);
-      }
+      if (this._processedBackLane.has(road.id)) continue;
+      this._processedBackLane.add(road.id);
+
+      // Only skeleton-level roads generate back lanes
+      const source = road.source || '';
+      if (source !== 'skeleton' && source !== 'shortcut' && source !== '') continue;
+
+      added += this._checkBackLanes(road);
     }
 
+    // Cross streets connect existing roads — allow from any road
     for (const road of roadsSnapshot) {
-      if (!this._processedCross.has(road.id)) {
-        this._processedCross.add(road.id);
-        added += this._checkCrossStreets(road);
-      }
+      if (this._processedCross.has(road.id)) continue;
+      this._processedCross.add(road.id);
+      added += this._checkCrossStreets(road);
     }
 
     return added > 0;
@@ -134,8 +140,8 @@ export class FrontagePressure {
 
       // Try both perpendicular directions
       for (const dir of [1, -1]) {
-        const targetX = midX + perpX * dir * PLOT_DEPTH * 2;
-        const targetZ = midZ + perpZ * dir * PLOT_DEPTH * 2;
+        const targetX = midX + perpX * dir * PLOT_DEPTH * 2.5;
+        const targetZ = midZ + perpZ * dir * PLOT_DEPTH * 2.5;
 
         const fromGx = Math.round((midX - map.originX) / map.cellSize);
         const fromGz = Math.round((midZ - map.originZ) / map.cellSize);
@@ -177,10 +183,13 @@ export class FrontagePressure {
 
   /**
    * Measure frontage fill ratio on one side of a road polyline.
+   * "Filled" means the land is buildable AND there isn't already a road there
+   * (indicating the frontage has available but undeveloped land that wants a back lane).
+   * We check if the buildable area at plot depth is accessible (not blocked by water).
    */
   _measureFrontage(polyline, side, depthCells) {
     const map = this.map;
-    let filledCount = 0;
+    let buildableCount = 0;
     let totalCount = 0;
 
     for (let i = 0; i < polyline.length - 1; i++) {
@@ -193,37 +202,36 @@ export class FrontagePressure {
       const segLen = Math.sqrt(dx * dx + dz * dz);
       if (segLen < 0.01) continue;
 
-      // Perpendicular direction
       const perpX = (-dz / segLen) * side;
       const perpZ = (dx / segLen) * side;
 
-      // Sample along segment
-      const steps = Math.max(1, Math.floor(segLen / map.cellSize));
+      // Sample sparsely along segment (every 2 cells)
+      const steps = Math.max(1, Math.floor(segLen / (map.cellSize * 2)));
       for (let s = 0; s <= steps; s++) {
         const t = s / steps;
         const px = ax + dx * t;
         const pz = az + dz * t;
 
-        // Check cells at various depths perpendicular to road
-        for (let d = 1; d <= depthCells; d++) {
-          const checkX = px + perpX * d * map.cellSize;
-          const checkZ = pz + perpZ * d * map.cellSize;
-          const gx = Math.round((checkX - map.originX) / map.cellSize);
-          const gz = Math.round((checkZ - map.originZ) / map.cellSize);
+        // Check at the back-lane distance (not every depth level)
+        const checkX = px + perpX * depthCells * map.cellSize;
+        const checkZ = pz + perpZ * depthCells * map.cellSize;
+        const gx = Math.round((checkX - map.originX) / map.cellSize);
+        const gz = Math.round((checkZ - map.originZ) / map.cellSize);
 
-          if (gx < 0 || gx >= map.width || gz < 0 || gz >= map.height) continue;
+        if (gx < 2 || gx >= map.width - 2 || gz < 2 || gz >= map.height - 2) continue;
 
-          totalCount++;
-          // "Filled" means buildable land (not water, has terrain to build on)
-          if (map.buildability.get(gx, gz) > 0.2 && map.waterMask.get(gx, gz) === 0) {
-            filledCount++;
-          }
+        totalCount++;
+        // Buildable = good terrain, no water, no existing road
+        if (map.buildability.get(gx, gz) > 0.2 &&
+            map.waterMask.get(gx, gz) === 0 &&
+            map.roadGrid.get(gx, gz) === 0) {
+          buildableCount++;
         }
       }
     }
 
     return {
-      fillRatio: totalCount > 0 ? filledCount / totalCount : 0,
+      fillRatio: totalCount > 0 ? buildableCount / totalCount : 0,
       sampleCount: totalCount,
     };
   }
