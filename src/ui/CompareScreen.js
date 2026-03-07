@@ -1,6 +1,12 @@
 import { setupCity } from '../city/setup.js';
 import { LAYERS } from '../rendering/debugLayers.js';
 import { SeededRandom } from '../core/rng.js';
+import { FaceSubdivision } from '../city/strategies/faceSubdivision.js';
+import { OffsetInfill } from '../city/strategies/offsetInfill.js';
+import { FrontagePressure } from '../city/strategies/frontagePressure.js';
+import { TriangleMergeSubdiv } from '../city/strategies/triangleMergeSubdiv.js';
+
+const STRATEGY_CLASSES = [FaceSubdivision, OffsetInfill, FrontagePressure, TriangleMergeSubdiv];
 
 const STRATEGY_NAMES = ['Face Subdivision', 'Offset Infill', 'Frontage Pressure', 'Triangle Merge'];
 const DETAIL_SCALE = 4;
@@ -187,9 +193,17 @@ export class CompareScreen {
     const rng = new SeededRandom(this.seed);
     const baseMap = setupCity(this.layers, this.settlement, rng.fork('city'));
     this.maps = [baseMap.clone(), baseMap.clone(), baseMap.clone(), baseMap.clone()];
+    this.strategies = this.maps.map((map, i) => new STRATEGY_CLASSES[i](map));
     this.currentTick = 0;
     this._selectedCell = null;
     this.tickLabel.textContent = 'Tick: 0';
+
+    // Auto-run ticks 1-4
+    for (let t = 0; t < 4; t++) {
+      for (const s of this.strategies) s.tick();
+      this.currentTick++;
+    }
+    this.tickLabel.textContent = `Tick: ${this.currentTick}`;
 
     // Update URL
     const url = new URL(location.href);
@@ -204,7 +218,7 @@ export class CompareScreen {
   }
 
   _step() {
-    // Strategies not wired yet — will be added in Task 9
+    for (const s of this.strategies) s.tick();
     this.currentTick++;
     this.tickLabel.textContent = `Tick: ${this.currentTick}`;
     this._updateInfo();
