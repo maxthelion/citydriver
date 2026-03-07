@@ -15,7 +15,6 @@ import { extractWaterPolygons } from './extractWaterPolygons.js';
 import { createOccupancyGrid, attachGrids, stampEdge, stampJunction, stampPlot } from './roadOccupancy.js';
 import { Grid2D } from '../core/Grid2D.js';
 import { computeBuildability } from './buildability.js';
-import { identifyRiverCrossings } from './riverCrossings.js';
 import { connectNuclei } from './connectNuclei.js';
 import {
   computeGradientField,
