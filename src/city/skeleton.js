@@ -23,11 +23,12 @@ function importanceTierWeight(tier) {
 }
 
 /**
- * Place nuclei and build road skeleton on the FeatureMap.
+ * Build skeleton roads on the FeatureMap.
+ * Collects anchor + MST + fallback connections, then pathfinds and adds roads.
  *
  * @param {import('../core/FeatureMap.js').FeatureMap} map
  */
-export function buildSkeleton(map) {
+export function buildSkeletonRoads(map) {
   const layers = map.regionalLayers;
   const nuclei = map.nuclei;
 
@@ -75,6 +76,16 @@ export function buildSkeleton(map) {
 
     _addRoadToGraph(map, road.polyline, width, road.hierarchy);
   }
+}
+
+/**
+ * Place nuclei and build road skeleton on the FeatureMap.
+ * Thin wrapper around buildSkeletonRoads for backward compatibility.
+ *
+ * @param {import('../core/FeatureMap.js').FeatureMap} map
+ */
+export function buildSkeleton(map) {
+  buildSkeletonRoads(map);
 }
 
 /**
