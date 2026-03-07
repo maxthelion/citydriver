@@ -1,12 +1,12 @@
 /**
  * Unified buildability grid.
  *
- * Composites elevation, slope, water, occupancy, and water proximity
- * into a single float32 grid (0 = unbuildable, 1 = ideal).
+ * Composites elevation, slope, water, and water proximity into a single
+ * float32 grid (0 = unbuildable, 1 = ideal).
  *
- * Recomputed after any operation that modifies occupancy (road stamping,
- * plot placement). Every system that needs "can we build here?" or
- * "how desirable is this cell?" reads this grid.
+ * Computed once from terrain, then incrementally updated: stamp operations
+ * (roads, plots, junctions) zero out affected cells automatically via
+ * the occupancy grid's attached buildability reference.
  *
  * Replaces: terrainAttraction, isBuildable(), isPlotBuildableSimple(),
  * and all ad-hoc elevation/slope/water checks scattered across files.
@@ -15,13 +15,14 @@
 import { Grid2D } from '../core/Grid2D.js';
 
 /**
- * Compute (or recompute) the buildability grid.
+ * Compute the buildability grid from terrain data.
+ * Called once during setup. After this, stamp operations incrementally
+ * zero out cells as artefacts are placed.
  *
  * @param {import('../core/LayerStack.js').LayerStack} cityLayers
- * @param {object} [occupancy] - occupancy grid (may be null early in pipeline)
  * @returns {Grid2D} float32 grid, 0 = unbuildable, 0..1 = buildability score
  */
-export function computeBuildability(cityLayers, occupancy = null) {
+export function computeBuildability(cityLayers) {
   const params = cityLayers.getData('params');
   const elevation = cityLayers.getGrid('elevation');
   const slope = cityLayers.getGrid('slope');
@@ -32,6 +33,9 @@ export function computeBuildability(cityLayers, occupancy = null) {
   const cs = params.cellSize;
   const seaLevel = params.seaLevel ?? 0;
 
+  // River centerline distance (from refineTerrain, may not exist yet)
+  const riverDist = cityLayers.getData('riverDist');
+
   // Precompute water distance via BFS (needed for waterfront bonus)
   const waterDist = computeWaterDistance(waterMask, elevation, seaLevel, w, h);
 
@@ -41,7 +45,23 @@ export function computeBuildability(cityLayers, occupancy = null) {
     for (let gx = 0; gx < w; gx++) {
       // --- Hard constraints (unbuildable = 0) ---
       if (elevation.get(gx, gz) < seaLevel) continue;
-      if (waterMask && waterMask.get(gx, gz) > 0) continue;
+
+      // River cells: use centerline distance for soft gradient
+      if (waterMask && waterMask.get(gx, gz) > 0) {
+        if (riverDist) {
+          const idx = gz * w + gx;
+          const nd = riverDist.halfW[idx] > 0
+            ? riverDist.dist[idx] / riverDist.halfW[idx]
+            : 0;
+          // Deep channel (nd < 0.8): unbuildable
+          // River edge (0.8-1.0): marginal
+          if (nd >= 0.8 && nd < 1.0) {
+            grid.set(gx, gz, 0.15 * ((nd - 0.8) / 0.2));
+          }
+          // else: score stays 0 (unbuildable)
+        }
+        continue;
+      }
 
       const edgeDist = Math.min(gx, gz, w - 1 - gx, h - 1 - gz);
       if (edgeDist < 3) continue;
@@ -63,17 +83,6 @@ export function computeBuildability(cityLayers, occupancy = null) {
       const wDist = waterDist[gz * w + gx];
       if (wDist > 0 && wDist < 10) {
         score = Math.min(1, score + 0.3 * (1 - wDist / 10));
-      }
-
-      // --- Occupancy: already used land = 0 ---
-      if (occupancy) {
-        const ax = Math.floor((gx * cs) / occupancy.res);
-        const az = Math.floor((gz * cs) / occupancy.res);
-        if (ax >= 0 && ax < occupancy.width && az >= 0 && az < occupancy.height) {
-          if (occupancy.data[az * occupancy.width + ax] > 0) {
-            score = 0;
-          }
-        }
       }
 
       grid.set(gx, gz, score);

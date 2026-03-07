@@ -1,5 +1,5 @@
 /**
- * Connect city nuclei using Union-Find + MST + merged road paths.
+ * Connect city nuclei using Union-Find + MST + shortcut roads + merged paths.
  *
  * After pathfinding all connections (with reuse discount so they share cells),
  * mergeRoadPaths splits at divergence points and deduplicates shared portions.
@@ -8,16 +8,17 @@
  *   1. Attach each nucleus to nearest road node
  *   2. Discover existing connectivity via BFS → Union-Find
  *   3. Identify clusters, select MST crossings + redundant links
- *   4. Pathfind all connections with reuse discount
+ *   4. Pathfind MST connections with reuse discount
  *   5. Merge shared segments → add to graph
  *   6. Safety-net: connect remaining graph components
+ *   7. Shortcut roads between nearby nuclei with high detour ratio
  */
 
 import { distance2D } from '../core/math.js';
 import { UnionFind } from '../core/UnionFind.js';
 import { findPath, simplifyPath, smoothPath } from '../core/pathfinding.js';
 import { stampEdge, stampJunction } from './roadOccupancy.js';
-import { nucleusConnectionCost } from './pathCost.js';
+import { nucleusConnectionCost, shortcutRoadCost } from './pathCost.js';
 import { addMergedRoads } from './roadNetwork.js';
 
 // ============================================================
@@ -182,145 +183,152 @@ export function connectNuclei(cityLayers, graph, nuclei, occupancy) {
   }
 
   // ============================================================
-  // Phase 3: Identify clusters + collect connection pairs
+  // Phase 3a: Identify clusters + collect MST connection pairs
   // ============================================================
 
-  if (uf.componentCount() <= 1) return;
+  const allConnections = [];
 
-  const clusters = [];
-  const components = uf.components();
-  for (const [root, members] of components) {
-    let importance = 0;
-    let cx = 0, cz = 0;
-    for (const idx of members) {
-      const nuc = nuclei[idx];
-      const tw = nuc.tier <= 1 ? 10 : nuc.tier <= 2 ? 5 : nuc.tier <= 3 ? 3 : 1;
-      importance += tw;
-      cx += nuc.x;
-      cz += nuc.z;
+  if (uf.componentCount() > 1) {
+    const clusters = [];
+    const components = uf.components();
+    for (const [root, members] of components) {
+      let importance = 0;
+      let cx = 0, cz = 0;
+      for (const idx of members) {
+        const nuc = nuclei[idx];
+        const tw = nuc.tier <= 1 ? 10 : nuc.tier <= 2 ? 5 : nuc.tier <= 3 ? 3 : 1;
+        importance += tw;
+        cx += nuc.x;
+        cz += nuc.z;
+      }
+      cx /= members.length;
+      cz /= members.length;
+      clusters.push({ root, members, importance, cx, cz });
     }
-    cx /= members.length;
-    cz /= members.length;
-    clusters.push({ root, members, importance, cx, cz });
-  }
 
-  // Build MST crossing candidates
-  const crossings = [];
-  for (let i = 0; i < clusters.length; i++) {
-    for (let j = i + 1; j < clusters.length; j++) {
-      let bestCost = Infinity;
-      let bestA = null, bestB = null;
-      for (const ai of clusters[i].members) {
-        for (const bi of clusters[j].members) {
-          const a = nuclei[ai];
-          const b = nuclei[bi];
-          const cost = estimateCrossingCost(a.x, a.z, b.x, b.z, buildability, cs);
-          if (cost < bestCost) {
-            bestCost = cost;
-            bestA = ai;
-            bestB = bi;
+    // Build MST crossing candidates
+    const crossings = [];
+    for (let i = 0; i < clusters.length; i++) {
+      for (let j = i + 1; j < clusters.length; j++) {
+        let bestCost = Infinity;
+        let bestA = null, bestB = null;
+        for (const ai of clusters[i].members) {
+          for (const bi of clusters[j].members) {
+            const a = nuclei[ai];
+            const b = nuclei[bi];
+            const cost = estimateCrossingCost(a.x, a.z, b.x, b.z, buildability, cs);
+            if (cost < bestCost) {
+              bestCost = cost;
+              bestA = ai;
+              bestB = bi;
+            }
           }
         }
+        if (bestA != null && bestB != null) {
+          crossings.push({ clusterI: i, clusterJ: j, nucleusA: bestA, nucleusB: bestB, cost: bestCost });
+        }
       }
-      if (bestA != null && bestB != null) {
-        crossings.push({ clusterI: i, clusterJ: j, nucleusA: bestA, nucleusB: bestB, cost: bestCost });
-      }
+    }
+
+    crossings.sort((a, b) => a.cost - b.cost);
+
+    // Kruskal's: select MST edges
+    const clusterUF = new UnionFind(clusters.length);
+
+    for (const crossing of crossings) {
+      if (clusterUF.componentCount() <= 1) break;
+      const { clusterI, clusterJ, nucleusA, nucleusB } = crossing;
+      if (clusterUF.connected(clusterI, clusterJ)) continue;
+
+      allConnections.push({
+        nucA: nuclei[nucleusA], nucB: nuclei[nucleusB],
+        isMST: true, nucleusIdxA: nucleusA, nucleusIdxB: nucleusB,
+        clusterI, clusterJ,
+      });
+      clusterUF.union(clusterI, clusterJ);
+      uf.union(nucleusA, nucleusB);
+    }
+
+    // Redundant links for important clusters
+    for (const crossing of crossings) {
+      const { clusterI, clusterJ, nucleusA, nucleusB } = crossing;
+      const cI = clusters[clusterI];
+      const cJ = clusters[clusterJ];
+      if (cI.importance < 3 && cJ.importance < 3) continue;
+      if (uf.connected(nucleusA, nucleusB)) continue;
+
+      allConnections.push({
+        nucA: nuclei[nucleusA], nucB: nuclei[nucleusB],
+        isMST: false, nucleusIdxA: nucleusA, nucleusIdxB: nucleusB,
+        clusterI, clusterJ,
+      });
+      uf.union(nucleusA, nucleusB);
     }
   }
 
-  crossings.sort((a, b) => a.cost - b.cost);
+  if (allConnections.length > 0) {
+    // ============================================================
+    // Phase 4: Pathfind MST connections with reuse discount
+    // ============================================================
 
-  // Kruskal's: select MST edges
-  const clusterUF = new UnionFind(clusters.length);
-  const allConnections = []; // { nucA, nucB, isMST, nucleusIdxA, nucleusIdxB, clusterI, clusterJ }
+    const usedCells = new Set();
+    const rawPaths = [];
 
-  for (const crossing of crossings) {
-    if (clusterUF.componentCount() <= 1) break;
-    const { clusterI, clusterJ, nucleusA, nucleusB } = crossing;
-    if (clusterUF.connected(clusterI, clusterJ)) continue;
+    for (const conn of allConnections) {
+      const nodeA = conn.nucA.roadNodeId;
+      const nodeB = conn.nucB.roadNodeId;
+      if (nodeA == null || nodeB == null) continue;
 
-    allConnections.push({
-      nucA: nuclei[nucleusA], nucB: nuclei[nucleusB],
-      isMST: true, nucleusIdxA: nucleusA, nucleusIdxB: nucleusB,
-      clusterI, clusterJ,
-    });
-    clusterUF.union(clusterI, clusterJ);
-    uf.union(nucleusA, nucleusB);
+      const nA = graph.getNode(nodeA);
+      const nB = graph.getNode(nodeB);
+      if (!nA || !nB) continue;
+
+      // Cost function with fixed low cost for cells used by previous connections
+      const sharedCost = (fromGx, fromGz, toGx, toGz) => {
+        if (usedCells.has(`${toGx},${toGz}`)) {
+          const dx = toGx - fromGx, dz = toGz - fromGz;
+          return Math.sqrt(dx * dx + dz * dz) * 0.3;
+        }
+        return costFn(fromGx, fromGz, toGx, toGz);
+      };
+
+      const result = findPath(
+        Math.round(nA.x / cs), Math.round(nA.z / cs),
+        Math.round(nB.x / cs), Math.round(nB.z / cs),
+        w, h, sharedCost,
+      );
+      if (!result || result.path.length < 2) continue;
+
+      const pathLen = result.path.length * cs;
+      const importance = computeImportance(conn.nucA, conn.nucB, pathLen, maxLength, conn.isMST);
+
+      for (const cell of result.path) usedCells.add(`${cell.gx},${cell.gz}`);
+      rawPaths.push({ cells: result.path, rank: 1, importance });
+    }
+
+    // ============================================================
+    // Phase 5: Merge shared segments → add to graph
+    // ============================================================
+
+    const mergeInput = rawPaths.map(p => ({ cells: p.cells, importance: p.importance }));
+    addMergedRoads(graph, mergeInput, cs, occupancy);
   }
-
-  // Redundant links for important clusters
-  for (const crossing of crossings) {
-    const { clusterI, clusterJ, nucleusA, nucleusB } = crossing;
-    const cI = clusters[clusterI];
-    const cJ = clusters[clusterJ];
-    if (cI.importance < 3 && cJ.importance < 3) continue;
-    if (uf.connected(nucleusA, nucleusB)) continue;
-
-    allConnections.push({
-      nucA: nuclei[nucleusA], nucB: nuclei[nucleusB],
-      isMST: false, nucleusIdxA: nucleusA, nucleusIdxB: nucleusB,
-      clusterI, clusterJ,
-    });
-    uf.union(nucleusA, nucleusB);
-  }
-
-  if (allConnections.length === 0) return;
-
-  // ============================================================
-  // Phase 4: Pathfind all connections with reuse discount
-  // ============================================================
-
-  // Track cells used by previous connections for reuse discount
-  const usedCells = new Set();
-
-  const rawPaths = []; // { cells, rank } for mergeRoadPaths
-
-  for (const conn of allConnections) {
-    const nodeA = conn.nucA.roadNodeId;
-    const nodeB = conn.nucB.roadNodeId;
-    if (nodeA == null || nodeB == null) continue;
-
-    const nA = graph.getNode(nodeA);
-    const nB = graph.getNode(nodeB);
-    if (!nA || !nB) continue;
-
-    // Cost function with fixed low cost for cells used by previous connections
-    const sharedCost = (fromGx, fromGz, toGx, toGz) => {
-      if (usedCells.has(`${toGx},${toGz}`)) {
-        const dx = toGx - fromGx, dz = toGz - fromGz;
-        return Math.sqrt(dx * dx + dz * dz) * 0.3;
-      }
-      return costFn(fromGx, fromGz, toGx, toGz);
-    };
-
-    const result = findPath(
-      Math.round(nA.x / cs), Math.round(nA.z / cs),
-      Math.round(nB.x / cs), Math.round(nB.z / cs),
-      w, h, sharedCost,
-    );
-    if (!result || result.path.length < 2) continue;
-
-    const pathLen = result.path.length * cs;
-    const importance = computeImportance(conn.nucA, conn.nucB, pathLen, maxLength, conn.isMST);
-
-    // Stamp cells for reuse by later connections
-    for (const cell of result.path) usedCells.add(`${cell.gx},${cell.gz}`);
-
-    // All paths get rank 1 so merge treats them uniformly.
-    // We assign hierarchy AFTER merging based on best importance per cell.
-    rawPaths.push({ cells: result.path, rank: 1, importance });
-  }
-
-  // ============================================================
-  // Phase 5: Merge shared segments → add to graph (with overlap prevention)
-  // ============================================================
-
-  // Convert importance to { cells, importance } for addMergedRoads
-  const mergeInput = rawPaths.map(p => ({ cells: p.cells, importance: p.importance }));
-  addMergedRoads(graph, mergeInput, cs, occupancy);
 
   // ============================================================
   // Phase 6: Safety-net — connect remaining graph components
+  // ============================================================
+
+  connectGraphComponents(graph, costFn, w, h, cs, occupancy);
+
+  // ============================================================
+  // Phase 7: Shortcut roads between nearby nuclei with high detour
+  // ============================================================
+
+  const scCostFn = shortcutRoadCost(cityLayers);
+  addShortcutRoads(cityLayers, graph, nuclei, scCostFn, w, h, cs, maxLength, occupancy);
+
+  // ============================================================
+  // Phase 8: Post-shortcut safety net (merge pipeline may fragment)
   // ============================================================
 
   connectGraphComponents(graph, costFn, w, h, cs, occupancy);
@@ -328,8 +336,14 @@ export function connectNuclei(cityLayers, graph, nuclei, occupancy) {
 
 /**
  * Final safety net: connect any remaining disconnected graph components.
+ * Uses direct edge addition (not addMergedRoads) to avoid creating fragments.
  */
 function connectGraphComponents(graph, costFn, w, h, cs, occupancy) {
+  // Remove orphaned nodes (degree 0) left by merge deduplication
+  for (const [id] of graph.nodes) {
+    if (graph.degree(id) === 0) graph.removeNode(id);
+  }
+
   if (graph.nodes.size === 0) return;
 
   const visited = new Set();
@@ -378,7 +392,19 @@ function connectGraphComponents(graph, costFn, w, h, cs, occupancy) {
         w, h, costFn,
       );
       if (result && result.path.length >= 2) {
-        addMergedRoads(graph, [{ cells: result.path, importance: 0.3 }], cs, occupancy);
+        const simplified = simplifyPath(result.path, 2.0);
+        const smooth = smoothPath(simplified, cs);
+        if (smooth.length >= 2) {
+          const edgeId = graph.addEdge(bestOtherId, bestMainId, {
+            points: smooth.slice(1, -1),
+            width: 9, hierarchy: 'local', importance: 0.3,
+          });
+          if (occupancy) stampEdge(graph, edgeId, occupancy);
+        } else {
+          graph.addEdge(bestOtherId, bestMainId, {
+            width: 9, hierarchy: 'local', importance: 0.2,
+          });
+        }
       } else {
         graph.addEdge(bestOtherId, bestMainId, {
           width: 9, hierarchy: 'local', importance: 0.2,
@@ -386,5 +412,128 @@ function connectGraphComponents(graph, costFn, w, h, cs, occupancy) {
       }
       for (const id of components[i]) mainSet.add(id);
     }
+  }
+}
+
+/**
+ * For each nucleus, find its Kth closest neighbor (skipping excludePairs)
+ * and propose a shortcut if the road-network route has high detour.
+ * Reject shortcuts that cross existing edges.
+ */
+/**
+ * For each nucleus, find its closest neighbor (skipping excludePairs)
+ * and propose a shortcut if the road-network route has high detour.
+ * All attempted pairs are added to excludePairs so future passes skip them.
+ */
+function findShortcutCandidates(graph, nuclei, cs, excludePairs) {
+  const n = nuclei.length;
+  const minShortcutDist = cs * 5;
+  const candidates = [];
+
+  for (let i = 0; i < n; i++) {
+    if (nuclei[i].roadNodeId == null) continue;
+
+    // Find closest neighbor not in excludePairs
+    let closestJ = -1;
+    let closestDist = Infinity;
+    for (let j = 0; j < n; j++) {
+      if (j === i || nuclei[j].roadNodeId == null) continue;
+      const key = `${Math.min(i, j)},${Math.max(i, j)}`;
+      if (excludePairs.has(key)) continue;
+      const d = distance2D(nuclei[i].x, nuclei[i].z, nuclei[j].x, nuclei[j].z);
+      if (d < closestDist) { closestDist = d; closestJ = j; }
+    }
+
+    if (closestJ < 0 || closestDist < minShortcutDist) continue;
+
+    const a = Math.min(i, closestJ);
+    const b = Math.max(i, closestJ);
+    candidates.push({ i: a, j: b, straightDist: closestDist });
+  }
+
+  // Deduplicate and mark all as attempted
+  const seen = new Set();
+  const unique = [];
+  for (const c of candidates) {
+    const key = `${c.i},${c.j}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    excludePairs.add(key);
+    unique.push(c);
+  }
+
+  // Filter: detour ratio > 2.0
+  const accepted = [];
+  for (const cand of unique) {
+    const graphDist = graph.shortestPathLength(nuclei[cand.i].roadNodeId, nuclei[cand.j].roadNodeId);
+    if (!isFinite(graphDist)) continue;
+    const detourRatio = graphDist / cand.straightDist;
+    if (detourRatio < 2.0) continue;
+
+    accepted.push({ ...cand, detourRatio });
+  }
+
+  return accepted;
+}
+
+/**
+ * Pathfind a shortcut and return its raw path + importance for merging.
+ * Returns null if pathfinding fails.
+ */
+function pathfindShortcut(graph, nucA, nucB, costFn, w, h, cs, maxLength) {
+  const nA = graph.getNode(nucA.roadNodeId);
+  const nB = graph.getNode(nucB.roadNodeId);
+  if (!nA || !nB) return null;
+
+  const result = findPath(
+    Math.round(nA.x / cs), Math.round(nA.z / cs),
+    Math.round(nB.x / cs), Math.round(nB.z / cs),
+    w, h, costFn,
+  );
+  if (!result || result.path.length < 2) return null;
+
+  const pathLen = result.path.length * cs;
+  const importance = computeImportance(nucA, nucB, pathLen, maxLength, false);
+
+  return { cells: result.path, importance };
+}
+
+/**
+ * Multi-pass shortcut addition:
+ *  Pass 1: each nucleus → closest neighbor with high detour
+ *  Pass 2-3: next-closest neighbors, skipping already-attempted pairs
+ * All paths are collected and fed through addMergedRoads in one batch.
+ */
+function addShortcutRoads(cityLayers, graph, nuclei, costFn, w, h, cs, maxLength, occupancy) {
+  const n = nuclei.length;
+  if (n < 2) return;
+
+  const attemptedPairs = new Set();
+  const allAccepted = [];
+  const allPaths = [];
+
+  for (let pass = 1; pass <= 3; pass++) {
+    const found = findShortcutCandidates(graph, nuclei, cs, attemptedPairs);
+    if (found.length === 0) break;
+
+    for (const cand of found) {
+      const pathData = pathfindShortcut(graph, nuclei[cand.i], nuclei[cand.j], costFn, w, h, cs, maxLength);
+      if (pathData) {
+        allAccepted.push(cand);
+        allPaths.push(pathData);
+      }
+    }
+  }
+
+  // Store for debug rendering
+  cityLayers.setData('shortcutCandidates', allAccepted.map(c => ({
+    ax: nuclei[c.i].x, az: nuclei[c.i].z,
+    bx: nuclei[c.j].x, bz: nuclei[c.j].z,
+    detourRatio: c.detourRatio,
+  })));
+
+  // Feed all shortcut paths through merge pipeline
+  if (allPaths.length > 0) {
+    addMergedRoads(graph, allPaths, cs, occupancy);
   }
 }

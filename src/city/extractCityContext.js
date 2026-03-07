@@ -102,6 +102,7 @@ export function extractCityContext(regionalLayers, settlement, options = {}) {
   // Copy relevant data
   cityLayers.setData('settlement', settlement);
   cityLayers.setData('rivers', regionalLayers.getData('rivers'));
+  cityLayers.setData('regionalRiverPaths', regionalLayers.getData('riverPaths'));
 
   // Copy regional roads that pass through the city area
   const roads = regionalLayers.getData('roads') || [];

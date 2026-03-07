@@ -9,6 +9,10 @@
  *
  * All road-adding stages read from and stamp onto this grid to prevent
  * overlapping roads and route around plots.
+ *
+ * When a buildability grid is attached (via attachBuildability), stamping
+ * incrementally zeros out the corresponding buildability cells — no
+ * expensive full recompute needed.
  */
 
 const RES = 3; // metres per occupancy cell
@@ -27,7 +31,18 @@ export const OCCUPANCY_JUNCTION = 3;
 export function createOccupancyGrid(params) {
   const w = Math.ceil((params.width * params.cellSize) / RES);
   const h = Math.ceil((params.height * params.cellSize) / RES);
-  return { data: new Uint8Array(w * h), width: w, height: h, res: RES };
+  return { data: new Uint8Array(w * h), width: w, height: h, res: RES, buildability: null, cityCS: params.cellSize };
+}
+
+/**
+ * Attach a buildability grid so that stamp operations incrementally
+ * zero out affected cells. Call after computeBuildability().
+ *
+ * @param {object} occupancy
+ * @param {import('../core/Grid2D.js').Grid2D} buildability
+ */
+export function attachBuildability(occupancy, buildability) {
+  occupancy.buildability = buildability;
 }
 
 /**
@@ -93,7 +108,7 @@ export function wrapCostWithOccupancy(baseCost, occupancy, cs) {
 /** Stamp a polygon onto the grid using scanline fill. */
 export function stampPolyOnGrid(verts, occupancy, value) {
   if (verts.length < 3) return;
-  const { data, width: aw, height: ah, res } = occupancy;
+  const { data, width: aw, height: ah, res, buildability, cityCS } = occupancy;
   const xs = verts.map(v => v.x);
   const zs = verts.map(v => v.z);
   const minAx = Math.max(0, Math.floor(Math.min(...xs) / res));
@@ -117,6 +132,14 @@ export function stampPolyOnGrid(verts, occupancy, value) {
       const xEnd = Math.min(maxAx, Math.floor(intersections[i + 1] / res));
       for (let ax = xStart; ax <= xEnd; ax++) {
         data[az * aw + ax] = value;
+        // Incrementally zero buildability for this cell
+        if (buildability) {
+          const bgx = Math.floor((ax * res) / cityCS);
+          const bgz = Math.floor((az * res) / cityCS);
+          if (bgx >= 0 && bgx < buildability.width && bgz >= 0 && bgz < buildability.height) {
+            buildability.set(bgx, bgz, 0);
+          }
+        }
       }
     }
   }
@@ -142,7 +165,7 @@ export function stampPolylineOnGrid(polyline, halfWidth, occupancy, value) {
 
 /** Stamp a circle onto the grid. */
 export function stampCircleOnGrid(cx, cz, radius, occupancy, value) {
-  const { data, width: aw, height: ah, res } = occupancy;
+  const { data, width: aw, height: ah, res, buildability, cityCS } = occupancy;
   const minAx = Math.max(0, Math.floor((cx - radius) / res));
   const maxAx = Math.min(aw - 1, Math.ceil((cx + radius) / res));
   const minAz = Math.max(0, Math.floor((cz - radius) / res));
@@ -154,6 +177,13 @@ export function stampCircleOnGrid(cx, cz, radius, occupancy, value) {
       const dx = ax * res - cx, dz = az * res - cz;
       if (dx * dx + dz * dz <= r2) {
         data[az * aw + ax] = value;
+        if (buildability) {
+          const bgx = Math.floor((ax * res) / cityCS);
+          const bgz = Math.floor((az * res) / cityCS);
+          if (bgx >= 0 && bgx < buildability.width && bgz >= 0 && bgz < buildability.height) {
+            buildability.set(bgx, bgz, 0);
+          }
+        }
       }
     }
   }

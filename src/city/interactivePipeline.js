@@ -12,7 +12,7 @@ import { identifyRiverCrossings } from './riverCrossings.js';
 import { seedNuclei } from './seedNuclei.js';
 import { generateInstitutionalPlots } from './generateInstitutionalPlots.js';
 import { extractWaterPolygons } from './extractWaterPolygons.js';
-import { createOccupancyGrid, stampEdge, stampJunction, stampPlot } from './roadOccupancy.js';
+import { createOccupancyGrid, attachBuildability, stampEdge, stampJunction, stampPlot } from './roadOccupancy.js';
 import { Grid2D } from '../core/Grid2D.js';
 import { computeBuildability } from './buildability.js';
 import { connectNuclei } from './connectNuclei.js';
@@ -50,8 +50,9 @@ export function setupCity(regionalLayers, settlement, rng, options = {}) {
   const occupancy = createOccupancyGrid(cityLayers.getData('params'));
   cityLayers.setData('occupancy', occupancy);
 
-  // Initial buildability (terrain-only, no occupancy yet)
-  computeBuildability(cityLayers);
+  // Buildability from terrain (then incrementally updated by stamps)
+  const buildability = computeBuildability(cityLayers);
+  attachBuildability(occupancy, buildability);
 
   const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'), occupancy);
 
@@ -91,9 +92,6 @@ export function setupCity(regionalLayers, settlement, rng, options = {}) {
   }
 
   cityLayers.setData('roadGraph', roadGraph);
-
-  // Compute buildability — the single source of truth for "can we build here?"
-  computeBuildability(cityLayers, occupancy);
 
   // Connect all nuclei (Union-Find + MST)
   connectNuclei(cityLayers, roadGraph, nuclei, occupancy);

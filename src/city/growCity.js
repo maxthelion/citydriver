@@ -14,7 +14,6 @@ import { distance2D } from '../core/math.js';
 import { findPath, simplifyPath, smoothPath } from '../core/pathfinding.js';
 import { stampEdge, stampPlot, stampJunction, OCCUPANCY_ROAD, OCCUPANCY_JUNCTION, OCCUPANCY_PLOT } from './roadOccupancy.js';
 import { fillBlockPlots } from './blockSubdivision.js';
-import { computeBuildability } from './buildability.js';
 import { growthRoadCost } from './pathCost.js';
 import {
   computeGradientField,
@@ -48,12 +47,11 @@ export function growCity(cityLayers, graph, nuclei, rng, options = {}) {
   const seaLevel = params.seaLevel ?? 0;
   const totalTarget = cityLayers.getData('targetPopulation') || 2000;
 
-  // Compute initial buildability (will be recomputed as occupancy changes)
-  computeBuildability(cityLayers, occupancy);
+  // Buildability is incrementally updated by stamp operations — no recompute needed
   const buildability = cityLayers.getGrid('buildability');
 
   // Unified cost functions from pathCost factory
-  let costFn = growthRoadCost(cityLayers);
+  const costFn = growthRoadCost(cityLayers);
 
   // --- Precompute terrain fields (once) ---
   const { dxGrid: gradDx, dzGrid: gradDz } = computeGradientField(elevation, w, h);
@@ -93,10 +91,8 @@ export function growCity(cityLayers, graph, nuclei, rng, options = {}) {
     if (stagnantCount > 5) break;
     if (Date.now() - startTime > timeBudgetMs) break;
 
-    // Refresh buildability and cost function every few ticks (expensive)
+    // Refresh road distance field periodically for proximity bands
     if (tick > 0 && tick % 3 === 0 && occupancy) {
-      computeBuildability(cityLayers, occupancy);
-      costFn = growthRoadCost(cityLayers);
       roadDistField = computeRoadDistanceField(occupancy);
     }
 

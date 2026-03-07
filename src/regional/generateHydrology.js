@@ -10,6 +10,7 @@ import { Grid2D } from '../core/Grid2D.js';
 import { clamp } from '../core/math.js';
 import { PerlinNoise } from '../core/noise.js';
 import { fillSinks, flowDirections, flowAccumulation, extractStreams, findConfluences, smoothRiverPaths } from '../core/flowAccumulation.js';
+import { segmentsToVectorPaths, paintPathsOntoWaterMask, riverHalfWidth, channelProfile } from '../core/riverGeometry.js';
 
 /**
  * Generate hydrology layers.
@@ -86,7 +87,7 @@ export function generateHydrology(params, elevation, permeability, rng) {
     river: riverThreshold * 5,
     majorRiver: riverMajorThreshold,
   };
-  const rivers = extractStreams(adjustedAccumulation, flowDirs, filledElev, thresholds);
+  const rivers = extractStreams(adjustedAccumulation, flowDirs, filledElev, thresholds, seaLevel);
 
   // Find confluences using adjusted accumulation
   const confluences = findConfluences(adjustedAccumulation, flowDirs, filledElev, riverThreshold);
@@ -111,63 +112,61 @@ export function generateHydrology(params, elevation, permeability, rng) {
     }
   }
 
-  // Mark river cells
-  function markRiver(seg) {
-    for (const c of seg.cells) {
-      waterMask.set(c.gx, c.gz, 1);
-    }
-    for (const child of (seg.children || [])) {
-      markRiver(child);
-    }
-  }
-  for (const root of rivers) markRiver(root);
+  // Convert segment tree to vector paths (single source of truth)
+  // Don't pass elevation for sea-level clipping here — regional waterMask
+  // should include all river cells. City-level import does its own clipping.
+  const riverPaths = segmentsToVectorPaths(rivers, cellSize, {
+    smoothIterations: 2,
+  });
 
-  return { rivers, confluences, flowDirs, accumulation: adjustedAccumulation, waterMask };
+  // Paint waterMask from vector paths (smoother than raw grid cells)
+  paintPathsOntoWaterMask(waterMask, riverPaths, cellSize, width, height);
+
+  return { rivers, confluences, flowDirs, accumulation: adjustedAccumulation, waterMask, riverPaths };
 }
 
 /**
- * Carve floodplains alongside large rivers.
- * Finds cells within a width proportional to accumulation and flattens
- * them to near the river's elevation.
+ * Carve floodplains alongside large rivers using shared profile.
+ * Mild regional carving — just enough to guide flow routing.
+ * Detailed channel profiles are computed at city resolution.
  */
 function carveFloodplains(elevation, rivers, width, height, seaLevel) {
   function processSegment(seg) {
     for (const cell of seg.cells) {
       const acc = cell.accumulation;
-      // Only carve floodplains for rivers with significant accumulation
       if (acc < 200) continue;
 
-      // Floodplain half-width: proportional to sqrt(accumulation), capped
-      const halfWidth = Math.min(4, Math.floor(Math.sqrt(acc) / 15) + 1);
+      const hw = riverHalfWidth(acc);
       const riverElev = elevation.get(cell.gx, cell.gz);
-
-      // Only carve on land above sea level
       if (riverElev < seaLevel) continue;
 
-      // Carve the river channel itself
-      if (acc >= 200) {
-        const channelDepth = Math.min(3, Math.sqrt(acc) / 30 + 0.5);
-        elevation.set(cell.gx, cell.gz, riverElev - channelDepth);
-      }
+      // Mild channel: 0.3-1.2m (detail comes at city scale)
+      const channelDepth = Math.min(1.2, Math.sqrt(acc) / 75 + 0.2);
 
-      for (let dz = -halfWidth; dz <= halfWidth; dz++) {
-        for (let dx = -halfWidth; dx <= halfWidth; dx++) {
-          if (dx === 0 && dz === 0) continue;
+      // Radius in grid cells to check (convert world-unit halfWidth to cells)
+      const cellSize = elevation.cellSize || 50;
+      const radiusCells = Math.ceil((hw + cellSize) / cellSize);
+
+      for (let dz = -radiusCells; dz <= radiusCells; dz++) {
+        for (let dx = -radiusCells; dx <= radiusCells; dx++) {
           const nx = cell.gx + dx;
           const nz = cell.gz + dz;
           if (nx < 0 || nx >= width || nz < 0 || nz >= height) continue;
 
-          const dist = Math.sqrt(dx * dx + dz * dz);
-          if (dist > halfWidth) continue;
+          const dist = Math.sqrt(dx * dx + dz * dz) * cellSize;
+          const nd = dist / hw;
+          const depthFraction = channelProfile(nd);
+          if (depthFraction <= 0) continue;
 
           const currentElev = elevation.get(nx, nz);
-          // Only lower terrain, never raise it
-          if (currentElev <= riverElev) continue;
+          if (currentElev < seaLevel) continue;
 
-          // Blend: close to river = nearly flat, further away = partial blend
-          const blend = 1.0 - dist / (halfWidth + 1);
-          const targetElev = riverElev + (currentElev - riverElev) * (1.0 - blend * 0.7);
-          elevation.set(nx, nz, targetElev);
+          // Apply mild carving scaled by profile
+          const carve = channelDepth * depthFraction;
+          if (carve > 0.05) {
+            const baseElev = Math.max(riverElev, currentElev - carve);
+            elevation.set(nx, nz, Math.min(currentElev, baseElev));
+          }
         }
       }
     }

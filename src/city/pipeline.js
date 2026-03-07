@@ -17,7 +17,7 @@ import { generateAmenities } from './generateAmenities.js';
 import { generateCityLandCover } from './generateLandCover.js';
 import { extractWaterPolygons } from './extractWaterPolygons.js';
 import { getCityValidators, runValidators } from '../validators/cityValidators.js';
-import { createOccupancyGrid, stampEdge, stampJunction, stampPlot } from './roadOccupancy.js';
+import { createOccupancyGrid, attachBuildability, stampEdge, stampJunction, stampPlot } from './roadOccupancy.js';
 import { computeBuildability } from './buildability.js';
 import { connectNuclei } from './connectNuclei.js';
 import { Grid2D } from '../core/Grid2D.js';
@@ -74,13 +74,15 @@ export function generateCity(regionalLayers, settlement, rng, options = {}) {
   const occupancy = createOccupancyGrid(cityLayers.getData('params'));
   cityLayers.setData('occupancy', occupancy);
 
-  // Initial buildability (terrain-only, no occupancy yet)
-  computeBuildability(cityLayers);
+  // Buildability from terrain (computed once, then incrementally updated by stamps)
+  const buildability = computeBuildability(cityLayers);
+  attachBuildability(occupancy, buildability);
 
   // C0d. Anchor routes (Phase 1-4: shared-grid pathfinding)
   const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'), occupancy);
 
   // Stamp all anchor route edges + junctions onto occupancy
+  // (buildability is incrementally zeroed via attachBuildability)
   for (const edgeId of roadGraph.edges.keys()) {
     stampEdge(roadGraph, edgeId, occupancy);
   }
@@ -121,9 +123,6 @@ export function generateCity(regionalLayers, settlement, rng, options = {}) {
   for (const p of institutionalPlots) {
     if (p.vertices) stampPlot(p.vertices, occupancy);
   }
-
-  // Compute buildability — the single source of truth for "can we build here?"
-  computeBuildability(cityLayers, occupancy);
 
   // Connect all nuclei to road network and to each other (Union-Find + MST)
   connectNuclei(cityLayers, roadGraph, nuclei, occupancy);

@@ -91,6 +91,7 @@ export function generateRegion(params, rng) {
 
   layers.setData('rivers', hydrology.rivers);
   layers.setData('confluences', hydrology.confluences);
+  layers.setData('riverPaths', hydrology.riverPaths);
   layers.setGrid('waterMask', hydrology.waterMask);
 
   const geoExtras = {

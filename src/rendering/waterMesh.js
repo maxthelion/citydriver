@@ -1,32 +1,6 @@
 import * as THREE from 'three';
 import { getRiverMaterial } from './materials.js';
-
-/**
- * Chaikin's corner-cutting: smooths a polyline of {x, z, accumulation} points.
- */
-function smoothPolyline(points, iterations = 3) {
-  let result = points;
-  for (let iter = 0; iter < iterations; iter++) {
-    const next = [result[0]];
-    for (let i = 0; i < result.length - 1; i++) {
-      const a = result[i];
-      const b = result[i + 1];
-      next.push({
-        x: a.x * 0.75 + b.x * 0.25,
-        z: a.z * 0.75 + b.z * 0.25,
-        accumulation: a.accumulation * 0.75 + b.accumulation * 0.25,
-      });
-      next.push({
-        x: a.x * 0.25 + b.x * 0.75,
-        z: a.z * 0.25 + b.z * 0.75,
-        accumulation: a.accumulation * 0.25 + b.accumulation * 0.75,
-      });
-    }
-    next.push(result[result.length - 1]);
-    result = next;
-  }
-  return result;
-}
+import { chaikinSmooth, riverHalfWidth } from '../core/riverGeometry.js';
 
 /**
  * Build a water plane for the city.
@@ -122,13 +96,13 @@ export function buildRiverMeshes(cityLayers) {
     }
 
     if (worldPoints.length >= 2) {
-      const smooth = smoothPolyline(worldPoints, 3);
+      const smooth = chaikinSmooth(worldPoints, 3);
       const baseVertex = vertices.length / 3;
 
       for (let i = 0; i < smooth.length; i++) {
         const p = smooth[i];
         const y = elevation.sample(p.x / cs, p.z / cs) + 1.0;
-        const halfWidth = Math.max(1.5, Math.min(25, Math.sqrt(p.accumulation) / 8));
+        const halfWidth = riverHalfWidth(p.accumulation);
 
         let dx, dz;
         if (i < smooth.length - 1) {

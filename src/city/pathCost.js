@@ -65,17 +65,33 @@ export function createPathCost(cityLayers, options = {}) {
 
     let c = baseDist + slope * slopePenalty;
 
+    // Occupancy: check FIRST so road reuse works even when buildability
+    // has been zeroed out by incremental stamping
+    if (occData) {
+      const ax = Math.floor((toGx * cs) / occRes);
+      const az = Math.floor((toGz * cs) / occRes);
+      if (ax >= 0 && ax < occW && az >= 0 && az < occH) {
+        const val = occData[az * occW + ax];
+        if (val === OCCUPANCY_ROAD || val === OCCUPANCY_JUNCTION) {
+          // Fixed low cost for existing roads — terrain-independent so roads
+          // always merge even through steep/wet terrain.
+          return baseDist * reuseDiscount;
+        } else if (val === OCCUPANCY_PLOT) {
+          c *= plotPenalty;
+        }
+      }
+    }
+
     // Bridge check — bridges bypass unbuildable water
     const isBridge = bridgeGrid && bridgeGrid.get(toGx, toGz) > 0;
 
-    // Buildability: single source of truth for terrain suitability
-    // (encodes water, sea level, slope, edge margin, waterfront bonus)
+    // Buildability: terrain suitability (water, sea level, slope, edge margin)
+    // Road/junction cells already returned above, so b=0 here means
+    // genuinely unbuildable terrain.
     if (buildability && toGx >= 0 && toGx < w && toGz >= 0 && toGz < h) {
       const b = buildability.get(toGx, toGz);
       if (b < 0.01) {
-        // Unbuildable cell (water, sea, steep cliff, edge)
         if (isBridge) {
-          // Bridge can cross — expensive but not impassable
           c *= 8;
         } else if (!isFinite(unbuildableCost)) {
           return Infinity;
@@ -83,25 +99,7 @@ export function createPathCost(cityLayers, options = {}) {
           c *= unbuildableCost;
         }
       } else if (b < 0.3) {
-        // Low buildability — moderate penalty
         c *= 1 + 2 * (1 - b / 0.3);
-      }
-      // b >= 0.3: no terrain penalty
-    }
-
-    // Occupancy: road reuse discount / plot penalty
-    // (separate from buildability because pathfinding needs to distinguish
-    // "existing road" from "existing plot" from "empty land")
-    if (occData) {
-      const ax = Math.floor((toGx * cs) / occRes);
-      const az = Math.floor((toGz * cs) / occRes);
-      if (ax >= 0 && ax < occW && az >= 0 && az < occH) {
-        const val = occData[az * occW + ax];
-        if (val === OCCUPANCY_ROAD || val === OCCUPANCY_JUNCTION) {
-          c *= reuseDiscount;
-        } else if (val === OCCUPANCY_PLOT) {
-          c *= plotPenalty;
-        }
       }
     }
 
@@ -152,6 +150,20 @@ export function nucleusConnectionCost(cityLayers) {
     slopePenalty: 5,
     unbuildableCost: 12,
     reuseDiscount: 0.1,
+    plotPenalty: 3.0,
+  });
+}
+
+/**
+ * Preset: shortcut roads between neighborhoods.
+ * No reuse discount — we want new roads cutting across open space,
+ * not paths that follow existing roads.
+ */
+export function shortcutRoadCost(cityLayers) {
+  return createPathCost(cityLayers, {
+    slopePenalty: 8,
+    unbuildableCost: 20,
+    reuseDiscount: 1.0,
     plotPenalty: 3.0,
   });
 }

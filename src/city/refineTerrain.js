@@ -1,10 +1,13 @@
 /**
  * B1b. Refine terrain at city scale.
  * Adds high-frequency detail to the inherited regional heightmap.
+ * Carves river channels using distance from river centerline for
+ * smooth cross-section profiles.
  */
 
 import { Grid2D } from '../core/Grid2D.js';
 import { PerlinNoise } from '../core/noise.js';
+import { channelProfile, riverMaxDepth } from '../core/riverGeometry.js';
 
 /**
  * Refine the city-scale elevation with high-frequency terrain detail.
@@ -55,37 +58,112 @@ export function refineTerrain(cityLayers, rng) {
 
   cityLayers.setGrid('slope', slope);
 
-  // Carve river channels into city terrain
-  const waterMask = cityLayers.getGrid('waterMask');
-  const seaLevel = params?.seaLevel ?? 0;
-  if (waterMask) {
-    for (let gz = 0; gz < h; gz++) {
-      for (let gx = 0; gx < w; gx++) {
-        if (waterMask.get(gx, gz) > 0 && elevation.get(gx, gz) >= seaLevel) {
-          // Carve channel: lower by 1-3 units based on nearby water density
-          let waterNeighbors = 0;
-          for (let dz = -1; dz <= 1; dz++) {
-            for (let dx = -1; dx <= 1; dx++) {
-              if (dx === 0 && dz === 0) continue;
-              if (waterMask.get(gx + dx, gz + dz) > 0) waterNeighbors++;
-            }
-          }
-          const channelDepth = 1 + (waterNeighbors / 8) * 2; // 1-3 units
-          elevation.set(gx, gz, elevation.get(gx, gz) - channelDepth);
+  // Carve river channels using centerline distance
+  carveRiverChannels(cityLayers, elevation, w, h, cs, params);
+}
 
-          // Smooth channel edges: lower adjacent non-water cells slightly
-          for (let dz = -1; dz <= 1; dz++) {
-            for (let dx = -1; dx <= 1; dx++) {
-              if (dx === 0 && dz === 0) continue;
-              const nx = gx + dx, nz = gz + dz;
-              if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
-              if (waterMask.get(nx, nz) === 0 && elevation.get(nx, nz) >= seaLevel) {
-                const bankDrop = channelDepth * 0.3;
-                elevation.set(nx, nz, elevation.get(nx, nz) - bankDrop);
-              }
+/**
+ * Compute distance from each city cell to the nearest river centerline
+ * point, along with the river half-width at that closest point.
+ * Returns a Float32Array of normalized distances (0 = center, 1 = edge,
+ * >1 = outside river) and stores the raw distance grid on cityLayers.
+ */
+function computeRiverDistanceGrid(riverPaths, w, h, cs) {
+  // dist: world-unit distance to nearest centerline point
+  // halfW: river half-width at the nearest centerline point
+  const dist = new Float32Array(w * h).fill(Infinity);
+  const halfW = new Float32Array(w * h);
+
+  for (const path of riverPaths) {
+    const pts = path.points;
+    if (pts.length < 2) continue;
+
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const segLen = Math.sqrt(dx * dx + dz * dz);
+      if (segLen < 0.01) continue;
+
+      // Max river half-width along this segment (for paint radius)
+      const maxHW = Math.max(a.width, b.width) / 2;
+      // Paint radius: extend beyond river edge for bank carving
+      const paintRadius = maxHW + cs * 3;
+
+      // Walk along segment
+      const stepSize = cs * 0.5;
+      const steps = Math.ceil(segLen / stepSize);
+
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const px = a.x + dx * t;
+        const pz = a.z + dz * t;
+        const hw = (a.width * (1 - t) + b.width * t) / 2;
+
+        const cellRadius = Math.ceil(paintRadius / cs);
+        const cgx = Math.floor(px / cs);
+        const cgz = Math.floor(pz / cs);
+
+        for (let ddz = -cellRadius; ddz <= cellRadius; ddz++) {
+          for (let ddx = -cellRadius; ddx <= cellRadius; ddx++) {
+            const gx = cgx + ddx;
+            const gz = cgz + ddz;
+            if (gx < 0 || gx >= w || gz < 0 || gz >= h) continue;
+
+            const cellX = gx * cs + cs / 2;
+            const cellZ = gz * cs + cs / 2;
+            const d = Math.sqrt((cellX - px) ** 2 + (cellZ - pz) ** 2);
+
+            const idx = gz * w + gx;
+            if (d < dist[idx]) {
+              dist[idx] = d;
+              halfW[idx] = hw;
             }
           }
         }
+      }
+    }
+  }
+
+  return { dist, halfW };
+}
+
+/**
+ * Carve river channels into city elevation using distance from river
+ * centerline. Produces smooth V/U-shaped cross-sections instead of
+ * blocky rectangular trenches.
+ */
+function carveRiverChannels(cityLayers, elevation, w, h, cs, params) {
+  const riverPaths = cityLayers.getData('riverPaths');
+  const seaLevel = params?.seaLevel ?? 0;
+  if (!riverPaths || riverPaths.length === 0) return;
+
+  const { dist, halfW } = computeRiverDistanceGrid(riverPaths, w, h, cs);
+
+  // Store for use by buildability
+  cityLayers.setData('riverDist', { dist, halfW, width: w, height: h });
+
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      const idx = gz * w + gx;
+      const d = dist[idx];
+      const hw = halfW[idx];
+      if (hw === 0 || d === Infinity) continue;
+
+      const elev = elevation.get(gx, gz);
+      if (elev < seaLevel) continue;
+
+      // Normalized distance: 0 = center, 1 = river edge
+      const nd = d / hw;
+      const depthFraction = channelProfile(nd);
+      if (depthFraction <= 0) continue;
+
+      const maxDepth = riverMaxDepth(hw);
+      const carve = maxDepth * depthFraction;
+
+      if (carve > 0.05) {
+        elevation.set(gx, gz, elev - carve);
       }
     }
   }
