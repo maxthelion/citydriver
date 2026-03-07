@@ -66,19 +66,27 @@ export function createPathCost(cityLayers, options = {}) {
     let c = baseDist + slope * slopePenalty;
 
     // Occupancy: check FIRST so road reuse works even when buildability
-    // has been zeroed out by incremental stamping
+    // has been zeroed out by incremental stamping.
+    // Scan ALL occupancy cells within this city cell to avoid resolution
+    // mismatch (10m city cell covers ~3-4 occupancy cells per axis).
     if (occData) {
-      const ax = Math.floor((toGx * cs) / occRes);
-      const az = Math.floor((toGz * cs) / occRes);
-      if (ax >= 0 && ax < occW && az >= 0 && az < occH) {
-        const val = occData[az * occW + ax];
-        if (val === OCCUPANCY_ROAD || val === OCCUPANCY_JUNCTION) {
-          // Fixed low cost for existing roads — terrain-independent so roads
-          // always merge even through steep/wet terrain.
-          return baseDist * reuseDiscount;
-        } else if (val === OCCUPANCY_PLOT) {
-          c *= plotPenalty;
+      const axMin = Math.floor((toGx * cs) / occRes);
+      const axMax = Math.min(occW - 1, Math.floor(((toGx + 1) * cs - 1) / occRes));
+      const azMin = Math.floor((toGz * cs) / occRes);
+      const azMax = Math.min(occH - 1, Math.floor(((toGz + 1) * cs - 1) / occRes));
+      let hasRoad = false, hasPlot = false;
+      for (let az = azMin; az <= azMax && !hasRoad; az++) {
+        for (let ax = axMin; ax <= axMax && !hasRoad; ax++) {
+          if (ax < 0 || az < 0) continue;
+          const val = occData[az * occW + ax];
+          if (val === OCCUPANCY_ROAD || val === OCCUPANCY_JUNCTION) hasRoad = true;
+          else if (val === OCCUPANCY_PLOT) hasPlot = true;
         }
+      }
+      if (hasRoad) {
+        return baseDist * reuseDiscount;
+      } else if (hasPlot) {
+        c *= plotPenalty;
       }
     }
 

@@ -101,17 +101,22 @@ export function wrapCostWithOccupancy(baseCost, occupancy, cs) {
     let c = baseCost(fromGx, fromGz, toGx, toGz);
     if (!isFinite(c)) return c;
 
-    // Sample the occupancy cell at the target position
-    const wx = toGx * cs, wz = toGz * cs;
-    const ax = Math.floor(wx / res), az = Math.floor(wz / res);
-    if (ax >= 0 && ax < occupancy.width && az >= 0 && az < occupancy.height) {
-      const val = data[az * aw + ax];
-      if (val === OCCUPANCY_ROAD || val === OCCUPANCY_JUNCTION) {
-        c *= 0.15;
-      } else if (val === OCCUPANCY_PLOT) {
-        c *= 5;
+    // Scan all occupancy cells within this city cell (10m → 3m resolution)
+    const axMin = Math.floor((toGx * cs) / res);
+    const axMax = Math.min(aw - 1, Math.floor(((toGx + 1) * cs - 1) / res));
+    const azMin = Math.floor((toGz * cs) / res);
+    const azMax = Math.min(occupancy.height - 1, Math.floor(((toGz + 1) * cs - 1) / res));
+    let hasRoad = false, hasPlot = false;
+    for (let az = azMin; az <= azMax && !hasRoad; az++) {
+      for (let ax = axMin; ax <= axMax && !hasRoad; ax++) {
+        if (ax < 0 || az < 0) continue;
+        const val = data[az * aw + ax];
+        if (val === OCCUPANCY_ROAD || val === OCCUPANCY_JUNCTION) hasRoad = true;
+        else if (val === OCCUPANCY_PLOT) hasPlot = true;
       }
     }
+    if (hasRoad) c *= 0.15;
+    else if (hasPlot) c *= 5;
     return c;
   };
 }
@@ -203,24 +208,25 @@ export function stampCircleOnGrid(cx, cz, radius, occupancy, value) {
 }
 
 /**
- * Walk a road polyline at buildability resolution, detect water crossings,
- * and mark bridgeGrid cells. Also appends bridge records for debug rendering.
+ * Rasterize a road polyline into grid cells (Bresenham between vertices),
+ * detect water crossings, and mark bridgeGrid cells.
+ * Also appends bridge records for debug rendering.
  */
 function detectBridgeCells(polyline, occupancy) {
   const { bridgeGrid, waterMask, bridges, cityCS } = occupancy;
   const w = bridgeGrid.width;
   const h = bridgeGrid.height;
 
+  // Rasterize polyline into grid cells via Bresenham
+  const cells = rasterizePolylineToGrid(polyline, cityCS, w, h);
+
   let inWater = false;
+  let seenLand = false;
   let entryGx = 0, entryGz = 0;
   let lastLandGx = 0, lastLandGz = 0;
 
-  // Walk the polyline at grid resolution
-  for (let i = 0; i < polyline.length; i++) {
-    const gx = Math.round(polyline[i].x / cityCS);
-    const gz = Math.round(polyline[i].z / cityCS);
-    if (gx < 0 || gx >= w || gz < 0 || gz >= h) continue;
-
+  for (let i = 0; i < cells.length; i++) {
+    const { gx, gz } = cells[i];
     const isWater = waterMask.get(gx, gz) > 0;
 
     if (!inWater && isWater) {
@@ -229,24 +235,25 @@ function detectBridgeCells(polyline, occupancy) {
       entryGz = lastLandGz;
     } else if (inWater && !isWater) {
       inWater = false;
-      // Mark bridge cells from entry to exit
-      markBridgeLine(bridgeGrid, entryGx, entryGz, gx, gz, w, h);
-      // Append bridge record for rendering
-      if (bridges) {
-        const dx = gx - entryGx, dz = gz - entryGz;
-        const bWidth = Math.round(Math.sqrt(dx * dx + dz * dz));
-        if (bWidth >= 1 && bWidth <= 25) {
-          bridges.push({
-            startGx: entryGx, startGz: entryGz,
-            endGx: gx, endGz: gz,
-            gx: Math.round((entryGx + gx) / 2),
-            gz: Math.round((entryGz + gz) / 2),
-            x: Math.round((entryGx + gx) / 2) * cityCS,
-            z: Math.round((entryGz + gz) / 2) * cityCS,
-            width: bWidth,
-            heading: Math.atan2(dx, dz),
-            importance: 0.4,
-          });
+      // Only create bridge if we had a valid land cell before entering water
+      if (seenLand) {
+        markBridgeLine(bridgeGrid, entryGx, entryGz, gx, gz, w, h);
+        if (bridges) {
+          const dx = gx - entryGx, dz = gz - entryGz;
+          const bWidth = Math.round(Math.sqrt(dx * dx + dz * dz));
+          if (bWidth >= 1 && bWidth <= 25) {
+            bridges.push({
+              startGx: entryGx, startGz: entryGz,
+              endGx: gx, endGz: gz,
+              gx: Math.round((entryGx + gx) / 2),
+              gz: Math.round((entryGz + gz) / 2),
+              x: Math.round((entryGx + gx) / 2) * cityCS,
+              z: Math.round((entryGz + gz) / 2) * cityCS,
+              width: bWidth,
+              heading: Math.atan2(dx, dz),
+              importance: 0.4,
+            });
+          }
         }
       }
     }
@@ -254,11 +261,48 @@ function detectBridgeCells(polyline, occupancy) {
     if (!isWater) {
       lastLandGx = gx;
       lastLandGz = gz;
+      seenLand = true;
     } else {
       // Mark water cells under road as bridge-passable
       bridgeGrid.set(gx, gz, 1);
     }
   }
+}
+
+/**
+ * Rasterize a world-coord polyline into unique grid cells via Bresenham.
+ */
+function rasterizePolylineToGrid(polyline, cs, w, h) {
+  const cells = [];
+  const seen = new Set();
+
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const x0 = Math.round(polyline[i].x / cs);
+    const z0 = Math.round(polyline[i].z / cs);
+    const x1 = Math.round(polyline[i + 1].x / cs);
+    const z1 = Math.round(polyline[i + 1].z / cs);
+
+    let gx = x0, gz = z0;
+    const dx = Math.abs(x1 - x0), dz = Math.abs(z1 - z0);
+    const sx = x0 < x1 ? 1 : -1, sz = z0 < z1 ? 1 : -1;
+    let err = dx - dz;
+
+    while (true) {
+      if (gx >= 0 && gx < w && gz >= 0 && gz < h) {
+        const key = gz * w + gx;
+        if (!seen.has(key)) {
+          seen.add(key);
+          cells.push({ gx, gz });
+        }
+      }
+      if (gx === x1 && gz === z1) break;
+      const e2 = 2 * err;
+      if (e2 > -dz) { err -= dz; gx += sx; }
+      if (e2 < dx) { err += dx; gz += sz; }
+    }
+  }
+
+  return cells;
 }
 
 /**

@@ -562,12 +562,14 @@ export function renderRegionOverview(regionalLayers, settlement, cityRadius) {
     for (const root of rivers) drawRiverSeg(root);
   }
 
-  // Roads
+  // Roads (sorted so arterials draw last / on top)
   const roads = regionalLayers.getData('roads');
   if (roads) {
-    for (const road of roads) {
+    const regionRoadColors = { arterial: [200, 180, 120], collector: [160, 140, 100], local: [120, 110, 80], track: [100, 90, 70] };
+    const hierOrder = { track: 0, local: 1, collector: 2, arterial: 3 };
+    const sorted = [...roads].sort((a, b) => (hierOrder[a.hierarchy] ?? 0) - (hierOrder[b.hierarchy] ?? 0));
+    for (const road of sorted) {
       if (!road.path || road.path.length < 2) continue;
-      const regionRoadColors = { arterial: [200, 180, 120], collector: [160, 140, 100], local: [120, 110, 80], track: [100, 90, 70] };
       const c = regionRoadColors[road.hierarchy] || [120, 110, 80];
       for (let i = 0; i < road.path.length - 1; i++) {
         drawLine(buf,

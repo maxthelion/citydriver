@@ -3,42 +3,35 @@
  * Routes roads between settlements using terrain-weighted A* pathfinding.
  * Roads follow valleys, cross rivers at narrow points, pass through highland passes.
  *
+ * After pathfinding, roads that share cells are merged via mergeRoadPaths:
+ * shared portions are kept once (highest hierarchy), unique tails become
+ * separate segments. Eliminates double lines where routes share a corridor.
+ *
  * Connection logic uses a phased algorithm with Union-Find to guarantee
- * full connectivity:
- *   Phase 1: Nearest neighbor (zero isolates)
- *   Phase 2: Local neighborhood (K-nearest + proximity)
- *   Phase 3: Cluster identification
- *   Phase 4: Inter-cluster bridging (Kruskal's MST + extras)
- *   Phase 5: Backbone verification (all tier 1-2 connected)
- *   Phase 6: Tier 5 farm tracks
+ * full connectivity.
  */
 
-import { findPath, terrainCostFunction, simplifyPath, smoothPath } from '../core/pathfinding.js';
+import { findPath, terrainCostFunction, simplifyPath } from '../core/pathfinding.js';
 import { distance2D } from '../core/math.js';
 import { Grid2D } from '../core/Grid2D.js';
 import { UnionFind } from '../core/UnionFind.js';
+import { mergeRoadPaths } from '../core/mergeRoadPaths.js';
+
+const HIER_RANK = { arterial: 1, collector: 2, local: 3, track: 4 };
+const RANK_HIER = { 1: 'arterial', 2: 'collector', 3: 'local', 4: 'track' };
 
 /**
  * @param {object} params
- * @param {number} params.width
- * @param {number} params.height
- * @param {number} [params.cellSize=50]
  * @param {Array} settlements - [{gx, gz, tier}]
  * @param {import('../core/Grid2D.js').Grid2D} elevation
  * @param {import('../core/Grid2D.js').Grid2D} slope
  * @param {import('../core/Grid2D.js').Grid2D} waterMask
  * @param {import('../core/rng.js').SeededRandom} rng
  * @param {object} [options]
- * @param {Grid2D} [options.existingRoadGrid] - Road grid from previous pass (for incremental mode)
- * @param {Array} [options.existingRoads] - Roads from previous pass (for incremental mode)
  * @returns {{ roads: Array<{from, to, path, hierarchy}>, roadGrid: Grid2D }}
  */
 export function generateRoads(params, settlements, elevation, slope, waterMask, rng, options = {}) {
-  const {
-    width,
-    height,
-    cellSize = 50,
-  } = params;
+  const { width, height, cellSize = 50 } = params;
 
   if (!settlements || settlements.length < 2) {
     return { roads: options.existingRoads || [], roadGrid: options.existingRoadGrid || new Grid2D(width, height, { type: 'uint8' }) };
@@ -52,44 +45,54 @@ export function generateRoads(params, settlements, elevation, slope, waterMask, 
     edgePenalty: 3,
   });
 
-  // Track existing road cells so later roads prefer sharing established routes
   const roadGrid = options.existingRoadGrid
     ? options.existingRoadGrid.clone()
     : new Grid2D(width, height, { type: 'uint8' });
 
+  // Existing road cells get fixed low cost so new roads merge onto them
   const roadAwareCost = (fromGx, fromGz, toGx, toGz) => {
     const base = costFn(fromGx, fromGz, toGx, toGz);
     if (base < 0) return base;
-    return roadGrid.get(toGx, toGz) > 0 ? base * 0.3 : base;
+    if (roadGrid.get(toGx, toGz) > 0) {
+      const dx = toGx - fromGx, dz = toGz - fromGz;
+      return Math.sqrt(dx * dx + dz * dz) * 0.3;
+    }
+    return base;
   };
 
-  // Build connections using phased algorithm
   const connections = buildConnections(settlements, width, elevation);
 
-  // In incremental mode, skip connections that already exist
   const existingRoads = options.existingRoads || [];
   const existingPairs = new Set();
   for (const road of existingRoads) {
-    const keyFwd = `${road.from.gx},${road.from.gz}-${road.to.gx},${road.to.gz}`;
-    const keyRev = `${road.to.gx},${road.to.gz}-${road.from.gx},${road.from.gz}`;
-    existingPairs.add(keyFwd);
-    existingPairs.add(keyRev);
+    existingPairs.add(`${road.from.gx},${road.from.gz}-${road.to.gx},${road.to.gz}`);
+    existingPairs.add(`${road.to.gx},${road.to.gz}-${road.from.gx},${road.from.gz}`);
   }
 
-  // Sort: arterials first so the trunk network exists before feeders pathfind.
-  // Within each hierarchy, shorter roads first so they stamp the roadGrid
-  // early and attract longer roads to merge through them.
+  // Sort: arterials first, then shorter roads first
   const hierarchyOrder = { arterial: 0, collector: 1, local: 2, track: 3 };
   connections.sort((a, b) => {
     const hDiff = (hierarchyOrder[a.hierarchy] ?? 3) - (hierarchyOrder[b.hierarchy] ?? 3);
     if (hDiff !== 0) return hDiff;
-    const distA = distance2D(a.from.gx, a.from.gz, a.to.gx, a.to.gz);
-    const distB = distance2D(b.from.gx, b.from.gz, b.to.gx, b.to.gz);
-    return distA - distB;
+    return distance2D(a.from.gx, a.from.gz, a.to.gx, a.to.gz) -
+           distance2D(b.from.gx, b.from.gz, b.to.gx, b.to.gz);
   });
 
-  // Find paths
-  const roads = [...existingRoads];
+  // ============================================================
+  // Pathfind all connections, stamp onto roadGrid
+  // ============================================================
+
+  const rawPaths = []; // { cells, rank } for mergeRoadPaths
+
+  // Include existing roads so the merge can split them at new junctions
+  for (const road of existingRoads) {
+    const cells = road.rawPath || road.path;
+    if (cells && cells.length >= 2) {
+      // All paths get rank 1 for uniform merge; hierarchy assigned post-merge
+      rawPaths.push({ cells, rank: 1, hierarchy: road.hierarchy || 'local' });
+    }
+  }
+
   for (const conn of connections) {
     const pairKey = `${conn.from.gx},${conn.from.gz}-${conn.to.gx},${conn.to.gz}`;
     if (existingPairs.has(pairKey)) continue;
@@ -101,39 +104,61 @@ export function generateRoads(params, settlements, elevation, slope, waterMask, 
     );
 
     if (result) {
-      for (const p of result.path) {
-        roadGrid.set(p.gx, p.gz, 1);
-      }
-
-      const simplified = simplifyPath(result.path, 1.5);
-      roads.push({
-        from: { gx: conn.from.gx, gz: conn.from.gz },
-        to: { gx: conn.to.gx, gz: conn.to.gz },
-        path: simplified,
-        rawPath: result.path,
-        hierarchy: conn.hierarchy,
-        cost: result.cost,
-      });
+      for (const p of result.path) roadGrid.set(p.gx, p.gz, 1);
+      rawPaths.push({ cells: result.path, rank: 1, hierarchy: conn.hierarchy || 'local' });
     }
+  }
+
+  // ============================================================
+  // Merge shared segments
+  // ============================================================
+
+  const merged = mergeRoadPaths(rawPaths);
+
+  // Build cell → best hierarchy lookup from original paths
+  const cellBestHier = new Map();
+  for (const p of rawPaths) {
+    const rank = HIER_RANK[p.hierarchy] || 4;
+    for (const c of p.cells) {
+      const key = `${c.gx},${c.gz}`;
+      const prev = cellBestHier.get(key) || 9;
+      if (rank < prev) cellBestHier.set(key, rank);
+    }
+  }
+
+  const roads = [];
+  for (const seg of merged) {
+    if (seg.cells.length < 2) continue;
+    const simplified = simplifyPath(seg.cells, 1.5);
+
+    // Derive hierarchy from best original path that used these cells
+    let bestRank = 9;
+    for (const c of seg.cells) {
+      const r = cellBestHier.get(`${c.gx},${c.gz}`) || 9;
+      if (r < bestRank) bestRank = r;
+    }
+
+    roads.push({
+      from: { gx: seg.cells[0].gx, gz: seg.cells[0].gz },
+      to: { gx: seg.cells[seg.cells.length - 1].gx, gz: seg.cells[seg.cells.length - 1].gz },
+      path: simplified,
+      rawPath: seg.cells,
+      hierarchy: RANK_HIER[bestRank] || 'local',
+    });
   }
 
   return { roads, roadGrid };
 }
 
-/**
- * Estimate how difficult it is to cross terrain between two points.
- * Samples elevation along the straight line and penalizes high points and ascent.
- * Used to find mountain passes — prefers pairs crossing through saddles.
- */
+// ============================================================
+// Helpers
+// ============================================================
+
 function estimateCrossingDifficulty(a, b, elevation) {
   const dist = distance2D(a.gx, a.gz, b.gx, b.gz);
   if (dist < 1) return dist;
-
   const steps = Math.ceil(dist);
-  let maxElev = 0;
-  let totalAscent = 0;
-  let prevElev = elevation.get(a.gx, a.gz);
-
+  let maxElev = 0, totalAscent = 0, prevElev = elevation.get(a.gx, a.gz);
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
     const gx = Math.round(a.gx + (b.gx - a.gx) * t);
@@ -146,7 +171,6 @@ function estimateCrossingDifficulty(a, b, elevation) {
     if (elev > prevElev) totalAscent += elev - prevElev;
     prevElev = elev;
   }
-
   return dist * (1 + maxElev / 100 + totalAscent / 200);
 }
 
@@ -157,9 +181,8 @@ function buildConnections(settlements, gridWidth, elevation) {
   const routable = settlements.filter(s => s.tier <= 5);
   if (routable.length < 2) return [];
 
-  // Assign each settlement a stable index for Union-Find
   const uf = new UnionFind(routable.length);
-  const indexMap = new Map(); // "gx,gz" -> index
+  const indexMap = new Map();
   for (let i = 0; i < routable.length; i++) {
     indexMap.set(`${routable[i].gx},${routable[i].gz}`, i);
   }
@@ -173,10 +196,7 @@ function buildConnections(settlements, gridWidth, elevation) {
     const pairKey = keyA < keyB ? `${keyA}-${keyB}` : `${keyB}-${keyA}`;
     if (pairSet.has(pairKey)) return;
     pairSet.add(pairKey);
-
     connections.push({ from: a, to: b, hierarchy });
-
-    // Update Union-Find
     const ia = indexMap.get(keyA);
     const ib = indexMap.get(keyB);
     if (ia !== undefined && ib !== undefined) uf.union(ia, ib);
@@ -193,63 +213,43 @@ function buildConnections(settlements, gridWidth, elevation) {
     return 'local';
   }
 
-  // --- Phase 1: Nearest neighbor guarantee ---
-  // Every settlement connects to its single nearest neighbor. Zero isolates.
+  // Phase 1: Nearest neighbor
   for (let i = 0; i < routable.length; i++) {
-    let nearestIdx = -1;
-    let nearestDist = Infinity;
+    let nearestIdx = -1, nearestDist = Infinity;
     for (let j = 0; j < routable.length; j++) {
       if (i === j) continue;
       const d = distance2D(routable[i].gx, routable[i].gz, routable[j].gx, routable[j].gz);
-      if (d < nearestDist) {
-        nearestDist = d;
-        nearestIdx = j;
-      }
+      if (d < nearestDist) { nearestDist = d; nearestIdx = j; }
     }
-    if (nearestIdx >= 0) {
-      addConnection(routable[i], routable[nearestIdx], assignHierarchy(routable[i], routable[nearestIdx]));
-    }
+    if (nearestIdx >= 0) addConnection(routable[i], routable[nearestIdx], assignHierarchy(routable[i], routable[nearestIdx]));
   }
 
-  // --- Phase 2: Local neighborhood (K-nearest + proximity) ---
+  // Phase 2: K-nearest + proximity
   const neighborsForTier = { 1: 5, 2: 4, 3: 3, 4: 2, 5: 1 };
-  const maxDistForTier = {
-    1: gridWidth * 0.8,
-    2: gridWidth * 0.5,
-    3: gridWidth * 0.3,
-    4: 30,
-    5: 12,
-  };
-
-  // Proximity guarantee: close pairs always connected
+  const maxDistForTier = { 1: gridWidth * 0.8, 2: gridWidth * 0.5, 3: gridWidth * 0.3, 4: 30, 5: 12 };
   const proximityThreshold = 15;
+
   for (let i = 0; i < routable.length; i++) {
     for (let j = i + 1; j < routable.length; j++) {
-      const dist = distance2D(routable[i].gx, routable[i].gz, routable[j].gx, routable[j].gz);
-      if (dist <= proximityThreshold) {
+      if (distance2D(routable[i].gx, routable[i].gz, routable[j].gx, routable[j].gz) <= proximityThreshold) {
         addConnection(routable[i], routable[j], assignHierarchy(routable[i], routable[j]));
       }
     }
   }
 
-  // K-nearest per tier
   for (const s of routable) {
     const k = neighborsForTier[s.tier] ?? 2;
     const maxDist = maxDistForTier[s.tier] ?? 30;
-
     const candidates = routable
       .filter(c => c !== s)
       .map(c => ({ settlement: c, dist: distance2D(s.gx, s.gz, c.gx, c.gz) }))
       .filter(c => c.dist <= maxDist)
       .sort((a, b) => a.dist - b.dist)
       .slice(0, k);
-
-    for (const c of candidates) {
-      addConnection(s, c.settlement, assignHierarchy(s, c.settlement));
-    }
+    for (const c of candidates) addConnection(s, c.settlement, assignHierarchy(s, c.settlement));
   }
 
-  // --- Phase 3: Cluster identification ---
+  // Phase 3: Cluster identification
   const componentMap = uf.components();
   const clusters = [];
   const importanceWeights = { 1: 10, 2: 5, 3: 3, 4: 1, 5: 0.5 };
@@ -258,89 +258,47 @@ function buildConnections(settlements, gridWidth, elevation) {
     const members = memberIndices.map(i => routable[i]);
     let cx = 0, cz = 0, importance = 0, highestTier = 5;
     for (const m of members) {
-      cx += m.gx;
-      cz += m.gz;
+      cx += m.gx; cz += m.gz;
       importance += importanceWeights[m.tier] ?? 1;
       if (m.tier < highestTier) highestTier = m.tier;
     }
-    clusters.push({
-      root,
-      members,
-      count: members.length,
-      highestTier,
-      importance,
-      centroid: { gx: cx / members.length, gz: cz / members.length },
-    });
+    clusters.push({ root, members, count: members.length, highestTier, importance,
+      centroid: { gx: cx / members.length, gz: cz / members.length } });
   }
 
-  // If only one cluster, skip bridging
   if (clusters.length <= 1) return connections;
 
-  // --- Phase 4: Inter-cluster bridging ---
-  // For each pair of clusters, find the best crossing point (lowest difficulty)
+  // Phase 4: Inter-cluster bridging
   const clusterPairs = [];
   for (let i = 0; i < clusters.length; i++) {
     for (let j = i + 1; j < clusters.length; j++) {
-      const ci = clusters[i];
-      const cj = clusters[j];
-
-      // Find the settlement pair with lowest crossing difficulty
-      let bestDifficulty = Infinity;
-      let bestA = null, bestB = null;
-      for (const a of ci.members) {
-        for (const b of cj.members) {
+      let bestDiff = Infinity, bestA = null, bestB = null;
+      for (const a of clusters[i].members) {
+        for (const b of clusters[j].members) {
           const diff = estimateCrossingDifficulty(a, b, elevation);
-          if (diff < bestDifficulty) {
-            bestDifficulty = diff;
-            bestA = a;
-            bestB = b;
-          }
+          if (diff < bestDiff) { bestDiff = diff; bestA = a; bestB = b; }
         }
       }
-
-      if (bestA && bestB) {
-        clusterPairs.push({
-          ci, cj,
-          bestA, bestB,
-          difficulty: bestDifficulty,
-        });
-      }
+      if (bestA && bestB) clusterPairs.push({ ci: clusters[i], cj: clusters[j], bestA, bestB, difficulty: bestDiff });
     }
   }
-
   clusterPairs.sort((a, b) => a.difficulty - b.difficulty);
 
-  // MST pass: bridge all clusters into one component
   const clusterUf = new UnionFind(clusters.length);
   const clusterIndexMap = new Map();
-  for (let i = 0; i < clusters.length; i++) {
-    clusterIndexMap.set(clusters[i].root, i);
-  }
-
-  // Track outbound bridge count per cluster
+  for (let i = 0; i < clusters.length; i++) clusterIndexMap.set(clusters[i].root, i);
   const bridgeCount = new Array(clusters.length).fill(0);
 
   for (const pair of clusterPairs) {
     const idxI = clusterIndexMap.get(pair.ci.root);
     const idxJ = clusterIndexMap.get(pair.cj.root);
-
     if (clusterUf.connected(idxI, idxJ)) continue;
-
-    // Bridge hierarchy: upgrade for important clusters
-    const combinedImportance = pair.ci.importance + pair.cj.importance;
-    const bothHaveMajor = pair.ci.highestTier <= 2 && pair.cj.highestTier <= 2;
-    let hierarchy;
-    if (bothHaveMajor) hierarchy = 'arterial';
-    else if (combinedImportance >= 6) hierarchy = 'collector';
-    else hierarchy = 'collector'; // bridges are at least collector
-
-    addConnection(pair.bestA, pair.bestB, hierarchy);
+    const bothMajor = pair.ci.highestTier <= 2 && pair.cj.highestTier <= 2;
+    addConnection(pair.bestA, pair.bestB, bothMajor ? 'arterial' : 'collector');
     clusterUf.union(idxI, idxJ);
-    bridgeCount[idxI]++;
-    bridgeCount[idxJ]++;
+    bridgeCount[idxI]++; bridgeCount[idxJ]++;
   }
 
-  // Extra bridges for large/important clusters (beyond MST)
   function maxBridges(cluster) {
     if (cluster.highestTier <= 2 || cluster.count >= 6) return 3;
     if (cluster.count >= 3) return 2;
@@ -350,31 +308,18 @@ function buildConnections(settlements, gridWidth, elevation) {
   for (const pair of clusterPairs) {
     const idxI = clusterIndexMap.get(pair.ci.root);
     const idxJ = clusterIndexMap.get(pair.cj.root);
-
-    // Skip if already connected in this pair (MST already bridged them)
     const keyA = `${pair.bestA.gx},${pair.bestA.gz}`;
     const keyB = `${pair.bestB.gx},${pair.bestB.gz}`;
-    const pairKey = keyA < keyB ? `${keyA}-${keyB}` : `${keyB}-${keyA}`;
-    if (pairSet.has(pairKey)) continue;
-
-    // Check bridge limits
+    const pk = keyA < keyB ? `${keyA}-${keyB}` : `${keyB}-${keyA}`;
+    if (pairSet.has(pk)) continue;
     if (bridgeCount[idxI] >= maxBridges(pair.ci)) continue;
     if (bridgeCount[idxJ] >= maxBridges(pair.cj)) continue;
-
-    const combinedImportance = pair.ci.importance + pair.cj.importance;
-    const bothHaveMajor = pair.ci.highestTier <= 2 && pair.cj.highestTier <= 2;
-    let hierarchy;
-    if (bothHaveMajor) hierarchy = 'arterial';
-    else if (combinedImportance >= 6) hierarchy = 'collector';
-    else hierarchy = 'collector';
-
-    addConnection(pair.bestA, pair.bestB, hierarchy);
-    bridgeCount[idxI]++;
-    bridgeCount[idxJ]++;
+    const bothMajor = pair.ci.highestTier <= 2 && pair.cj.highestTier <= 2;
+    addConnection(pair.bestA, pair.bestB, bothMajor ? 'arterial' : 'collector');
+    bridgeCount[idxI]++; bridgeCount[idxJ]++;
   }
 
-  // --- Phase 5: Backbone verification ---
-  // Ensure all tier 1-2 are in one component
+  // Phase 5: Backbone verification
   const majorIndices = [];
   for (let i = 0; i < routable.length; i++) {
     if (routable[i].tier <= 2) majorIndices.push(i);
@@ -387,28 +332,20 @@ function buildConnections(settlements, gridWidth, elevation) {
     }
   }
 
-  // --- Phase 6: Farm tracks ---
-  // Ensure tier 5 farms all have at least one connection (phase 1 should
-  // have handled this, but be defensive)
+  // Phase 6: Farm tracks
   for (let i = 0; i < routable.length; i++) {
     if (routable[i].tier !== 5) continue;
     const key = `${routable[i].gx},${routable[i].gz}`;
-    let hasConnection = false;
-    for (const pk of pairSet) {
-      if (pk.includes(key)) { hasConnection = true; break; }
-    }
-    if (!hasConnection) {
-      // Connect to nearest anything
-      let nearestIdx = -1;
-      let nearestDist = Infinity;
+    let has = false;
+    for (const pk of pairSet) { if (pk.includes(key)) { has = true; break; } }
+    if (!has) {
+      let nearestIdx = -1, nearestDist = Infinity;
       for (let j = 0; j < routable.length; j++) {
         if (i === j) continue;
         const d = distance2D(routable[i].gx, routable[i].gz, routable[j].gx, routable[j].gz);
         if (d < nearestDist) { nearestDist = d; nearestIdx = j; }
       }
-      if (nearestIdx >= 0) {
-        addConnection(routable[i], routable[nearestIdx], 'track');
-      }
+      if (nearestIdx >= 0) addConnection(routable[i], routable[nearestIdx], 'track');
     }
   }
 

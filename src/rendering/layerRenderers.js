@@ -134,39 +134,42 @@ export function renderClustersLayer(state) {
 // ============================================================
 
 export function renderConnectionsLayer(state) {
-  const { cityLayers, nuclei, roadGraph } = state;
+  const { cityLayers, nuclei } = state;
   const params = cityLayers.getData('params');
   const cs = params.cellSize;
   const w = params.width, h = params.height;
 
   const buf = createBuffer(w, h);
-  if (!nuclei || !roadGraph) return buf;
 
-  for (const n of nuclei) {
-    const gx = Math.round(n.x / cs);
-    const gz = Math.round(n.z / cs);
-    const c = NUCLEUS_COLORS[n.type] || [255, 255, 255];
+  // Draw shortcut candidates as straight lines between nuclei
+  const shortcuts = cityLayers.getData('shortcutCandidates');
+  if (shortcuts) {
+    for (const sc of shortcuts) {
+      const ax = Math.round(sc.ax / cs);
+      const az = Math.round(sc.az / cs);
+      const bx = Math.round(sc.bx / cs);
+      const bz = Math.round(sc.bz / cs);
 
-    const nearest = roadGraph.nearestNode(n.x, n.z);
-    if (!nearest) continue;
+      drawLine(buf, ax, az, bx, bz, 255, 0, 0);
 
-    const rn = roadGraph.getNode(nearest.id);
-    const rnx = Math.round(rn.x / cs);
-    const rnz = Math.round(rn.z / cs);
-
-    // Dashed line
-    const dx = rnx - gx, dz = rnz - gz;
-    const len = Math.sqrt(dx * dx + dz * dz) || 1;
-    for (let t = 0; t < len; t += 2) {
-      const px = Math.round(gx + (dx / len) * t);
-      const pz = Math.round(gz + (dz / len) * t);
-      setPixel(buf, px, pz, c[0], c[1], c[2], 180);
+      const mx = Math.round((ax + bx) / 2);
+      const mz = Math.round((az + bz) / 2);
+      drawLabel(buf, mx + 2, mz - 3, sc.detourRatio.toFixed(1), 255, 0, 0);
     }
+  }
 
-    // Small dot at road end
-    for (let ddz = -1; ddz <= 1; ddz++) {
-      for (let ddx = -1; ddx <= 1; ddx++) {
-        setPixel(buf, rnx + ddx, rnz + ddz, 255, 255, 255);
+  // Draw nucleus dots
+  if (nuclei) {
+    for (const n of nuclei) {
+      const gx = Math.round(n.x / cs);
+      const gz = Math.round(n.z / cs);
+      const c = NUCLEUS_COLORS[n.type] || [255, 255, 255];
+      for (let dz = -2; dz <= 2; dz++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          if (dx * dx + dz * dz <= 4) {
+            setPixel(buf, gx + dx, gz + dz, c[0], c[1], c[2]);
+          }
+        }
       }
     }
   }
@@ -367,7 +370,7 @@ export function renderPathCostLayer(state) {
   // Use growthRoadCost-like settings (the most common preset)
   const costFn = createPathCost(cityLayers, {
     slopePenalty: 0,  // exclude slope — it's direction-dependent, show static cost only
-    reuseDiscount: 0.5,
+    reuseDiscount: 0.1,
     plotPenalty: 5.0,
   });
 

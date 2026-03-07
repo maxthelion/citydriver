@@ -186,35 +186,76 @@ export function flowAccumulation(elevation, directions) {
 }
 
 /**
+ * Compute slope-scaled stream threshold.
+ * Steep terrain (mountains) uses the base threshold so small streams appear.
+ * Flat terrain (plains) requires much higher accumulation — only major rivers visible.
+ */
+function slopeScaledThreshold(maxDrop, baseThreshold) {
+  if (maxDrop > 0.15) return baseThreshold;            // steep mountain
+  if (maxDrop > 0.08) return baseThreshold * 2.5;      // hills
+  if (maxDrop > 0.03) return baseThreshold * 10;       // gentle terrain
+  return baseThreshold * 25;                            // flat plains
+}
+
+/**
  * Extract stream segments from flow accumulation data.
  */
-export function extractStreams(accumulation, directions, elevation, thresholds = { stream: 50, river: 500, majorRiver: 5000 }) {
+export function extractStreams(accumulation, directions, elevation, thresholds = { stream: 50, river: 500, majorRiver: 5000 }, seaLevel = 0) {
   const W = elevation.width;
   const H = elevation.height;
   const total = W * H;
   const streamThreshold = thresholds.stream;
 
+  // Two stream masks:
+  // - isStream: slope-scaled threshold, determines where streams can ORIGINATE
+  // - canFlow: base threshold, determines where an existing stream can CONTINUE
+  // This prevents gaps where a stream crosses from steep to flat terrain.
   const isStream = new Uint8Array(total);
+  const canFlow = new Uint8Array(total);
   for (let i = 0; i < total; i++) {
-    if (accumulation[i] >= streamThreshold) isStream[i] = 1;
+    const gx = i % W;
+    const gz = (i / W) | 0;
+    const elev = elevation.get(gx, gz);
+
+    // Skip cells below sea level
+    if (elev < seaLevel) continue;
+
+    if (accumulation[i] >= streamThreshold) {
+      canFlow[i] = 1;
+
+      // Compute max drop to any neighbor (local slope proxy)
+      let maxDrop = 0;
+      for (let d = 0; d < 8; d++) {
+        const nx = gx + DX[d];
+        const nz = gz + DZ[d];
+        if (nx < 0 || nx >= W || nz < 0 || nz >= H) continue;
+        const drop = (elev - elevation.get(nx, nz)) / DIST[d];
+        if (drop > maxDrop) maxDrop = drop;
+      }
+
+      const localThreshold = slopeScaledThreshold(maxDrop, streamThreshold);
+      if (accumulation[i] >= localThreshold) isStream[i] = 1;
+    }
   }
 
   // Count upstream stream-cell neighbors flowing into each cell
+  // Use canFlow (base threshold) so streams aren't broken by flat gaps
   const upstreamCount = new Uint8Array(total);
   for (let gz = 0; gz < H; gz++) {
     for (let gx = 0; gx < W; gx++) {
       const idx = gz * W + gx;
-      if (!isStream[idx]) continue;
+      if (!canFlow[idx]) continue;
       const dir = directions[idx];
       if (dir === NO_DIR) continue;
       const nx = gx + DX[dir];
       const nz = gz + DZ[dir];
       if (nx < 0 || nx >= W || nz < 0 || nz >= H) continue;
-      if (isStream[nz * W + nx]) upstreamCount[nz * W + nx]++;
+      if (canFlow[nz * W + nx]) upstreamCount[nz * W + nx]++;
     }
   }
 
-  // Find headwaters (stream cells with no upstream stream contributors)
+  // Find headwaters: cells that pass the slope-scaled threshold
+  // with no upstream contributors (where new streams originate)
   const headwaters = [];
   for (let gz = 0; gz < H; gz++) {
     for (let gx = 0; gx < W; gx++) {
@@ -236,8 +277,9 @@ export function extractStreams(accumulation, directions, elevation, thresholds =
 
     while (true) {
       const idx = gz * W + gx;
-      if (!isStream[idx] || visited[idx]) break;
+      if (!canFlow[idx] || visited[idx]) break;
       if (upstreamCount[idx] >= 2 && cells.length > 0) break;
+      if (elevation.get(gx, gz) < seaLevel) break; // river reached coast
 
       visited[idx] = 1;
       cells.push({
@@ -295,7 +337,7 @@ export function extractStreams(accumulation, directions, elevation, thresholds =
   for (let gz = 0; gz < H; gz++) {
     for (let gx = 0; gx < W; gx++) {
       const idx = gz * W + gx;
-      if (!isStream[idx] || visited[idx]) continue;
+      if (!canFlow[idx] || visited[idx]) continue;
       if (upstreamCount[idx] >= 2) traceSegment(gx, gz);
     }
   }

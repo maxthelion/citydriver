@@ -447,6 +447,61 @@ export class PlanarGraph {
   }
 
   /**
+   * Compute shortest path length between two nodes using Dijkstra.
+   * Edge weights are the polyline geometric length.
+   * @returns {number} total distance, or Infinity if unreachable
+   */
+  shortestPathLength(fromId, toId) {
+    if (fromId === toId) return 0;
+    if (!this.nodes.has(fromId) || !this.nodes.has(toId)) return Infinity;
+
+    const dist = new Map();
+    dist.set(fromId, 0);
+
+    // Simple priority queue via sorted insertion (fine for small graphs)
+    const queue = [{ id: fromId, d: 0 }];
+    const visited = new Set();
+
+    while (queue.length > 0) {
+      // Extract min
+      let minIdx = 0;
+      for (let i = 1; i < queue.length; i++) {
+        if (queue[i].d < queue[minIdx].d) minIdx = i;
+      }
+      const { id: current, d: currentDist } = queue[minIdx];
+      queue.splice(minIdx, 1);
+
+      if (current === toId) return currentDist;
+      if (visited.has(current)) continue;
+      visited.add(current);
+
+      const adj = this._adjacency.get(current);
+      if (!adj) continue;
+
+      for (const { edgeId, neighborId } of adj) {
+        if (visited.has(neighborId)) continue;
+
+        // Compute edge length from polyline
+        const polyline = this.edgePolyline(edgeId);
+        let edgeLen = 0;
+        for (let i = 0; i < polyline.length - 1; i++) {
+          const dx = polyline[i + 1].x - polyline[i].x;
+          const dz = polyline[i + 1].z - polyline[i].z;
+          edgeLen += Math.sqrt(dx * dx + dz * dz);
+        }
+
+        const newDist = currentDist + edgeLen;
+        if (newDist < (dist.get(neighborId) ?? Infinity)) {
+          dist.set(neighborId, newDist);
+          queue.push({ id: neighborId, d: newDist });
+        }
+      }
+    }
+
+    return Infinity;
+  }
+
+  /**
    * Check if the graph is connected (all nodes reachable from any node).
    */
   isConnected() {

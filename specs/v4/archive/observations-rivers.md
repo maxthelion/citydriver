@@ -84,3 +84,19 @@ Real-world drainage density (km of stream per km² of land):
 - Flat plains/marsh: < 0.5 km/km²
 
 We should aim for similar ratios scaled to our grid resolution.
+
+## Coast Termination
+
+Rivers should stop at the coastline. Previously, river segments extended
+past sea level into the ocean because flow accumulation routes water to
+map edges via `fillSinks`, and neither `extractStreams` nor `importRivers`
+checked for sea level.
+
+**Fix applied:** `extractStreams` now breaks tracing when elevation drops
+below sea level, and `importRivers` defensively clips paths at the coast.
+
+## Deferred: Endorheic Basins
+
+Rivers that should terminate in inland lakes currently get routed to the
+map boundary by `fillSinks`. Fixing this requires preserving certain
+depressions and filling them with water — deferred to a separate task.

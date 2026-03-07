@@ -1,11 +1,12 @@
 import { setupCity, tickGrowth } from '../city/interactivePipeline.js';
 import { LAYER_NAMES, LAYER_RENDERERS } from '../rendering/layerRenderers.js';
+import { renderRegionOverview } from '../rendering/debugTiles.js';
 import { SeededRandom } from '../core/rng.js';
 
 const LAYER_DEFAULTS = {
   'elevation':      { visible: true,  opacity: 1.0 },
   'clusters':       { visible: true,  opacity: 1.0 },
-  'connections':    { visible: false, opacity: 0.7 },
+  'connections':    { visible: true,  opacity: 0.7 },
   'arterials':      { visible: true,  opacity: 1.0 },
   'rivers':         { visible: true,  opacity: 0.8 },
   'available-land': { visible: false, opacity: 0.5 },
@@ -126,6 +127,16 @@ export class DebugScreen {
     infoPanel.style.cssText = 'width:220px;background:#16213e;border-left:1px solid #333;display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto';
     this._root.appendChild(infoPanel);
 
+    // Regional map
+    const regionTitle = document.createElement('div');
+    regionTitle.style.cssText = 'padding:8px 12px;color:#888;border-bottom:1px solid #333;font-size:12px;font-weight:bold';
+    regionTitle.textContent = 'REGION';
+    infoPanel.appendChild(regionTitle);
+
+    this._regionCanvas = document.createElement('canvas');
+    this._regionCanvas.style.cssText = 'width:100%;image-rendering:pixelated;border-bottom:1px solid #333';
+    infoPanel.appendChild(this._regionCanvas);
+
     const stateTitle = document.createElement('div');
     stateTitle.style.cssText = 'padding:8px 12px;color:#888;border-bottom:1px solid #333;font-size:12px;font-weight:bold';
     stateTitle.textContent = 'STATE';
@@ -180,11 +191,24 @@ export class DebugScreen {
         { cityRadius, cityCellSize: 10 },
       );
 
+      this._renderRegionMap(cityRadius);
       this._buildLayerUI();
       this._renderAllLayers();
       this._updateStatePanel();
       this._statusSpan.textContent = `Tick ${this._state.tick}`;
     }, 30);
+  }
+
+  _renderRegionMap(cityRadius) {
+    const buf = renderRegionOverview(this._regionalLayers, this._settlement, cityRadius);
+    this._regionCanvas.width = buf.width;
+    this._regionCanvas.height = buf.height;
+    const ctx = this._regionCanvas.getContext('2d');
+    const imageData = new ImageData(
+      new Uint8ClampedArray(buf.data.buffer, buf.data.byteOffset, buf.data.byteLength),
+      buf.width, buf.height,
+    );
+    ctx.putImageData(imageData, 0, 0);
   }
 
   _buildLayerUI() {
