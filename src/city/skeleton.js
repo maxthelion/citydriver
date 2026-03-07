@@ -32,19 +32,17 @@ export function buildSkeletonRoads(map) {
   const layers = map.regionalLayers;
   const nuclei = map.nuclei;
 
-  // 2. Collect all road connections (anchor + MST)
+  // 2. Collect road connections — MST + anchors (no extras yet)
+  const { mstConnections, extraConnections } = getMSTConnections(map, nuclei);
   const connections = [];
-  const anchorConns = getAnchorConnections(map, layers);
-  const mstConns = getMSTConnections(map, nuclei);
-  connections.push(...anchorConns);
-  connections.push(...mstConns);
+  connections.push(...getAnchorConnections(map, layers));
+  connections.push(...mstConnections);
 
   if (connections.length === 0) {
-    // Fallback: no regional roads and no MST edges
     connections.push(...getFallbackConnections(map));
   }
 
-  // 3. Shared pipeline: pathfind → merge → smooth
+  // 3. Shared pipeline: pathfind → merge → smooth (MST + anchors only)
   const costFn = map.createPathCost('anchor');
   const builtRoads = buildRoadNetwork({
     width: map.width,
@@ -76,6 +74,15 @@ export function buildSkeletonRoads(map) {
 
     _addRoadToGraph(map, road.polyline, width, road.hierarchy);
   }
+
+  // 5. Connect any nuclei that ended up far from the road network.
+  // The merge step can absorb nucleus endpoints into anchor routes.
+  _connectDisconnectedNuclei(map);
+
+  // 6. Add extra edges (cycle creators) AFTER the main skeleton.
+  // These are pathfound with a cost function that penalizes existing roads,
+  // forcing them to find alternative routes and create genuine cycles.
+  _addExtraEdges(map, extraConnections);
 }
 
 /**
@@ -163,12 +170,10 @@ function getAnchorConnections(map, layers) {
  * Uses Union-Find to find inter-component edges, returns connection pairs.
  */
 function getMSTConnections(map, nuclei) {
-  if (nuclei.length < 2) return [];
+  if (nuclei.length < 2) return { mstConnections: [], extraConnections: [] };
 
-  // Simple MST: connect all nuclei by shortest distance, skipping already-connected
   const uf = new UnionFind(nuclei.length);
 
-  // Kruskal's MST
   const edges = [];
   for (let i = 0; i < nuclei.length; i++) {
     for (let j = i + 1; j < nuclei.length; j++) {
@@ -178,8 +183,8 @@ function getMSTConnections(map, nuclei) {
   }
   edges.sort((a, b) => a.cost - b.cost);
 
-  const connections = [];
-  const extraEdges = []; // non-MST edges that create cycles
+  const mstConnections = [];
+  const candidateExtras = [];
 
   for (const edge of edges) {
     const a = nuclei[edge.i];
@@ -189,31 +194,25 @@ function getMSTConnections(map, nuclei) {
 
     if (!uf.connected(edge.i, edge.j)) {
       uf.union(edge.i, edge.j);
-      connections.push({
+      mstConnections.push({
         from: { gx: a.gx, gz: a.gz },
         to: { gx: b.gx, gz: b.gz },
         hierarchy,
       });
     } else {
-      // Already connected — this edge would create a cycle.
-      // Keep short ones as candidates for extra connections.
-      extraEdges.push({ edge, a, b, hierarchy });
+      candidateExtras.push({
+        from: { gx: a.gx, gz: a.gz },
+        to: { gx: b.gx, gz: b.gz },
+        hierarchy: hierarchy === 'arterial' ? 'collector' : 'local',
+      });
     }
   }
 
-  // Add extra edges beyond the MST to create cycles (enclosed faces).
   // Take the shortest non-MST edges, up to ~40% of the MST edge count.
-  const maxExtras = Math.max(2, Math.floor(connections.length * 0.4));
-  for (let i = 0; i < Math.min(maxExtras, extraEdges.length); i++) {
-    const { a, b, hierarchy } = extraEdges[i];
-    connections.push({
-      from: { gx: a.gx, gz: a.gz },
-      to: { gx: b.gx, gz: b.gz },
-      hierarchy: hierarchy === 'arterial' ? 'collector' : 'local',
-    });
-  }
+  const maxExtras = Math.max(2, Math.floor(mstConnections.length * 0.4));
+  const extraConnections = candidateExtras.slice(0, maxExtras);
 
-  return connections;
+  return { mstConnections, extraConnections };
 }
 
 /**
@@ -228,6 +227,158 @@ function getFallbackConnections(map) {
     { from: { gx: cx, gz: cz }, to: { gx: margin, gz: cz }, hierarchy: 'collector' },
     { from: { gx: cx, gz: cz }, to: { gx: map.width - margin, gz: cz }, hierarchy: 'collector' },
   ];
+}
+
+/**
+ * Add extra edges that create cycles in the graph.
+ * Pathfound AFTER the main skeleton with a cost that penalizes existing roads,
+ * forcing genuinely different routes.
+ */
+function _addExtraEdges(map, extraConnections) {
+  if (extraConnections.length === 0) return;
+
+  // Cost function that penalizes cells already on roads (opposite of reuse discount)
+  const baseCostFn = map.createPathCost('growth');
+  const avoidRoadCostFn = (fromGx, fromGz, toGx, toGz) => {
+    const base = baseCostFn(fromGx, fromGz, toGx, toGz);
+    if (!isFinite(base)) return base;
+    // Penalize cells that already have roads — force alternative routes
+    if (map.roadGrid.get(toGx, toGz) > 0) return base * 5;
+    return base;
+  };
+
+  for (const conn of extraConnections) {
+    const result = findPath(
+      conn.from.gx, conn.from.gz,
+      conn.to.gx, conn.to.gz,
+      map.width, map.height, avoidRoadCostFn,
+    );
+    if (!result || result.path.length < 2) continue;
+
+    // Stamp onto roadGrid
+    for (const p of result.path) {
+      map.roadGrid.set(p.gx, p.gz, 1);
+    }
+
+    const simplified = _simplifyPathInline(result.path, 1.0);
+    const smoothed = _smoothPathInline(simplified, map.cellSize, map.originX, map.originZ);
+
+    if (smoothed.length < 2) continue;
+
+    const width = 6 + 0.45 * 10;
+    map.addFeature('road', {
+      polyline: smoothed,
+      width,
+      hierarchy: conn.hierarchy,
+      importance: 0.45,
+      source: 'skeleton',
+    });
+
+    _addRoadToGraph(map, smoothed, width, conn.hierarchy);
+  }
+}
+
+/** Simplified RDP for grid paths. */
+function _simplifyPathInline(path, epsilon) {
+  if (path.length <= 2) return path;
+  let maxDist = 0, maxIdx = 0;
+  const first = path[0], last = path[path.length - 1];
+  for (let i = 1; i < path.length - 1; i++) {
+    const d = _pointLineDistSq(path[i].gx, path[i].gz, first.gx, first.gz, last.gx, last.gz);
+    if (d > maxDist) { maxDist = d; maxIdx = i; }
+  }
+  if (Math.sqrt(maxDist) > epsilon) {
+    const left = _simplifyPathInline(path.slice(0, maxIdx + 1), epsilon);
+    const right = _simplifyPathInline(path.slice(maxIdx), epsilon);
+    return left.slice(0, -1).concat(right);
+  }
+  return [first, last];
+}
+
+function _pointLineDistSq(px, pz, ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az;
+  const lenSq = dx * dx + dz * dz;
+  if (lenSq === 0) return (px - ax) ** 2 + (pz - az) ** 2;
+  let t = ((px - ax) * dx + (pz - az) * dz) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return (px - ax - t * dx) ** 2 + (pz - az - t * dz) ** 2;
+}
+
+/** Simple Chaikin smoothing for grid paths → world coords. */
+function _smoothPathInline(path, cellSize, originX, originZ) {
+  // Convert to world coords first
+  let pts = path.map(p => ({ x: p.gx * cellSize + originX, z: p.gz * cellSize + originZ }));
+  // 2 iterations of Chaikin
+  for (let iter = 0; iter < 2; iter++) {
+    const out = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      out.push({ x: a.x * 0.75 + b.x * 0.25, z: a.z * 0.75 + b.z * 0.25 });
+      out.push({ x: a.x * 0.25 + b.x * 0.75, z: a.z * 0.25 + b.z * 0.75 });
+    }
+    out.push(pts[pts.length - 1]);
+    pts = out;
+  }
+  return pts;
+}
+
+/**
+ * Connect nuclei that are far from the road network.
+ * After buildRoadNetwork merges paths, some nucleus endpoints get absorbed
+ * into anchor routes. This adds short spur roads from each disconnected
+ * nucleus to the nearest road cell.
+ */
+function _connectDisconnectedNuclei(map) {
+  const graph = map.graph;
+  const snapDist = map.cellSize * 3;
+
+  for (const n of map.nuclei) {
+    const wx = map.originX + n.gx * map.cellSize;
+    const wz = map.originZ + n.gz * map.cellSize;
+    const nearest = graph.nearestNode(wx, wz);
+    if (nearest && nearest.dist <= snapDist) continue;
+
+    // Nucleus is far from graph — find nearest road cell and pathfind a spur
+    let bestDist = Infinity, bestGx = -1, bestGz = -1;
+    const searchRadius = 20;
+    for (let dz = -searchRadius; dz <= searchRadius; dz++) {
+      for (let dx = -searchRadius; dx <= searchRadius; dx++) {
+        const gx = n.gx + dx, gz = n.gz + dz;
+        if (gx < 0 || gx >= map.width || gz < 0 || gz >= map.height) continue;
+        if (map.roadGrid.get(gx, gz) === 0) continue;
+        const d = Math.sqrt(dx * dx + dz * dz);
+        if (d < bestDist) { bestDist = d; bestGx = gx; bestGz = gz; }
+      }
+    }
+
+    if (bestGx < 0) continue;
+
+    // Use 'nucleus' preset — tolerates low buildability (cost 12, not Infinity)
+    const costFn = map.createPathCost('nucleus');
+    const result = findPath(n.gx, n.gz, bestGx, bestGz, map.width, map.height, costFn);
+    if (!result || result.path.length < 2) continue;
+
+    // Stamp road grid
+    for (const p of result.path) {
+      map.roadGrid.set(p.gx, p.gz, 1);
+    }
+
+    // Simplify and smooth
+    const simplified = _simplifyPathInline(result.path, 1.0);
+    const smoothed = _smoothPathInline(simplified, map.cellSize, map.originX, map.originZ);
+    if (smoothed.length < 2) continue;
+
+    const width = 6 + 0.3 * 10;
+    map.addFeature('road', {
+      polyline: smoothed,
+      width,
+      hierarchy: 'local',
+      importance: 0.3,
+      source: 'skeleton',
+    });
+
+    _addRoadToGraph(map, smoothed, width, 'local');
+  }
 }
 
 // ============================================================
@@ -250,6 +401,10 @@ function _addRoadToGraph(map, polyline, width, hierarchy) {
   const endNodeId = _findOrCreateNode(graph, endPt.x, endPt.z, snapDist);
 
   if (startNodeId === endNodeId) return;
+
+  // Skip if there's already an edge between these nodes (prevents duplicate
+  // edges that break the half-edge face extraction algorithm)
+  if (graph.neighbors(startNodeId).includes(endNodeId)) return;
 
   const points = polyline.slice(1, -1).map(p => ({ x: p.x, z: p.z }));
   graph.addEdge(startNodeId, endNodeId, { points, width, hierarchy });

@@ -5,10 +5,11 @@ import { FaceSubdivision } from '../city/strategies/faceSubdivision.js';
 import { OffsetInfill } from '../city/strategies/offsetInfill.js';
 import { FrontagePressure } from '../city/strategies/frontagePressure.js';
 import { TriangleMergeSubdiv } from '../city/strategies/triangleMergeSubdiv.js';
+import { DesireLines } from '../city/strategies/desireLines.js';
 
-const STRATEGY_CLASSES = [FaceSubdivision, OffsetInfill, FrontagePressure, TriangleMergeSubdiv];
+const STRATEGY_CLASSES = [FaceSubdivision, OffsetInfill, FrontagePressure, TriangleMergeSubdiv, DesireLines];
 
-const STRATEGY_NAMES = ['Face Subdivision', 'Offset Infill', 'Frontage Pressure', 'Triangle Merge'];
+const STRATEGY_NAMES = ['Face Subdivision', 'Offset Infill', 'Frontage Pressure', 'Triangle Merge', 'Desire Lines'];
 const DETAIL_SCALE = 4;
 const GRID_DIVISIONS = 6;
 
@@ -19,8 +20,8 @@ export class CompareScreen {
     this.settlement = settlement;
     this.seed = seed;
     this.onBack = onBack;
-    this.maps = [null, null, null, null];
-    this.strategies = [null, null, null, null];
+    this.maps = [null, null, null, null, null];
+    this.strategies = [null, null, null, null, null];
     this.currentLayerIndex = 0;
     this._selectedCell = null;
     this.currentTick = 0;
@@ -117,14 +118,14 @@ export class CompareScreen {
 
     // Grid area (2 rows x 4 cols)
     const gridArea = document.createElement('div');
-    gridArea.style.cssText = 'flex:1; display:grid; grid-template-columns:repeat(4,1fr); grid-template-rows:1fr 1fr; gap:4px; padding:4px; overflow:hidden;';
+    gridArea.style.cssText = 'flex:1; display:grid; grid-template-columns:repeat(5,1fr); grid-template-rows:1fr 1fr; gap:4px; padding:4px; overflow:hidden;';
 
     this.macroCanvases = [];
     this.microCanvases = [];
     this._microLabels = [];
 
     // Row 1: macro canvases
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < STRATEGY_CLASSES.length; i++) {
       const cell = document.createElement('div');
       cell.style.cssText = 'display:flex; flex-direction:column; min-height:0;';
 
@@ -143,7 +144,7 @@ export class CompareScreen {
     }
 
     // Row 2: micro canvases
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < STRATEGY_CLASSES.length; i++) {
       const cell = document.createElement('div');
       cell.style.cssText = 'display:flex; flex-direction:column; min-height:0;';
 
@@ -192,7 +193,7 @@ export class CompareScreen {
   _generate() {
     const rng = new SeededRandom(this.seed);
     const baseMap = setupCity(this.layers, this.settlement, rng.fork('city'));
-    this.maps = [baseMap.clone(), baseMap.clone(), baseMap.clone(), baseMap.clone()];
+    this.maps = STRATEGY_CLASSES.map(() => baseMap.clone());
     this.strategies = this.maps.map((map, i) => new STRATEGY_CLASSES[i](map));
     this.currentTick = 0;
     this._selectedCell = null;
@@ -254,7 +255,7 @@ export class CompareScreen {
 
   _renderAll() {
     // Update micro labels
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < STRATEGY_CLASSES.length; i++) {
       if (this._microLabels[i]) {
         this._microLabels[i].textContent = this._selectedCell
           ? `Detail: ${STRATEGY_NAMES[i]}`
@@ -262,7 +263,7 @@ export class CompareScreen {
       }
     }
 
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < STRATEGY_CLASSES.length; i++) {
       this._renderMacro(i);
       this._renderMicro(i);
     }
@@ -378,7 +379,7 @@ export class CompareScreen {
   _updateInfo() {
     if (!this.infoDiv) return;
     const lines = [`Tick: ${this.currentTick}`, ''];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < STRATEGY_CLASSES.length; i++) {
       const m = this.maps[i];
       if (m) {
         const faces = m.graph.faces();

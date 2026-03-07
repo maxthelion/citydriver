@@ -176,18 +176,39 @@ function placeNuclei(map, tier, rng) {
   const minSpacing = 15; // grid cells
   const nuclei = [];
 
-  // Center nucleus at settlement location
-  const centerGx = Math.round((map.settlement.gx * (map.regionalLayers.getData('params').cellSize) - map.originX) / map.cellSize);
-  const centerGz = Math.round((map.settlement.gz * (map.regionalLayers.getData('params').cellSize) - map.originZ) / map.cellSize);
+  // Center nucleus at settlement location (nudge to nearest buildable cell if on water)
+  let centerGx = Math.round((map.settlement.gx * (map.regionalLayers.getData('params').cellSize) - map.originX) / map.cellSize);
+  let centerGz = Math.round((map.settlement.gz * (map.regionalLayers.getData('params').cellSize) - map.originZ) / map.cellSize);
 
   if (centerGx >= 0 && centerGx < map.width && centerGz >= 0 && centerGz < map.height) {
-    nuclei.push({
-      gx: centerGx,
-      gz: centerGz,
-      type: classifyNucleus(map, centerGx, centerGz),
-      tier: 1,
-      index: 0,
-    });
+    // If center is unbuildable (e.g. settlement on river), find nearest buildable cell.
+    // Search up to half the map — rivers can be wide at city resolution.
+    if (map.buildability.get(centerGx, centerGz) < 0.1) {
+      let bestDist = Infinity;
+      let bestGx = centerGx, bestGz = centerGz;
+      const searchR = Math.floor(Math.min(map.width, map.height) / 2);
+      for (let dz = -searchR; dz <= searchR; dz++) {
+        for (let dx = -searchR; dx <= searchR; dx++) {
+          const gx = centerGx + dx, gz = centerGz + dz;
+          if (gx < 3 || gx >= map.width - 3 || gz < 3 || gz >= map.height - 3) continue;
+          if (map.buildability.get(gx, gz) < 0.2) continue;
+          const d = dx * dx + dz * dz;
+          if (d < bestDist) { bestDist = d; bestGx = gx; bestGz = gz; }
+        }
+      }
+      centerGx = bestGx;
+      centerGz = bestGz;
+    }
+
+    if (map.buildability.get(centerGx, centerGz) >= 0.1) {
+      nuclei.push({
+        gx: centerGx,
+        gz: centerGz,
+        type: classifyNucleus(map, centerGx, centerGz),
+        tier: 1,
+        index: 0,
+      });
+    }
   }
 
   // Build list of buildable candidate cells (sampled for speed on large grids)
