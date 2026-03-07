@@ -10,7 +10,8 @@
 import { Grid2D } from '../core/Grid2D.js';
 import { FeatureMap } from '../core/FeatureMap.js';
 import { PerlinNoise } from '../core/noise.js';
-import { chaikinSmooth, riverHalfWidth, segmentsToVectorPaths } from '../core/riverGeometry.js';
+import { inheritRivers } from '../core/inheritRivers.js';
+import { distance2D } from '../core/math.js';
 
 /**
  * Create a FeatureMap from regional layers centered on a settlement.
@@ -113,14 +114,21 @@ export function setupCity(layers, settlement, rng) {
     }
   }
 
-  // Import rivers as features
+  // Import rivers as features (shared inheritance utility)
   const riverPaths = layers.getData('riverPaths');
   if (riverPaths) {
-    const cityRiverPaths = _extractCityRivers(riverPaths, originX, originZ, cityGridSize, cityCellSize);
-    for (const path of cityRiverPaths) {
-      map.addFeature('river', {
-        polyline: path.points,
-      });
+    const bounds = {
+      minX: originX,
+      minZ: originZ,
+      maxX: originX + cityGridSize * cityCellSize,
+      maxZ: originZ + cityGridSize * cityCellSize,
+    };
+    const cityRivers = inheritRivers(riverPaths, bounds, {
+      chaikinPasses: 1,
+      margin: cityCellSize,
+    });
+    for (const river of cityRivers) {
+      map.addFeature('river', { polyline: river.polyline });
     }
   }
 
@@ -133,66 +141,166 @@ export function setupCity(layers, settlement, rng) {
   // Carve channels
   map.carveChannels();
 
-  // Store metadata
+  // Store metadata (needed by computeLandValue for town center)
   map.seaLevel = seaLevel;
   map.settlement = settlement;
   map.regionalLayers = layers;
   map.rng = rng;
 
+  // Compute initial land value from terrain features
+  map.computeLandValue();
+
+  // Place nuclei (shared across all growth strategies)
+  const tier = settlement.tier || 3;
+  map.nuclei = placeNuclei(map, tier, rng);
+
   return map;
 }
 
+// ============================================================
+// Nucleus placement
+// ============================================================
+
+// Nucleus caps by tier
+function nucleusCap(tier) {
+  if (tier <= 1) return 20;
+  if (tier <= 2) return 14;
+  return 10;
+}
+
 /**
- * Extract river paths that fall within city bounds, applying extra Chaikin smoothing.
+ * Place nucleus seeds on buildable land.
  */
-function _extractCityRivers(riverPaths, originX, originZ, gridSize, cellSize) {
-  const cityMinX = originX - cellSize;
-  const cityMinZ = originZ - cellSize;
-  const cityMaxX = originX + gridSize * cellSize + cellSize;
-  const cityMaxZ = originZ + gridSize * cellSize + cellSize;
+function placeNuclei(map, tier, rng) {
+  const cap = nucleusCap(tier);
+  const minSpacing = 15; // grid cells
+  const nuclei = [];
 
-  const result = [];
+  // Center nucleus at settlement location
+  const centerGx = Math.round((map.settlement.gx * (map.regionalLayers.getData('params').cellSize) - map.originX) / map.cellSize);
+  const centerGz = Math.round((map.settlement.gz * (map.regionalLayers.getData('params').cellSize) - map.originZ) / map.cellSize);
 
-  for (const path of riverPaths) {
-    // Filter to points within city bounds (with margin)
-    const clipped = [];
-    for (const p of path.points) {
-      if (p.x >= cityMinX && p.x <= cityMaxX && p.z >= cityMinZ && p.z <= cityMaxZ) {
-        clipped.push({
-          x: p.x,
-          z: p.z,
-          accumulation: p.accumulation,
-          width: p.width,
-        });
-      } else if (clipped.length > 0) {
-        // Include one point outside to avoid gaps at boundary
-        clipped.push({ x: p.x, z: p.z, accumulation: p.accumulation, width: p.width });
-        break;
+  if (centerGx >= 0 && centerGx < map.width && centerGz >= 0 && centerGz < map.height) {
+    nuclei.push({
+      gx: centerGx,
+      gz: centerGz,
+      type: classifyNucleus(map, centerGx, centerGz),
+      tier: 1,
+      index: 0,
+    });
+  }
+
+  // Build list of buildable candidate cells (sampled for speed on large grids)
+  const buildableCells = [];
+  const step = map.width > 200 ? 3 : 1;
+  for (let gz = 3; gz < map.height - 3; gz += step) {
+    for (let gx = 3; gx < map.width - 3; gx += step) {
+      if (map.buildability.get(gx, gz) >= 0.2) {
+        buildableCells.push({ gx, gz });
       }
-    }
-
-    if (clipped.length >= 2) {
-      // Extra Chaikin pass for higher resolution
-      const smoothed = chaikinSmooth(
-        clipped.map(p => ({ x: p.x, z: p.z, accumulation: p.accumulation })),
-        1
-      );
-      result.push({
-        points: smoothed.map(p => ({
-          x: p.x,
-          z: p.z,
-          accumulation: p.accumulation,
-          width: riverHalfWidth(p.accumulation) * 2,
-        })),
-      });
-    }
-
-    // Recurse into children
-    if (path.children) {
-      const childResults = _extractCityRivers(path.children, originX, originZ, gridSize, cellSize);
-      result.push(...childResults);
     }
   }
 
-  return result;
+  // Greedy placement: score = value * buildability, with spacing enforcement
+  while (nuclei.length < cap) {
+    let bestScore = -1;
+    let bestCell = null;
+
+    for (const c of buildableCells) {
+      let minDist = Infinity;
+      for (const n of nuclei) {
+        const d = distance2D(c.gx, c.gz, n.gx, n.gz);
+        if (d < minDist) minDist = d;
+      }
+      if (minDist < minSpacing) continue;
+
+      const b = map.buildability.get(c.gx, c.gz);
+      const v = map.landValue.get(c.gx, c.gz);
+      const spacingBonus = Math.min(1, minDist / 30);
+      const score = v * b * (0.7 + 0.3 * spacingBonus);
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestCell = c;
+      }
+    }
+
+    if (!bestCell) break;
+
+    const nucleusTier = nuclei.length < 3 ? 2 : (nuclei.length < 6 ? 3 : 4);
+    nuclei.push({
+      gx: bestCell.gx,
+      gz: bestCell.gz,
+      type: classifyNucleus(map, bestCell.gx, bestCell.gz),
+      tier: nucleusTier,
+      index: nuclei.length,
+    });
+
+    const intensity = nucleusTier <= 2 ? 0.6 : nucleusTier <= 3 ? 0.4 : 0.25;
+    map._spreadValue(bestCell.gx, bestCell.gz, intensity, 15);
+  }
+
+  return nuclei;
 }
+
+/**
+ * Classify nucleus type based on surrounding terrain.
+ */
+function classifyNucleus(map, gx, gz) {
+  const waterRadius = 5;
+  for (let dz = -waterRadius; dz <= waterRadius; dz++) {
+    for (let dx = -waterRadius; dx <= waterRadius; dx++) {
+      const nx = gx + dx;
+      const nz = gz + dz;
+      if (nx >= 0 && nx < map.width && nz >= 0 && nz < map.height) {
+        if (map.waterMask.get(nx, nz) > 0) return 'waterfront';
+      }
+    }
+  }
+
+  let roadDirs = 0;
+  const checkRadius = 5;
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    for (let r = 1; r <= checkRadius; r++) {
+      const nx = gx + dx * r;
+      const nz = gz + dz * r;
+      if (nx >= 0 && nx < map.width && nz >= 0 && nz < map.height) {
+        if (map.roadGrid.get(nx, nz) > 0) { roadDirs++; break; }
+      }
+    }
+  }
+  if (roadDirs >= 3) return 'market';
+
+  const windowSize = 2;
+  let avgElev = 0, avgSlope = 0, count = 0;
+  for (let dz = -windowSize; dz <= windowSize; dz++) {
+    for (let dx = -windowSize; dx <= windowSize; dx++) {
+      const nx = gx + dx, nz = gz + dz;
+      if (nx >= 0 && nx < map.width && nz >= 0 && nz < map.height) {
+        avgElev += map.elevation.get(nx, nz);
+        avgSlope += map.slope.get(nx, nz);
+        count++;
+      }
+    }
+  }
+  avgElev /= count;
+  avgSlope /= count;
+
+  let globalAvgElev = 0;
+  let globalCount = 0;
+  for (let gz2 = 0; gz2 < map.height; gz2 += 5) {
+    for (let gx2 = 0; gx2 < map.width; gx2 += 5) {
+      globalAvgElev += map.elevation.get(gx2, gz2);
+      globalCount++;
+    }
+  }
+  globalAvgElev /= globalCount;
+
+  if (avgElev > globalAvgElev + 5 && avgSlope > 0.05) return 'hilltop';
+  if (avgElev < globalAvgElev - 5 && avgSlope < 0.05) return 'valley';
+
+  if (map.roadGrid.get(gx, gz) > 0) return 'roadside';
+
+  return 'suburban';
+}
+

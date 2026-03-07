@@ -46,6 +46,47 @@ describe('setupCity', () => {
     expect(buildable).toBeGreaterThan(0);
   });
 
+  it('computes land value with non-zero values', () => {
+    const { layers, rng } = makeRegion();
+    const settlements = layers.getData('settlements');
+    if (!settlements || settlements.length === 0) return;
+
+    const settlement = settlements[0];
+    const map = setupCity(layers, settlement, rng.fork('city'));
+
+    // Should have some cells with positive land value
+    let valued = 0;
+    for (let gz = 0; gz < map.height; gz++) {
+      for (let gx = 0; gx < map.width; gx++) {
+        if (map.landValue.get(gx, gz) > 0.1) valued++;
+      }
+    }
+    expect(valued).toBeGreaterThan(0);
+
+    // Town center area should have high value
+    const params = layers.getData('params');
+    const cx = Math.round((settlement.gx * params.cellSize - map.originX) / map.cellSize);
+    const cz = Math.round((settlement.gz * params.cellSize - map.originZ) / map.cellSize);
+    if (cx >= 0 && cx < map.width && cz >= 0 && cz < map.height) {
+      expect(map.landValue.get(cx, cz)).toBeGreaterThan(0.3);
+    }
+  });
+
+  it('places nuclei during setup', () => {
+    const { layers, rng } = makeRegion();
+    const settlements = layers.getData('settlements');
+    if (!settlements || settlements.length === 0) return;
+
+    const settlement = settlements[0];
+    const map = setupCity(layers, settlement, rng.fork('city'));
+
+    expect(map.nuclei.length).toBeGreaterThan(0);
+    expect(map.nuclei[0]).toHaveProperty('gx');
+    expect(map.nuclei[0]).toHaveProperty('gz');
+    expect(map.nuclei[0]).toHaveProperty('type');
+    expect(map.nuclei[0]).toHaveProperty('tier');
+  });
+
   it('imports rivers from regional data', () => {
     const { layers, rng } = makeRegion();
     const settlements = layers.getData('settlements');
