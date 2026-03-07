@@ -124,4 +124,22 @@ describe('Grid2D', () => {
     expect(g.get(0, 0)).toBe(42);
     expect(g.get(2, 2)).toBe(42);
   });
+
+  it('clone creates an independent deep copy', () => {
+    const g = new Grid2D(10, 10, { type: 'float32', cellSize: 5, originX: 100, originZ: 200 });
+    g.set(3, 4, 42);
+    const c = g.clone();
+
+    expect(c.width).toBe(10);
+    expect(c.height).toBe(10);
+    expect(c.cellSize).toBe(5);
+    expect(c.originX).toBe(100);
+    expect(c.originZ).toBe(200);
+    expect(c.get(3, 4)).toBe(42);
+
+    // Mutation independence
+    c.set(3, 4, 99);
+    expect(g.get(3, 4)).toBe(42);
+    expect(c.get(3, 4)).toBe(99);
+  });
 });
