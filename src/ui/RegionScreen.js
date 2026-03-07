@@ -7,6 +7,11 @@ import { buildRegionTerrain, buildWaterPlane, buildSettlementMarkers, buildRegio
 import { createScorePanel, updateScorePanel } from './ScorePanel.js';
 import { SeededRandom } from '../core/rng.js';
 
+const RING_HOVER_OPACITY = 0.4;
+const RING_SELECTED_OPACITY = 0.8;
+const RING_HOVER_COLOR = 0xccccff;
+const RING_SELECTED_COLOR = 0xffffff;
+
 /**
  * Region selection screen.
  * Shows 3D orbit preview (left) + 2D map (right) + Regenerate/Enter buttons.
@@ -21,6 +26,7 @@ export class RegionScreen {
     } else {
       this.onEnter = callbacks.onEnter;
       this.onDebug = callbacks.onDebug || null;
+      this.onCompare = callbacks.onCompare || null;
     }
     this._layers = null;
     this._seed = initialSeed ?? Math.floor(Math.random() * 999999);
@@ -101,6 +107,17 @@ export class RegionScreen {
       btnRow.appendChild(this._debugBtn);
     }
 
+    if (this.onCompare) {
+      this._compareBtn = this._makeBtn('Compare Growth', () => {
+        if (this._layers && this._selectedSettlement && this.onCompare) {
+          this.onCompare(this._layers, this._selectedSettlement, this._seed);
+        }
+      });
+      this._compareBtn.style.opacity = '0.5';
+      this._compareBtn.style.background = '#353';
+      btnRow.appendChild(this._compareBtn);
+    }
+
     rightPanel.appendChild(btnRow);
 
     // Score panel
@@ -131,36 +148,23 @@ export class RegionScreen {
       coastEdges,
     }, rng);
 
-    // Auto-select first settlement
-    const settlements = this._layers.getData('settlements');
-    if (settlements && settlements.length > 0) {
-      this._selectedSettlement = settlements[0];
-      this._enterBtn.style.opacity = '1';
-      this._enterBtn.disabled = false;
-      if (this._debugBtn) { this._debugBtn.style.opacity = '1'; this._debugBtn.disabled = false; }
-    } else {
-      this._selectedSettlement = null;
-      this._enterBtn.style.opacity = '0.5';
-      this._enterBtn.disabled = true;
-      if (this._debugBtn) { this._debugBtn.style.opacity = '0.5'; this._debugBtn.disabled = true; }
-    }
-
     // Run validators
     const validators = getRegionalValidators(5);
     const scores = runValidators(this._layers, validators);
     updateScorePanel(this._scorePanel, scores);
 
-    // Render 2D map
-    renderMap(this._layers, this._mapCanvas);
-    const ctx = this._mapCanvas.getContext('2d');
-    drawRivers(this._layers, ctx);
-    drawRoads(this._layers, ctx);
-    drawSettlements(this._layers, ctx);
-
-    // Build 3D preview
+    // Build 3D preview (before selection so markers exist)
     this._build3D();
 
-    this._info.textContent = 'Click a settlement marker on the map to select it.';
+    // Auto-select first settlement
+    const settlements = this._layers.getData('settlements');
+    if (settlements && settlements.length > 0) {
+      this._selectSettlement(settlements[0]);
+    } else {
+      this._selectSettlement(null);
+    }
+
+    this._info.textContent = 'Click a settlement on the map or 3D view to select it.';
   }
 
   _build3D() {
@@ -169,6 +173,8 @@ export class RegionScreen {
       this._renderer3D.dispose();
       this._preview3D.innerHTML = '';
     }
+    this._3dMarkers = [];
+    this._hoveredMarker = null;
 
     const w = this._preview3D.clientWidth;
     const h = this._preview3D.clientHeight || 500;
@@ -180,6 +186,7 @@ export class RegionScreen {
     this._renderer3D = renderer;
 
     const scene = new THREE.Scene();
+    this._scene = scene;
     scene.fog = new THREE.Fog(0x87ceeb, 8000, 20000);
     scene.add(new THREE.AmbientLight(0x8899aa, 0.6));
     const sun = new THREE.DirectionalLight(0xffeedd, 1.2);
@@ -193,8 +200,9 @@ export class RegionScreen {
     const waterPlane = buildWaterPlane(this._layers);
     scene.add(waterPlane);
 
-    const markers = buildSettlementMarkers(this._layers);
-    scene.add(markers);
+    const { group: markerGroup, markers } = buildSettlementMarkers(this._layers);
+    scene.add(markerGroup);
+    this._3dMarkers = markers;
 
     const roadLines = buildRegionRoads(this._layers);
     scene.add(roadLines);
@@ -204,10 +212,22 @@ export class RegionScreen {
 
     // Orbit camera
     const camera = new THREE.PerspectiveCamera(50, w / h, 10, 20000);
+    this._camera = camera;
     const elevation = this._layers.getGrid('elevation');
     const worldSize = elevation.width * elevation.cellSize;
     camera.position.set(worldSize * 0.5, worldSize * 0.4, worldSize * 0.5);
     camera.lookAt(0, 0, 0);
+
+    // Raycaster for 3D picking
+    this._raycaster = new THREE.Raycaster();
+    const domEl = renderer.domElement;
+    domEl.style.cursor = 'default';
+
+    domEl.addEventListener('mousemove', (e) => this._on3DHover(e));
+    domEl.addEventListener('click', (e) => this._on3DClick(e));
+
+    // Update ring state for initial selection
+    this._updateRings();
 
     // Simple auto-orbit
     let angle = 0;
@@ -227,6 +247,104 @@ export class RegionScreen {
     animate();
   }
 
+  /**
+   * Shared selection logic — updates both 2D and 3D views.
+   */
+  _selectSettlement(settlement) {
+    this._selectedSettlement = settlement;
+    this._enterBtn.style.opacity = settlement ? '1' : '0.5';
+    this._enterBtn.disabled = !settlement;
+    if (this._debugBtn) {
+      this._debugBtn.style.opacity = settlement ? '1' : '0.5';
+      this._debugBtn.disabled = !settlement;
+    }
+    if (this._compareBtn) {
+      this._compareBtn.style.opacity = settlement ? '1' : '0.5';
+      this._compareBtn.disabled = !settlement;
+    }
+
+    if (settlement) {
+      this._info.textContent = `Selected: ${settlement.type} (tier ${settlement.tier}) at (${settlement.gx}, ${settlement.gz})`;
+    }
+
+    this._redrawMap();
+    this._updateRings();
+  }
+
+  _redrawMap() {
+    renderMap(this._layers, this._mapCanvas);
+    const ctx = this._mapCanvas.getContext('2d');
+    drawRivers(this._layers, ctx);
+    drawRoads(this._layers, ctx);
+    drawSettlements(this._layers, ctx);
+
+    if (this._selectedSettlement) {
+      const s = this._selectedSettlement;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(s.gx, s.gz, 6, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  /**
+   * Update 3D ring visibility based on selection and hover state.
+   */
+  _updateRings() {
+    for (const m of this._3dMarkers) {
+      const isSelected = this._selectedSettlement === m.settlement;
+      const isHovered = this._hoveredMarker === m;
+
+      if (isSelected) {
+        m.ring.material.color.setHex(RING_SELECTED_COLOR);
+        m.ring.material.opacity = RING_SELECTED_OPACITY;
+      } else if (isHovered) {
+        m.ring.material.color.setHex(RING_HOVER_COLOR);
+        m.ring.material.opacity = RING_HOVER_OPACITY;
+      } else {
+        m.ring.material.opacity = 0;
+      }
+    }
+  }
+
+  _get3DMouseCoords(e) {
+    const rect = this._renderer3D.domElement.getBoundingClientRect();
+    return new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+  }
+
+  _hitTestMarkers(e) {
+    const mouse = this._get3DMouseCoords(e);
+    this._raycaster.setFromCamera(mouse, this._camera);
+    const meshes = this._3dMarkers.map(m => m.mesh);
+    const hits = this._raycaster.intersectObjects(meshes);
+    if (hits.length > 0) {
+      const hit = hits[0].object;
+      return this._3dMarkers.find(m => m.mesh === hit) || null;
+    }
+    return null;
+  }
+
+  _on3DHover(e) {
+    const marker = this._hitTestMarkers(e);
+    const prev = this._hoveredMarker;
+    this._hoveredMarker = marker;
+    if (marker !== prev) {
+      this._renderer3D.domElement.style.cursor = marker ? 'pointer' : 'default';
+      this._updateRings();
+    }
+  }
+
+  _on3DClick(e) {
+    const marker = this._hitTestMarkers(e);
+    if (marker) {
+      this._selectSettlement(marker.settlement);
+    }
+  }
+
   _onMapClick(e) {
     const rect = this._mapCanvas.getBoundingClientRect();
     const scaleX = this._mapCanvas.width / rect.width;
@@ -237,7 +355,6 @@ export class RegionScreen {
     const settlements = this._layers.getData('settlements');
     if (!settlements) return;
 
-    // Find closest settlement
     let closest = null;
     let closestDist = Infinity;
     for (const s of settlements) {
@@ -251,23 +368,7 @@ export class RegionScreen {
     }
 
     if (closest && closestDist < 20) {
-      this._selectedSettlement = closest;
-      this._enterBtn.style.opacity = '1';
-      this._info.textContent = `Selected: ${closest.type} (tier ${closest.tier}) at (${closest.gx}, ${closest.gz})`;
-
-      // Redraw map with highlight
-      renderMap(this._layers, this._mapCanvas);
-      const ctx = this._mapCanvas.getContext('2d');
-      drawRivers(this._layers, ctx);
-      drawRoads(this._layers, ctx);
-      drawSettlements(this._layers, ctx);
-
-      // Highlight selected
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(closest.gx, closest.gz, 6, 0, Math.PI * 2);
-      ctx.stroke();
+      this._selectSettlement(closest);
     }
   }
 
