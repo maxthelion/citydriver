@@ -179,21 +179,37 @@ function getMSTConnections(map, nuclei) {
   edges.sort((a, b) => a.cost - b.cost);
 
   const connections = [];
-  for (const edge of edges) {
-    if (uf.connected(edge.i, edge.j)) continue;
-    uf.union(edge.i, edge.j);
+  const extraEdges = []; // non-MST edges that create cycles
 
+  for (const edge of edges) {
     const a = nuclei[edge.i];
     const b = nuclei[edge.j];
-
-    // Compute hierarchy from tier weights
     const pairWeight = (importanceTierWeight(a.tier) + importanceTierWeight(b.tier)) / 2;
     const hierarchy = pairWeight > 0.6 ? 'arterial' : pairWeight > 0.3 ? 'collector' : 'local';
 
+    if (!uf.connected(edge.i, edge.j)) {
+      uf.union(edge.i, edge.j);
+      connections.push({
+        from: { gx: a.gx, gz: a.gz },
+        to: { gx: b.gx, gz: b.gz },
+        hierarchy,
+      });
+    } else {
+      // Already connected — this edge would create a cycle.
+      // Keep short ones as candidates for extra connections.
+      extraEdges.push({ edge, a, b, hierarchy });
+    }
+  }
+
+  // Add extra edges beyond the MST to create cycles (enclosed faces).
+  // Take the shortest non-MST edges, up to ~40% of the MST edge count.
+  const maxExtras = Math.max(2, Math.floor(connections.length * 0.4));
+  for (let i = 0; i < Math.min(maxExtras, extraEdges.length); i++) {
+    const { a, b, hierarchy } = extraEdges[i];
     connections.push({
       from: { gx: a.gx, gz: a.gz },
       to: { gx: b.gx, gz: b.gz },
-      hierarchy,
+      hierarchy: hierarchy === 'arterial' ? 'collector' : 'local',
     });
   }
 

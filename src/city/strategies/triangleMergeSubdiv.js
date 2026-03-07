@@ -3,8 +3,6 @@ import { findPath, simplifyPath, smoothPath } from '../../core/pathfinding.js';
 
 const TARGET_BLOCK_AREA = 4000; // ~60x60m
 const MAX_SUBDIVISIONS_PER_TICK = 5;
-const CONNECTOR_SPACING = 50; // denser than FaceSubdiv (50m vs 80m)
-const CONNECTOR_MAX_LENGTH = 40;
 
 export class TriangleMergeSubdiv {
   constructor(map) {
@@ -19,130 +17,19 @@ export class TriangleMergeSubdiv {
       buildSkeletonRoads(this.map);
       return true;
     }
+    // Skeleton now includes extra edges beyond MST, creating cycles.
+    // Tick 2: merge adjacent triangles into quads.
     if (this._tick === 2) {
-      return this._addConnectors();
-    }
-    if (this._tick === 3) {
       return this._mergeTriangles();
     }
+    // Tick 3+: subdivide oversized faces.
     return this._subdivide();
   }
 
-  /**
-   * Add dense perpendicular connectors between skeleton roads.
-   * Denser spacing than FaceSubdivision to create more, smaller triangular
-   * faces that can then be merged into quads.
-   */
-  _addConnectors() {
-    const map = this.map;
-    const skeletonRoads = map.roads.filter(r => r.source === 'skeleton');
-    if (skeletonRoads.length === 0) return false;
-
-    let added = 0;
-    for (const road of skeletonRoads) {
-      const polyline = road.polyline;
-      if (!polyline || polyline.length < 2) continue;
-
-      let accDist = 0;
-      let lastConnAt = 0;
-
-      for (let i = 0; i < polyline.length - 1; i++) {
-        const ax = polyline[i].x, az = polyline[i].z;
-        const bx = polyline[i + 1].x, bz = polyline[i + 1].z;
-        const dx = bx - ax, dz = bz - az;
-        const segLen = Math.sqrt(dx * dx + dz * dz);
-        accDist += segLen;
-
-        if (accDist - lastConnAt < CONNECTOR_SPACING) continue;
-        lastConnAt = accDist;
-
-        if (segLen < 1) continue;
-        const perpX = -dz / segLen;
-        const perpZ = dx / segLen;
-
-        const mx = (ax + bx) / 2;
-        const mz = (az + bz) / 2;
-        const fromGx = Math.round((mx - map.originX) / map.cellSize);
-        const fromGz = Math.round((mz - map.originZ) / map.cellSize);
-
-        for (const dir of [1, -1]) {
-          let targetGx = -1, targetGz = -1;
-          for (let d = 5; d <= CONNECTOR_MAX_LENGTH; d++) {
-            const gx = fromGx + Math.round(perpX * dir * d);
-            const gz = fromGz + Math.round(perpZ * dir * d);
-            if (gx < 2 || gx >= map.width - 2 || gz < 2 || gz >= map.height - 2) break;
-            if (map.roadGrid.get(gx, gz) > 0) {
-              targetGx = gx;
-              targetGz = gz;
-              break;
-            }
-          }
-
-          if (targetGx < 0) continue;
-          const dist = Math.sqrt((targetGx - fromGx) ** 2 + (targetGz - fromGz) ** 2);
-          if (dist < 5) continue;
-
-          if (fromGx < 2 || fromGx >= map.width - 2 || fromGz < 2 || fromGz >= map.height - 2) continue;
-
-          const costFn = map.createPathCost('growth');
-          const result = findPath(fromGx, fromGz, targetGx, targetGz, map.width, map.height, costFn);
-          if (!result || result.path.length < 3) continue;
-
-          const simplified = simplifyPath(result.path, 1.0);
-          const worldPoints = smoothPath(simplified, map.cellSize, 2);
-          if (worldPoints.length < 2) continue;
-
-          const connPolyline = worldPoints.map(p => ({
-            x: p.x + map.originX,
-            z: p.z + map.originZ,
-          }));
-
-          map.addFeature('road', {
-            polyline: connPolyline, width: 6, hierarchy: 'local',
-            importance: 0.35, source: 'connector',
-          });
-          this._addToGraph(connPolyline);
-          added++;
-          break;
-        }
-      }
-    }
-
-    return added > 0;
-  }
-
-  _addToGraph(polyline) {
-    const map = this.map;
-    const graph = map.graph;
-    const snapDist = map.cellSize * 3;
-    if (polyline.length < 2) return;
-
-    const startPt = polyline[0];
-    const endPt = polyline[polyline.length - 1];
-
-    const startNode = this._findOrCreateNode(graph, startPt.x, startPt.z, snapDist);
-    const endNode = this._findOrCreateNode(graph, endPt.x, endPt.z, snapDist);
-    if (startNode === endNode) return;
-
-    const points = polyline.slice(1, -1).map(p => ({ x: p.x, z: p.z }));
-    graph.addEdge(startNode, endNode, { points, width: 6, hierarchy: 'local' });
-  }
-
-  _findOrCreateNode(graph, x, z, snapDist) {
-    const nearest = graph.nearestNode(x, z);
-    if (nearest && nearest.dist < snapDist) return nearest.id;
-    return graph.addNode(x, z);
-  }
-
-  /**
-   * Find adjacent triangle pairs sharing an edge, remove shared edge to create quads.
-   * If no merges possible, fall through to subdivision.
-   */
   _mergeTriangles() {
     const graph = this.map.graph;
     const faces = graph.facesWithEdges();
 
-    // Filter to simple inner faces (positive signed area)
     const innerFaces = [];
     for (const face of faces) {
       const { nodeIds } = face;
@@ -152,11 +39,9 @@ export class TriangleMergeSubdiv {
       innerFaces.push(face);
     }
 
-    // Find triangular faces (exactly 3 nodes)
     const triangles = innerFaces.filter(f => f.nodeIds.length === 3);
 
     if (triangles.length < 2) {
-      // No triangle pairs possible, go straight to subdivision
       return this._subdivide();
     }
 
@@ -169,7 +54,6 @@ export class TriangleMergeSubdiv {
       }
     }
 
-    // Find mergeable pairs
     const merged = new Set();
     let mergeCount = 0;
 
@@ -178,26 +62,19 @@ export class TriangleMergeSubdiv {
       const [i, j] = faceIndices;
       if (merged.has(i) || merged.has(j)) continue;
 
-      // Remove the shared edge to merge the two triangles into a quad
       graph._removeEdge(eid);
       merged.add(i);
       merged.add(j);
       mergeCount++;
     }
 
-    this._merged = mergeCount > 0;
-
-    if (!this._merged) {
+    if (mergeCount === 0) {
       return this._subdivide();
     }
 
     return true;
   }
 
-  /**
-   * Find oversized faces and split them by connecting midpoints of the two longest edges.
-   * Returns true if any faces were subdivided, false if done.
-   */
   _subdivide() {
     const map = this.map;
     const graph = map.graph;
@@ -205,7 +82,6 @@ export class TriangleMergeSubdiv {
     const faces = graph.facesWithEdges();
     if (faces.length === 0) return false;
 
-    // Filter to simple inner faces with area > target
     const oversized = [];
     for (const face of faces) {
       const { nodeIds } = face;
@@ -220,82 +96,61 @@ export class TriangleMergeSubdiv {
 
     if (oversized.length === 0) return false;
 
-    // Sort largest first
     oversized.sort((a, b) => b.area - a.area);
 
     let subdivided = 0;
-
     for (const face of oversized) {
       if (subdivided >= MAX_SUBDIVISIONS_PER_TICK) break;
-
-      const success = this._splitFace(face);
-      if (success) subdivided++;
+      if (this._splitFace(face)) subdivided++;
     }
 
     return subdivided > 0;
   }
 
-  /**
-   * Split a face by connecting midpoints of its two longest edges.
-   */
   _splitFace(face) {
     const map = this.map;
     const graph = map.graph;
     const { edgeIds } = face;
 
-    // Compute edge lengths and find two longest
     const edgeLengths = [];
-    for (let i = 0; i < edgeIds.length; i++) {
-      const eid = edgeIds[i];
+    for (const eid of edgeIds) {
       const polyline = graph.edgePolyline(eid);
-      const len = polylineLength(polyline);
-      edgeLengths.push({ edgeId: eid, length: len, index: i });
+      edgeLengths.push({ edgeId: eid, length: polylineLength(polyline) });
     }
-
     edgeLengths.sort((a, b) => b.length - a.length);
     if (edgeLengths.length < 2) return false;
 
     const edgeA = edgeLengths[0];
     const edgeB = edgeLengths[1];
 
-    // Compute geometric midpoints
     const midA = polylineMidpoint(graph.edgePolyline(edgeA.edgeId));
     const midB = polylineMidpoint(graph.edgePolyline(edgeB.edgeId));
-
     if (!midA || !midB) return false;
 
-    // Convert to grid coordinates
     const gxA = Math.round((midA.x - map.originX) / map.cellSize);
     const gzA = Math.round((midA.z - map.originZ) / map.cellSize);
     const gxB = Math.round((midB.x - map.originX) / map.cellSize);
     const gzB = Math.round((midB.z - map.originZ) / map.cellSize);
 
-    // Bounds check
     if (gxA < 0 || gxA >= map.width || gzA < 0 || gzA >= map.height) return false;
     if (gxB < 0 || gxB >= map.width || gzB < 0 || gzB >= map.height) return false;
 
-    // Pathfind between midpoints
     const costFn = map.createPathCost('growth');
     const result = findPath(gxA, gzA, gxB, gzB, map.width, map.height, costFn);
-    if (!result || !result.path || result.path.length < 2) return false;
+    if (!result || result.path.length < 2) return false;
 
-    // Simplify and smooth the path
     const simplified = simplifyPath(result.path, 1.0);
     const worldPoints = smoothPath(simplified, map.cellSize, 1);
-
     if (worldPoints.length < 2) return false;
 
-    // Offset world points by origin
     const polyline = worldPoints.map(p => ({
       x: p.x + map.originX,
       z: p.z + map.originZ,
     }));
 
-    // Split the two face edges at their midpoints
     const midNodeA = graph.splitEdge(edgeA.edgeId, midA.x, midA.z);
     const midNodeB = graph.splitEdge(edgeB.edgeId, midB.x, midB.z);
 
-    // Add connecting edge to graph
     const intermediatePoints = polyline.slice(1, -1);
     graph.addEdge(midNodeA, midNodeB, {
       points: intermediatePoints,
@@ -303,7 +158,6 @@ export class TriangleMergeSubdiv {
       hierarchy: 'local',
     });
 
-    // Add road feature
     map.addFeature('road', {
       polyline,
       width: 6,
@@ -316,7 +170,6 @@ export class TriangleMergeSubdiv {
   }
 }
 
-/** Signed area via shoelace. Positive = CCW (inner face in x-right, z-down). */
 function signedArea(nodeIds, graph) {
   let area = 0;
   for (let i = 0; i < nodeIds.length; i++) {
@@ -327,7 +180,6 @@ function signedArea(nodeIds, graph) {
   return area / 2;
 }
 
-/** Total length of a polyline [{x,z}]. */
 function polylineLength(pts) {
   let len = 0;
   for (let i = 0; i < pts.length - 1; i++) {
@@ -338,7 +190,6 @@ function polylineLength(pts) {
   return len;
 }
 
-/** Geometric midpoint of a polyline (50% of total length). */
 function polylineMidpoint(pts) {
   if (pts.length === 0) return null;
   if (pts.length === 1) return { x: pts[0].x, z: pts[0].z };
