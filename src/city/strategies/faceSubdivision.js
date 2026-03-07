@@ -4,14 +4,12 @@ import { distance2D } from '../../core/math.js';
 
 const TARGET_BLOCK_AREA = 4000; // ~60x60m
 const MAX_SUBDIVISIONS_PER_TICK = 5;
-const SHORTCUT_MAX_DIST = 50; // max graph distance (cells) for shortcut candidates
-const SHORTCUT_MIN_DIST = 8; // min distance to avoid trivial shortcuts
+const MAX_SHORTCUTS = 8; // cap on shortcut roads to avoid flooding
 
 export class FaceSubdivision {
   constructor(map) {
     this.map = map;
     this._tick = 0;
-    this._cyclesCreated = false;
   }
 
   tick() {
@@ -28,7 +26,8 @@ export class FaceSubdivision {
 
   /**
    * The skeleton is an MST (tree) — no cycles means no enclosed faces.
-   * Add shortcut edges between nearby non-adjacent nodes to create cycles.
+   * Add a small number of shortcut edges between nearby dead-end or
+   * low-degree nodes to create enclosed blocks for subdivision.
    */
   _createCycles() {
     const map = this.map;
@@ -36,65 +35,80 @@ export class FaceSubdivision {
     const nodes = [...graph.nodes.values()];
     if (nodes.length < 3) return false;
 
-    let added = 0;
-
-    // Find pairs of nodes that are geographically close but not directly connected
+    // Score all candidate shortcut pairs, then take the best few
+    const candidates = [];
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         const a = nodes[i];
         const b = nodes[j];
-        const geoDist = distance2D(a.x, a.z, b.x, b.z);
-        const geoDistCells = geoDist / map.cellSize;
-
-        // Must be within range
-        if (geoDistCells < SHORTCUT_MIN_DIST || geoDistCells > SHORTCUT_MAX_DIST) continue;
 
         // Skip if already directly connected
         if (graph.neighbors(a.id).includes(b.id)) continue;
 
-        // Only add if graph path is significantly longer than geometric distance
-        const graphDist = graph.shortestPathLength(a.id, b.id);
-        if (graphDist < geoDist * 2.5) continue;
+        const geoDist = distance2D(a.x, a.z, b.x, b.z);
+        const geoDistCells = geoDist / map.cellSize;
 
-        // Pathfind the shortcut
-        const gxA = Math.round((a.x - map.originX) / map.cellSize);
-        const gzA = Math.round((a.z - map.originZ) / map.cellSize);
-        const gxB = Math.round((b.x - map.originX) / map.cellSize);
-        const gzB = Math.round((b.z - map.originZ) / map.cellSize);
+        // Keep shortcuts short — max 30 cells (300m)
+        if (geoDistCells < 5 || geoDistCells > 30) continue;
 
-        if (gxA < 1 || gxA >= map.width - 1 || gzA < 1 || gzA >= map.height - 1) continue;
-        if (gxB < 1 || gxB >= map.width - 1 || gzB < 1 || gzB >= map.height - 1) continue;
-
-        const costFn = map.createPathCost('growth');
-        const result = findPath(gxA, gzA, gxB, gzB, map.width, map.height, costFn);
-        if (!result || result.path.length < 2) continue;
-
-        const simplified = simplifyPath(result.path, 1.0);
-        const worldPoints = smoothPath(simplified, map.cellSize, 2);
-        if (worldPoints.length < 2) continue;
-
-        const polyline = worldPoints.map(p => ({
-          x: p.x + map.originX,
-          z: p.z + map.originZ,
-        }));
-
-        // Add road feature
-        map.addFeature('road', {
-          polyline,
-          width: 6,
-          hierarchy: 'local',
-          importance: 0.4,
-          source: 'shortcut',
-        });
-
-        // Add edge to graph
-        const points = polyline.slice(1, -1);
-        graph.addEdge(a.id, b.id, { points, width: 6, hierarchy: 'local' });
-        added++;
+        candidates.push({ a, b, geoDist });
       }
     }
 
+    // Sort by geometric distance (prefer shorter shortcuts — they create tighter faces)
+    candidates.sort((a, b) => a.geoDist - b.geoDist);
+
+    let added = 0;
+    for (const { a, b, geoDist } of candidates) {
+      if (added >= MAX_SHORTCUTS) break;
+
+      // Re-check adjacency (previous shortcuts may have connected them)
+      if (graph.neighbors(a.id).includes(b.id)) continue;
+
+      // Only add if graph path is significantly longer than geometric distance
+      const graphDist = graph.shortestPathLength(a.id, b.id);
+      if (graphDist < geoDist * 2.0) continue;
+
+      const success = this._pathfindShortcut(a, b);
+      if (success) added++;
+    }
+
     return added > 0;
+  }
+
+  _pathfindShortcut(a, b) {
+    const map = this.map;
+    const graph = map.graph;
+
+    const gxA = Math.round((a.x - map.originX) / map.cellSize);
+    const gzA = Math.round((a.z - map.originZ) / map.cellSize);
+    const gxB = Math.round((b.x - map.originX) / map.cellSize);
+    const gzB = Math.round((b.z - map.originZ) / map.cellSize);
+
+    if (gxA < 1 || gxA >= map.width - 1 || gzA < 1 || gzA >= map.height - 1) return false;
+    if (gxB < 1 || gxB >= map.width - 1 || gzB < 1 || gzB >= map.height - 1) return false;
+
+    const costFn = map.createPathCost('growth');
+    const result = findPath(gxA, gzA, gxB, gzB, map.width, map.height, costFn);
+    if (!result || result.path.length < 2) return false;
+
+    const simplified = simplifyPath(result.path, 1.0);
+    const worldPoints = smoothPath(simplified, map.cellSize, 2);
+    if (worldPoints.length < 2) return false;
+
+    const polyline = worldPoints.map(p => ({
+      x: p.x + map.originX,
+      z: p.z + map.originZ,
+    }));
+
+    map.addFeature('road', {
+      polyline, width: 6, hierarchy: 'local',
+      importance: 0.4, source: 'shortcut',
+    });
+
+    const points = polyline.slice(1, -1);
+    graph.addEdge(a.id, b.id, { points, width: 6, hierarchy: 'local' });
+    return true;
   }
 
   /**

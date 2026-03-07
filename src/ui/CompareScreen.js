@@ -198,8 +198,8 @@ export class CompareScreen {
     this._selectedCell = null;
     this.tickLabel.textContent = 'Tick: 0';
 
-    // Auto-run ticks 1-4
-    for (let t = 0; t < 4; t++) {
+    // Auto-run ticks 1-6 (skeleton + cycles + several subdivision passes)
+    for (let t = 0; t < 6; t++) {
       for (const s of this.strategies) s.tick();
       this.currentTick++;
     }
