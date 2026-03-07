@@ -12,9 +12,10 @@ import { identifyRiverCrossings } from './riverCrossings.js';
 import { seedNuclei } from './seedNuclei.js';
 import { generateInstitutionalPlots } from './generateInstitutionalPlots.js';
 import { extractWaterPolygons } from './extractWaterPolygons.js';
-import { createOccupancyGrid, attachBuildability, stampEdge, stampJunction, stampPlot } from './roadOccupancy.js';
+import { createOccupancyGrid, attachGrids, stampEdge, stampJunction, stampPlot } from './roadOccupancy.js';
 import { Grid2D } from '../core/Grid2D.js';
 import { computeBuildability } from './buildability.js';
+import { identifyRiverCrossings } from './riverCrossings.js';
 import { connectNuclei } from './connectNuclei.js';
 import {
   computeGradientField,
@@ -50,11 +51,21 @@ export function setupCity(regionalLayers, settlement, rng, options = {}) {
   const occupancy = createOccupancyGrid(cityLayers.getData('params'));
   cityLayers.setData('occupancy', occupancy);
 
-  // Buildability from terrain (then incrementally updated by stamps)
   const buildability = computeBuildability(cityLayers);
-  attachBuildability(occupancy, buildability);
 
   const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'), occupancy);
+  cityLayers.setData('roadGraph', roadGraph);
+
+  const { bridgeGrid, bridges } = identifyRiverCrossings(cityLayers);
+  cityLayers.setGrid('bridgeGrid', bridgeGrid);
+  cityLayers.setData('bridges', bridges);
+
+  attachGrids(occupancy, {
+    buildability,
+    bridgeGrid,
+    waterMask: cityLayers.getGrid('waterMask'),
+    bridges,
+  });
 
   for (const edgeId of roadGraph.edges.keys()) {
     stampEdge(roadGraph, edgeId, occupancy);
@@ -64,12 +75,6 @@ export function setupCity(regionalLayers, settlement, rng, options = {}) {
       stampJunction(node.x, node.z, 15, occupancy);
     }
   }
-
-  cityLayers.setData('roadGraph', roadGraph);
-
-  const { bridgeGrid, bridges } = identifyRiverCrossings(cityLayers);
-  cityLayers.setGrid('bridgeGrid', bridgeGrid);
-  cityLayers.setData('bridges', bridges);
 
   const nuclei = seedNuclei(cityLayers, roadGraph, rng.fork('nuclei'));
   cityLayers.setData('nuclei', nuclei);

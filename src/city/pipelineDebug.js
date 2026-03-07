@@ -16,7 +16,7 @@ import { generateBuildings } from './generateBuildings.js';
 import { generateAmenities } from './generateAmenities.js';
 import { generateCityLandCover } from './generateLandCover.js';
 import { extractWaterPolygons } from './extractWaterPolygons.js';
-import { createOccupancyGrid, attachBuildability, stampEdge, stampJunction, stampPlot } from './roadOccupancy.js';
+import { createOccupancyGrid, attachGrids, stampEdge, stampJunction, stampPlot } from './roadOccupancy.js';
 import { computeBuildability } from './buildability.js';
 import { connectNuclei } from './connectNuclei.js';
 import { Grid2D } from '../core/Grid2D.js';
@@ -73,12 +73,24 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
   const occupancy = createOccupancyGrid(cityLayers.getData('params'));
   cityLayers.setData('occupancy', occupancy);
 
-  // Buildability from terrain (then incrementally updated by stamps)
   const buildability = computeBuildability(cityLayers);
-  attachBuildability(occupancy, buildability);
 
   // C0d: Anchor routes (Phase 1-4 only)
   const roadGraph = generateAnchorRoutes(cityLayers, rng.fork('anchorRoutes'), occupancy);
+  cityLayers.setData('roadGraph', roadGraph);
+
+  // C3b: Initial bridge detection from anchor routes
+  const { bridgeGrid, bridges } = identifyRiverCrossings(cityLayers);
+  cityLayers.setGrid('bridgeGrid', bridgeGrid);
+  cityLayers.setData('bridges', bridges);
+
+  // Wire occupancy → derived grids for incremental updates
+  attachGrids(occupancy, {
+    buildability,
+    bridgeGrid,
+    waterMask: cityLayers.getGrid('waterMask'),
+    bridges,
+  });
 
   // Stamp all anchor route edges + junctions onto occupancy
   for (const edgeId of roadGraph.edges.keys()) {
@@ -96,16 +108,8 @@ export function generateCityStepByStep(regionalLayers, settlement, rng, options 
     name: 'Anchor Routes', render: 'roads',
     edgeIds: new Set(curEdges), newEdgeIds: new Set(curEdges),
   });
-  if (stop('anchor routes')) { cityLayers.setData('roadGraph', roadGraph); return { cityLayers, roadGraph, steps }; }
+  if (stop('anchor routes')) { return { cityLayers, roadGraph, steps }; }
   prevEdges = new Set(curEdges);
-
-  // Store roadGraph early so identifyRiverCrossings can read it
-  cityLayers.setData('roadGraph', roadGraph);
-
-  // C3b: River crossings (detected where roads cross water)
-  const { bridgeGrid, bridges } = identifyRiverCrossings(cityLayers);
-  cityLayers.setGrid('bridgeGrid', bridgeGrid);
-  cityLayers.setData('bridges', bridges);
 
   // C0e: Seed nuclei
   const nuclei = seedNuclei(cityLayers, roadGraph, rng.fork('nuclei'));

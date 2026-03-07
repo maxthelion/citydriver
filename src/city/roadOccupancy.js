@@ -10,9 +10,9 @@
  * All road-adding stages read from and stamp onto this grid to prevent
  * overlapping roads and route around plots.
  *
- * When a buildability grid is attached (via attachBuildability), stamping
- * incrementally zeros out the corresponding buildability cells — no
- * expensive full recompute needed.
+ * When derived grids are attached (via attachGrids), stamping
+ * incrementally updates buildability (zeroed) and bridgeGrid (marked
+ * where roads cross water) — no expensive full recompute needed.
  */
 
 const RES = 3; // metres per occupancy cell
@@ -35,18 +35,26 @@ export function createOccupancyGrid(params) {
 }
 
 /**
- * Attach a buildability grid so that stamp operations incrementally
- * zero out affected cells. Call after computeBuildability().
+ * Attach derived grids so stamp operations incrementally update them.
+ * Call after computeBuildability() and identifyRiverCrossings().
  *
  * @param {object} occupancy
- * @param {import('../core/Grid2D.js').Grid2D} buildability
+ * @param {object} grids
+ * @param {import('../core/Grid2D.js').Grid2D} grids.buildability
+ * @param {import('../core/Grid2D.js').Grid2D} [grids.bridgeGrid]
+ * @param {import('../core/Grid2D.js').Grid2D} [grids.waterMask]
+ * @param {Array} [grids.bridges] - mutable array to append new bridges to
  */
-export function attachBuildability(occupancy, buildability) {
-  occupancy.buildability = buildability;
+export function attachGrids(occupancy, grids) {
+  occupancy.buildability = grids.buildability;
+  occupancy.bridgeGrid = grids.bridgeGrid || null;
+  occupancy.waterMask = grids.waterMask || null;
+  occupancy.bridges = grids.bridges || null;
 }
 
 /**
  * Stamp a road edge's polyline corridor onto the occupancy grid.
+ * Also detects water crossings and incrementally updates bridgeGrid.
  * @param {import('../core/PlanarGraph.js').PlanarGraph} graph
  * @param {number} edgeId
  * @param {object} occupancy - { data, width, height, res }
@@ -57,6 +65,11 @@ export function stampEdge(graph, edgeId, occupancy) {
   const polyline = graph.edgePolyline(edgeId);
   const halfW = ((edge.width || 12) / 2) + 2;
   stampPolylineOnGrid(polyline, halfW, occupancy, OCCUPANCY_ROAD);
+
+  // Detect water crossings and mark bridgeGrid
+  if (occupancy.bridgeGrid && occupancy.waterMask) {
+    detectBridgeCells(polyline, occupancy);
+  }
 }
 
 /**
@@ -186,5 +199,89 @@ export function stampCircleOnGrid(cx, cz, radius, occupancy, value) {
         }
       }
     }
+  }
+}
+
+/**
+ * Walk a road polyline at buildability resolution, detect water crossings,
+ * and mark bridgeGrid cells. Also appends bridge records for debug rendering.
+ */
+function detectBridgeCells(polyline, occupancy) {
+  const { bridgeGrid, waterMask, bridges, cityCS } = occupancy;
+  const w = bridgeGrid.width;
+  const h = bridgeGrid.height;
+
+  let inWater = false;
+  let entryGx = 0, entryGz = 0;
+  let lastLandGx = 0, lastLandGz = 0;
+
+  // Walk the polyline at grid resolution
+  for (let i = 0; i < polyline.length; i++) {
+    const gx = Math.round(polyline[i].x / cityCS);
+    const gz = Math.round(polyline[i].z / cityCS);
+    if (gx < 0 || gx >= w || gz < 0 || gz >= h) continue;
+
+    const isWater = waterMask.get(gx, gz) > 0;
+
+    if (!inWater && isWater) {
+      inWater = true;
+      entryGx = lastLandGx;
+      entryGz = lastLandGz;
+    } else if (inWater && !isWater) {
+      inWater = false;
+      // Mark bridge cells from entry to exit
+      markBridgeLine(bridgeGrid, entryGx, entryGz, gx, gz, w, h);
+      // Append bridge record for rendering
+      if (bridges) {
+        const dx = gx - entryGx, dz = gz - entryGz;
+        const bWidth = Math.round(Math.sqrt(dx * dx + dz * dz));
+        if (bWidth >= 1 && bWidth <= 25) {
+          bridges.push({
+            startGx: entryGx, startGz: entryGz,
+            endGx: gx, endGz: gz,
+            gx: Math.round((entryGx + gx) / 2),
+            gz: Math.round((entryGz + gz) / 2),
+            x: Math.round((entryGx + gx) / 2) * cityCS,
+            z: Math.round((entryGz + gz) / 2) * cityCS,
+            width: bWidth,
+            heading: Math.atan2(dx, dz),
+            importance: 0.4,
+          });
+        }
+      }
+    }
+
+    if (!isWater) {
+      lastLandGx = gx;
+      lastLandGz = gz;
+    } else {
+      // Mark water cells under road as bridge-passable
+      bridgeGrid.set(gx, gz, 1);
+    }
+  }
+}
+
+/**
+ * Mark cells along a bridge line (Bresenham) plus 1-cell margin.
+ */
+function markBridgeLine(bridgeGrid, x0, z0, x1, z1, w, h) {
+  const dx = Math.abs(x1 - x0), dz = Math.abs(z1 - z0);
+  const sx = x0 < x1 ? 1 : -1, sz = z0 < z1 ? 1 : -1;
+  let gx = x0, gz = z0, err = dx - dz;
+
+  while (true) {
+    // Mark cell and 1-cell margin
+    for (let ddz = -1; ddz <= 1; ddz++) {
+      for (let ddx = -1; ddx <= 1; ddx++) {
+        const nx = gx + ddx, nz = gz + ddz;
+        if (nx >= 0 && nx < w && nz >= 0 && nz < h) {
+          bridgeGrid.set(nx, nz, 1);
+        }
+      }
+    }
+    if (gx === x1 && gz === z1) break;
+    const e2 = 2 * err;
+    if (e2 > -dz) { err -= dz; gx += sx; }
+    if (e2 < dx) { err += dx; gz += sz; }
   }
 }

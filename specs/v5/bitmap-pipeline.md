@@ -33,7 +33,11 @@ These are set once during setup and never modified after refineTerrain completes
 
 Modified throughout the pipeline as roads and plots are stamped. Values: 0=empty, 1=road, 2=plot, 3=junction.
 
-Carries an attached reference to the buildability grid so stamp operations can incrementally update it.
+Carries attached references to derived grids (via `attachGrids`) so stamp operations incrementally update them:
+- **buildability** — zeroed when a cell is stamped
+- **bridgeGrid** — marked when a road is stamped over water
+- **waterMask** — read-only, used to detect water crossings
+- **bridges** — array, new bridge records appended when roads cross water
 
 ### Derived Bitmap 1: buildability (float32, 0–1)
 
@@ -84,36 +88,43 @@ Setup:
   extractCityContext → importRivers → classifyWater → refineTerrain
   → create occupancy grid
   → computeBuildability (terrain-only, computed once)
-  → attachBuildability (wire occupancy → buildability)
-  ── from here, every stamp() zeroes buildability cells automatically ──
   → generateAnchorRoutes (using pathCost)
-  → stamp roads onto occupancy          ← buildability updated
+  → identifyRiverCrossings (initial bridgeGrid from anchor routes)
+  → attachGrids (wire occupancy → buildability, bridgeGrid, waterMask, bridges)
+  ── from here, every stamp() updates all derived grids automatically ──
+  → stamp anchor roads onto occupancy   ← buildability zeroed, bridges detected
   → seedNuclei (reads buildability)
   → generateInstitutionalPlots (reads buildability)
-  → stamp plots onto occupancy          ← buildability updated
+  → stamp plots onto occupancy          ← buildability zeroed
   → connectNuclei (MST + shortcuts)
-  → stamp roads onto occupancy          ← buildability updated
+  → stamp roads onto occupancy          ← buildability zeroed, bridges detected
 
 Growth (per tick):
   → select targets (reads buildability for priority)
-  → pathfind roads (using pathCost, reads buildability + occupancy)
-  → stamp new roads onto occupancy      ← buildability updated
+  → pathfind roads (using pathCost, reads buildability + occupancy + bridgeGrid)
+  → stamp new roads onto occupancy      ← buildability zeroed, bridges detected
   → subdivide blocks into plots
-  → stamp plots onto occupancy          ← buildability updated
+  → stamp plots onto occupancy          ← buildability zeroed
   → next tick reads updated surface
 ```
 
-No full recompute at any stage. The buildability grid is always up-to-date because every stamp operation zeros the affected cells in O(affected cells).
+No full recompute at any stage. Every stamp operation updates affected cells in O(affected cells):
+- **buildability**: zeroed for stamped cells
+- **bridgeGrid**: marked where road cells cross water (via `detectBridgeCells`)
+- **bridges array**: new bridge records appended for debug rendering
 
 ## Implementation
 
 ### buildability.js
 
-`computeBuildability(cityLayers)` — terrain-only, no occupancy parameter. Computed once during setup. Returns the Grid2D which is then attached to the occupancy grid via `attachBuildability()`.
+`computeBuildability(cityLayers)` — terrain-only, no occupancy parameter. Computed once during setup. Returns the Grid2D which is then attached to the occupancy grid.
 
 ### roadOccupancy.js
 
-`attachBuildability(occupancy, buildability)` — stores a reference to the buildability grid on the occupancy object. The low-level stamp helpers (`stampPolyOnGrid`, `stampCircleOnGrid`) check for this reference and zero corresponding buildability cells as they mark occupancy cells. The mapping from 3m occupancy cells to 10m buildability cells is: `bgx = floor(ax * res / cityCS)`.
+`attachGrids(occupancy, { buildability, bridgeGrid, waterMask, bridges })` — stores references to derived grids on the occupancy object.
+
+- **`stampPolyOnGrid` / `stampCircleOnGrid`**: after marking an occupancy cell, zero the corresponding buildability cell. Mapping: `bgx = floor(ax * res / cityCS)`.
+- **`stampEdge`**: after stamping the road corridor, calls `detectBridgeCells` which walks the polyline at grid resolution, marks water cells in `bridgeGrid`, and appends bridge records to the `bridges` array.
 
 ### pathCost.js
 
@@ -129,9 +140,10 @@ Presets: `anchorRouteCost`, `growthRoadCost`, `satelliteCost`, `nucleusConnectio
 | Action | File | Change |
 |--------|------|--------|
 | Done | `src/city/buildability.js` | Terrain-only computation, no occupancy parameter |
-| Done | `src/city/roadOccupancy.js` | `attachBuildability()`, incremental zeroing in stamp helpers |
+| Done | `src/city/roadOccupancy.js` | `attachGrids()`, incremental buildability zeroing + bridge detection |
+| Done | `src/city/riverCrossings.js` | Initial bridge detection from anchor routes |
 | Done | `src/city/pathCost.js` | Occupancy-first check order, parameterized presets |
-| Done | `src/city/pipeline.js` | Single `computeBuildability` + `attachBuildability`, no recomputes |
+| Done | `src/city/pipeline.js` | Single `computeBuildability` + `attachGrids`, no recomputes |
 | Done | `src/city/interactivePipeline.js` | Same |
 | Done | `src/city/pipelineDebug.js` | Same |
 | Done | `src/city/growCity.js` | No periodic recompute, stable grid reference |
