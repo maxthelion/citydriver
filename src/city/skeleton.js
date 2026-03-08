@@ -8,7 +8,7 @@
  * Constants: technical-reference.md
  */
 
-import { findPath } from '../core/pathfinding.js';
+import { findPath, gridPathToWorldPolyline } from '../core/pathfinding.js';
 import { buildRoadNetwork } from '../core/buildRoadNetwork.js';
 import { UnionFind } from '../core/UnionFind.js';
 import { distance2D } from '../core/math.js';
@@ -265,7 +265,7 @@ function _addExtraEdges(map, extraConnections) {
     }
 
     const simplified = _simplifyPathInline(result.path, 1.0);
-    const smoothed = _smoothPathInline(simplified, map.cellSize, map.originX, map.originZ);
+    const smoothed = gridPathToWorldPolyline(simplified, map.cellSize, map.originX, map.originZ);
 
     if (smoothed.length < 2) continue;
 
@@ -306,24 +306,6 @@ function _pointLineDistSq(px, pz, ax, az, bx, bz) {
   let t = ((px - ax) * dx + (pz - az) * dz) / lenSq;
   t = Math.max(0, Math.min(1, t));
   return (px - ax - t * dx) ** 2 + (pz - az - t * dz) ** 2;
-}
-
-/** Simple Chaikin smoothing for grid paths → world coords. */
-function _smoothPathInline(path, cellSize, originX, originZ) {
-  // Convert to world coords first
-  let pts = path.map(p => ({ x: p.gx * cellSize + originX, z: p.gz * cellSize + originZ }));
-  // 2 iterations of Chaikin
-  for (let iter = 0; iter < 2; iter++) {
-    const out = [pts[0]];
-    for (let i = 0; i < pts.length - 1; i++) {
-      const a = pts[i], b = pts[i + 1];
-      out.push({ x: a.x * 0.75 + b.x * 0.25, z: a.z * 0.75 + b.z * 0.25 });
-      out.push({ x: a.x * 0.25 + b.x * 0.75, z: a.z * 0.25 + b.z * 0.75 });
-    }
-    out.push(pts[pts.length - 1]);
-    pts = out;
-  }
-  return pts;
 }
 
 /**
@@ -369,7 +351,7 @@ function _connectDisconnectedNuclei(map) {
 
     // Simplify and smooth
     const simplified = _simplifyPathInline(result.path, 1.0);
-    const smoothed = _smoothPathInline(simplified, map.cellSize, map.originX, map.originZ);
+    const smoothed = gridPathToWorldPolyline(simplified, map.cellSize, map.originX, map.originZ);
     if (smoothed.length < 2) continue;
 
     const width = 6 + 0.3 * 10;
