@@ -264,3 +264,26 @@ export function smoothPath(path, cellSize, iterations = 2) {
 
   return points;
 }
+
+/**
+ * Convert grid-coord path to world-coord polyline.
+ * Quantizes to half-cell resolution and removes consecutive duplicates.
+ */
+export function gridPathToWorldPolyline(path, cellSize, originX = 0, originZ = 0) {
+  if (path.length === 0) return [];
+
+  const half = cellSize * 0.5;
+  const result = [];
+  let prevX = NaN, prevZ = NaN;
+
+  for (const p of path) {
+    const wx = Math.round((p.gx * cellSize + originX) / half) * half;
+    const wz = Math.round((p.gz * cellSize + originZ) / half) * half;
+    if (wx === prevX && wz === prevZ) continue;
+    result.push({ x: wx, z: wz });
+    prevX = wx;
+    prevZ = wz;
+  }
+
+  return result;
+}

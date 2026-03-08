@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findPath, terrainCostFunction, simplifyPath, smoothPath } from '../../src/core/pathfinding.js';
+import { findPath, terrainCostFunction, simplifyPath, smoothPath, gridPathToWorldPolyline } from '../../src/core/pathfinding.js';
 import { Grid2D } from '../../src/core/Grid2D.js';
 
 describe('pathfinding', () => {
@@ -53,6 +53,31 @@ describe('pathfinding', () => {
     expect(simplified.length).toBe(2);
     expect(simplified[0]).toEqual({ gx: 0, gz: 0 });
     expect(simplified[1]).toEqual({ gx: 3, gz: 0 });
+  });
+
+  it('gridPathToWorldPolyline converts, quantizes, and dedupes', () => {
+    const path = [
+      { gx: 0, gz: 0 },
+      { gx: 1, gz: 0 },
+      { gx: 1, gz: 0 },  // duplicate
+      { gx: 2, gz: 1 },
+      { gx: 3, gz: 1 },
+    ];
+    const poly = gridPathToWorldPolyline(path, 10, 100, 200);
+
+    // Should dedupe the duplicate
+    expect(poly.length).toBe(4);
+
+    // World coords with origin offset
+    expect(poly[0]).toEqual({ x: 100, z: 200 });
+    expect(poly[1]).toEqual({ x: 110, z: 200 });
+    expect(poly[3]).toEqual({ x: 130, z: 210 });
+
+    // All values quantized to half-cell (5)
+    for (const p of poly) {
+      expect(p.x % 5).toBe(0);
+      expect(p.z % 5).toBe(0);
+    }
   });
 
   it('smoothPath produces world coordinates', () => {
