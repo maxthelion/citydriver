@@ -12,6 +12,7 @@ import { findPath, gridPathToWorldPolyline } from '../core/pathfinding.js';
 import { buildRoadNetwork } from '../core/buildRoadNetwork.js';
 import { UnionFind } from '../core/UnionFind.js';
 import { distance2D } from '../core/math.js';
+import { PlanarGraph } from '../core/PlanarGraph.js';
 import { placeBridges } from './bridges.js';
 
 // Importance weight for hierarchy computation
@@ -57,7 +58,7 @@ export function buildSkeletonRoads(map) {
     originZ: map.originZ,
   });
 
-  // 4. Add merged roads as features + graph edges
+  // 4. Add merged roads as features (no graph yet — built at end)
   for (const road of builtRoads) {
     if (!road.polyline || road.polyline.length < 2) continue;
 
@@ -72,21 +73,18 @@ export function buildSkeletonRoads(map) {
       importance,
       source: 'skeleton',
     });
-
-    addRoadToGraph(map, road.polyline, width, road.hierarchy);
   }
 
   // 5. Connect any nuclei that ended up far from the road network.
-  // The merge step can absorb nucleus endpoints into anchor routes.
   _connectDisconnectedNuclei(map);
 
   // 6. Add extra edges (cycle creators) AFTER the main skeleton.
-  // These are pathfound with a cost function that penalizes existing roads,
-  // forcing them to find alternative routes and create genuine cycles.
   _addExtraEdges(map, extraConnections);
 
-  // 7. Compact graph: merge adjacent nodes, deduplicate parallel edges
-  map.graph.compact(map.cellSize * 1.5);
+  // 7. Compact road polylines: snap nearby vertices, remove duplicates.
+  //    Then rebuild the graph from the cleaned roads.
+  compactRoads(map, map.cellSize * 1.5);
+  rebuildGraphFromRoads(map);
 
   // 8. Place bridges where skeleton roads cross rivers.
   placeBridges(map);
@@ -280,8 +278,6 @@ function _addExtraEdges(map, extraConnections) {
       importance: 0.45,
       source: 'skeleton',
     });
-
-    addRoadToGraph(map, smoothed, width, conn.hierarchy);
   }
 }
 
@@ -318,16 +314,22 @@ function _pointLineDistSq(px, pz, ax, az, bx, bz) {
  * nucleus to the nearest road cell.
  */
 function _connectDisconnectedNuclei(map) {
-  const graph = map.graph;
-  const snapDist = map.cellSize * 3;
+  const threshold = 3; // cells — consider connected if road within this radius
 
   for (const n of map.nuclei) {
-    const wx = map.originX + n.gx * map.cellSize;
-    const wz = map.originZ + n.gz * map.cellSize;
-    const nearest = graph.nearestNode(wx, wz);
-    if (nearest && nearest.dist <= snapDist) continue;
+    // Check if nucleus is already near a road cell
+    let nearRoad = false;
+    for (let dz = -threshold; dz <= threshold && !nearRoad; dz++) {
+      for (let dx = -threshold; dx <= threshold && !nearRoad; dx++) {
+        const gx = n.gx + dx, gz = n.gz + dz;
+        if (gx >= 0 && gx < map.width && gz >= 0 && gz < map.height) {
+          if (map.roadGrid.get(gx, gz) > 0) nearRoad = true;
+        }
+      }
+    }
+    if (nearRoad) continue;
 
-    // Nucleus is far from graph — find nearest road cell and pathfind a spur
+    // Nucleus is far from roads — find nearest road cell and pathfind a spur
     let bestDist = Infinity, bestGx = -1, bestGz = -1;
     const searchRadius = 20;
     for (let dz = -searchRadius; dz <= searchRadius; dz++) {
@@ -365,8 +367,6 @@ function _connectDisconnectedNuclei(map) {
       importance: 0.3,
       source: 'skeleton',
     });
-
-    addRoadToGraph(map, smoothed, width, 'local');
   }
 }
 
@@ -375,7 +375,7 @@ function _connectDisconnectedNuclei(map) {
 // ============================================================
 
 /**
- * Add a smoothed road polyline to the PlanarGraph.
+ * Add a road polyline to the PlanarGraph.
  */
 export function addRoadToGraph(map, polyline, width, hierarchy) {
   if (polyline.length < 2) return;
@@ -405,4 +405,147 @@ function _findOrCreateNode(graph, x, z, snapDist) {
     return nearest.id;
   }
   return graph.addNode(x, z);
+}
+
+// ============================================================
+// Road compaction — unify polylines and graph
+// ============================================================
+
+const HIER_RANK = { arterial: 1, collector: 2, local: 3, track: 4 };
+
+/**
+ * Compact road polylines: snap nearby vertices, deduplicate roads.
+ * Then rebuild the graph from the cleaned roads.
+ *
+ * @param {import('../core/FeatureMap.js').FeatureMap} map
+ * @param {number} snapDist - Max distance to merge vertices
+ */
+export function compactRoads(map, snapDist) {
+  const roads = map.roads.filter(r => r.source === 'skeleton');
+  if (roads.length === 0) return;
+
+  // --- Pass 1: Snap nearby polyline vertices ---
+  // Collect all unique vertices across all road polylines
+  const allPts = [];
+  for (const road of roads) {
+    for (const p of road.polyline) {
+      allPts.push(p);
+    }
+  }
+
+  // Union-Find to group nearby points
+  const parent = new Map();
+  for (let i = 0; i < allPts.length; i++) parent.set(i, i);
+
+  function find(x) {
+    while (parent.get(x) !== x) {
+      parent.set(x, parent.get(parent.get(x)));
+      x = parent.get(x);
+    }
+    return x;
+  }
+
+  function union(a, b) {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent.set(rb, ra);
+  }
+
+  // O(n²) — fine for skeleton roads (typically <2000 vertices)
+  for (let i = 0; i < allPts.length; i++) {
+    for (let j = i + 1; j < allPts.length; j++) {
+      const dx = allPts[i].x - allPts[j].x;
+      const dz = allPts[i].z - allPts[j].z;
+      if (dx * dx + dz * dz <= snapDist * snapDist) {
+        union(i, j);
+      }
+    }
+  }
+
+  // Compute centroid for each group
+  const groups = new Map(); // root → { sumX, sumZ, count }
+  for (let i = 0; i < allPts.length; i++) {
+    const root = find(i);
+    if (!groups.has(root)) groups.set(root, { sumX: 0, sumZ: 0, count: 0 });
+    const g = groups.get(root);
+    g.sumX += allPts[i].x;
+    g.sumZ += allPts[i].z;
+    g.count++;
+  }
+
+  // Snap each point to its group centroid (quantized to half-cell)
+  const half = map.cellSize * 0.5;
+  for (let i = 0; i < allPts.length; i++) {
+    const g = groups.get(find(i));
+    allPts[i].x = Math.round((g.sumX / g.count) / half) * half;
+    allPts[i].z = Math.round((g.sumZ / g.count) / half) * half;
+  }
+
+  // --- Pass 1b: Deduplicate consecutive identical points in each polyline ---
+  for (const road of roads) {
+    const poly = road.polyline;
+    const deduped = [poly[0]];
+    for (let i = 1; i < poly.length; i++) {
+      if (poly[i].x !== deduped[deduped.length - 1].x ||
+          poly[i].z !== deduped[deduped.length - 1].z) {
+        deduped.push(poly[i]);
+      }
+    }
+    road.polyline = deduped;
+  }
+
+  // --- Pass 2: Remove duplicate roads with same endpoints ---
+  // Key by normalized start+end position
+  const roadsByEndpoints = new Map();
+  for (const road of roads) {
+    if (road.polyline.length < 2) continue;
+    const s = road.polyline[0];
+    const e = road.polyline[road.polyline.length - 1];
+    // Normalize: smaller coord first
+    const key = s.x < e.x || (s.x === e.x && s.z <= e.z)
+      ? `${s.x},${s.z}-${e.x},${e.z}`
+      : `${e.x},${e.z}-${s.x},${s.z}`;
+    if (!roadsByEndpoints.has(key)) roadsByEndpoints.set(key, []);
+    roadsByEndpoints.get(key).push(road);
+  }
+
+  const toRemove = new Set();
+  for (const [, group] of roadsByEndpoints) {
+    if (group.length <= 1) continue;
+    // Keep the road with best hierarchy
+    group.sort((a, b) =>
+      (HIER_RANK[a.hierarchy] || 9) - (HIER_RANK[b.hierarchy] || 9));
+    for (let i = 1; i < group.length; i++) {
+      toRemove.add(group[i].id);
+    }
+  }
+
+  // Also remove roads that became too short (< 2 distinct points)
+  for (const road of roads) {
+    if (road.polyline.length < 2) toRemove.add(road.id);
+  }
+
+  // Remove from map.roads and map.features
+  if (toRemove.size > 0) {
+    map.roads = map.roads.filter(r => !toRemove.has(r.id));
+    map.features = map.features.filter(f => !toRemove.has(f.id));
+  }
+}
+
+/**
+ * Rebuild the PlanarGraph from current map.roads.
+ * Clears the graph and re-adds all road polylines.
+ *
+ * @param {import('../core/FeatureMap.js').FeatureMap} map
+ */
+export function rebuildGraphFromRoads(map) {
+  // Clear graph and rebuild from road polylines
+  map.graph = new PlanarGraph();
+
+  for (const road of map.roads) {
+    if (!road.polyline || road.polyline.length < 2) continue;
+    addRoadToGraph(map, road.polyline, road.width, road.hierarchy);
+  }
+
+  // Compact graph nodes too
+  map.graph.compact(map.cellSize * 1.5);
 }
