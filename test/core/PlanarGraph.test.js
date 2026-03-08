@@ -198,4 +198,104 @@ describe('PlanarGraph', () => {
     const g = new PlanarGraph();
     expect(g.facesWithEdges()).toEqual([]);
   });
+
+  it('faces extracts all inner faces from a properly embedded graph', () => {
+    const g = new PlanarGraph();
+
+    // Center crossroads: 4 triangular faces
+    //        1
+    //       / \
+    //      /   \
+    //     /     \
+    //    0---5---2
+    //     \     /
+    //      \   /
+    //       \ /
+    //        3
+    const n0 = g.addNode(0, 150);
+    const n1 = g.addNode(150, 0);
+    const n2 = g.addNode(300, 150);
+    const n3 = g.addNode(150, 300);
+    const n5 = g.addNode(150, 150); // center
+
+    g.addEdge(n0, n1);
+    g.addEdge(n1, n2);
+    g.addEdge(n2, n3);
+    g.addEdge(n3, n0);
+    g.addEdge(n0, n5);
+    g.addEdge(n1, n5);
+    g.addEdge(n2, n5);
+    g.addEdge(n3, n5);
+
+    const faces = g.faces();
+    // 4 inner triangular faces + 1 outer face = 5
+    expect(faces.length).toBe(5);
+
+    // 4 simple triangular faces (3 nodes each)
+    const simpleFaces = faces.filter(f => f.length === 3);
+    expect(simpleFaces.length).toBe(4);
+  });
+
+  it('mergeNodes rewires edges to survivor', () => {
+    const g = new PlanarGraph();
+    const a = g.addNode(0, 0);
+    const b = g.addNode(5, 0);
+    const c = g.addNode(100, 0);
+    g.addEdge(a, c, { hierarchy: 'arterial' });
+    g.addEdge(b, c, { hierarchy: 'collector' });
+
+    g.mergeNodes(b, a);
+
+    expect(g.nodes.has(b)).toBe(false);
+    expect(g.nodes.has(a)).toBe(true);
+    expect(g.degree(a)).toBe(2);
+    expect(g.degree(c)).toBe(2);
+  });
+
+  it('mergeNodes removes self-loops', () => {
+    const g = new PlanarGraph();
+    const a = g.addNode(0, 0);
+    const b = g.addNode(5, 0);
+    g.addEdge(a, b);
+
+    g.mergeNodes(b, a);
+
+    expect(g.nodes.has(b)).toBe(false);
+    expect(g.edges.size).toBe(0);
+  });
+
+  it('faces uses polyline direction for angle computation', () => {
+    const g = new PlanarGraph();
+
+    // Two edges from node 1 going in similar endpoint directions,
+    // but polyline point on 1→2 makes the angles distinguishable
+    //
+    // 0 --- 1 -.   (1→2 curves via (230,100))
+    // |     |   `.
+    // |     4    2
+    // |         /
+    // 3 ------/
+    const n0 = g.addNode(0, 0);
+    const n1 = g.addNode(200, 0);
+    const n2 = g.addNode(200, 200);
+    const n3 = g.addNode(0, 200);
+    const n4 = g.addNode(200, 100);
+
+    g.addEdge(n0, n1);
+    g.addEdge(n0, n3);
+    g.addEdge(n3, n2);
+    // Edge 1→2 curves RIGHT of n4 via polyline point
+    g.addEdge(n1, n2, { points: [{ x: 230, z: 100 }] });
+    // Edge 1→4 goes straight down (angle 0°)
+    // Edge 1→2 first segment goes toward (230,100) (angle ~17°)
+    // Without polyline fix, both would have angle 0° (to (200,200) and (200,100))
+    g.addEdge(n1, n4);
+
+    const faces = g.faces();
+    // 1 enclosed face (the quad 0-1-2-3) + 1 outer face (non-simple, includes dead-end n4)
+    expect(faces.length).toBe(2);
+    const simpleFaces = faces.filter(f => f.length === new Set(f).size);
+    expect(simpleFaces.length).toBe(1);
+    expect(simpleFaces[0].length).toBe(4); // the quad
+  });
 });

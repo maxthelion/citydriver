@@ -177,79 +177,13 @@ export class PlanarGraph {
   faces() {
     if (this.edges.size === 0) return [];
 
-    // Build directed half-edges sorted by angle at each node
-    const halfEdges = []; // [{from, to, edgeId, angle}]
-
-    for (const [edgeId, edge] of this.edges) {
-      const fromNode = this.nodes.get(edge.from);
-      const toNode = this.nodes.get(edge.to);
-
-      // Forward half-edge
-      halfEdges.push({
-        from: edge.from,
-        to: edge.to,
-        edgeId,
-        angle: Math.atan2(toNode.x - fromNode.x, toNode.z - fromNode.z),
-      });
-
-      // Reverse half-edge
-      halfEdges.push({
-        from: edge.to,
-        to: edge.from,
-        edgeId,
-        angle: Math.atan2(fromNode.x - toNode.x, fromNode.z - toNode.z),
-      });
-    }
-
-    // Group by source node and sort by angle
-    const outgoing = new Map();
-    for (const he of halfEdges) {
-      if (!outgoing.has(he.from)) outgoing.set(he.from, []);
-      outgoing.get(he.from).push(he);
-    }
-    for (const [, hes] of outgoing) {
-      hes.sort((a, b) => a.angle - b.angle);
-    }
-
-    // For each half-edge, find the "next" half-edge in the face:
-    // At the target node, find the half-edge that goes in the most clockwise
-    // direction relative to the incoming direction.
-    const nextHE = new Map(); // "from-to" -> next half-edge key
-
-    for (const he of halfEdges) {
-      const incomingAngle = Math.atan2(he.from === he.from ? this.nodes.get(he.from).x - this.nodes.get(he.to).x : 0,
-        he.from === he.from ? this.nodes.get(he.from).z - this.nodes.get(he.to).z : 0);
-
-      // At node he.to, find the outgoing half-edge that is next clockwise after incomingAngle
-      const outHEs = outgoing.get(he.to);
-      if (!outHEs || outHEs.length === 0) continue;
-
-      const fromNode = this.nodes.get(he.from);
-      const toNode = this.nodes.get(he.to);
-      const arrivalAngle = Math.atan2(fromNode.x - toNode.x, fromNode.z - toNode.z);
-
-      // Find next CW: the outgoing half-edge whose angle is the first one
-      // less than arrivalAngle (wrapping around)
-      let bestIdx = -1;
-      for (let i = 0; i < outHEs.length; i++) {
-        if (outHEs[i].to === he.from && outHEs[i].edgeId === he.edgeId) continue; // skip twin
-        if (bestIdx === -1) { bestIdx = i; continue; }
-
-        // Prefer the one immediately CW from arrivalAngle
-        const diff = normalizeAngle(outHEs[i].angle - arrivalAngle);
-        const bestDiff = normalizeAngle(outHEs[bestIdx].angle - arrivalAngle);
-        if (diff < bestDiff) bestIdx = i;
-      }
-
-      if (bestIdx >= 0) {
-        const key = `${he.from}-${he.to}`;
-        nextHE.set(key, `${outHEs[bestIdx].from}-${outHEs[bestIdx].to}`);
-      }
-    }
+    // Build the nextHE map using _buildHalfEdgeNext
+    const { nextHE } = this._buildHalfEdgeNext();
 
     // Walk face loops
     const visited = new Set();
     const faces = [];
+    const maxSteps = this.edges.size * 2 + 1; // each half-edge visited at most once
 
     for (const startKey of nextHE.keys()) {
       if (visited.has(startKey)) continue;
@@ -257,7 +191,6 @@ export class PlanarGraph {
       const face = [];
       let current = startKey;
       let steps = 0;
-      const maxSteps = this.nodes.size + 1;
 
       while (!visited.has(current) && steps < maxSteps) {
         visited.add(current);
@@ -281,43 +214,30 @@ export class PlanarGraph {
   }
 
   /**
-   * Extract faces with their edge IDs via edge-loop walking.
-   * Returns arrays of { nodeIds, edgeIds } forming closed polygons.
-   * @returns {Array<{ nodeIds: number[], edgeIds: number[] }>}
+   * Build the half-edge next map for face traversal.
+   * Standard DCEL algorithm: for half-edge (u→v), next = prev(twin) in
+   * the sorted outgoing list at v. This traces faces CW (left side of edge).
+   * @returns {{ nextHE: Map<string, string>, outgoing: Map<number, Array> }}
    */
-  facesWithEdges() {
-    if (this.edges.size === 0) return [];
-
-    // Build node pair → edgeId lookup (both directions)
-    const edgeLookup = new Map();
-    for (const [edgeId, edge] of this.edges) {
-      const key1 = `${edge.from}-${edge.to}`;
-      const key2 = `${edge.to}-${edge.from}`;
-      edgeLookup.set(key1, edgeId);
-      edgeLookup.set(key2, edgeId);
-    }
-
-    // Build directed half-edges sorted by angle at each node
+  _buildHalfEdgeNext() {
     const halfEdges = []; // [{from, to, edgeId, angle}]
 
     for (const [edgeId, edge] of this.edges) {
       const fromNode = this.nodes.get(edge.from);
       const toNode = this.nodes.get(edge.to);
+      const pts = edge.points || [];
 
-      // Forward half-edge
+      // Use first/last polyline segment for angle (not endpoint-to-endpoint)
+      const fwdTarget = pts.length > 0 ? pts[0] : toNode;
+      const revTarget = pts.length > 0 ? pts[pts.length - 1] : fromNode;
+
       halfEdges.push({
-        from: edge.from,
-        to: edge.to,
-        edgeId,
-        angle: Math.atan2(toNode.x - fromNode.x, toNode.z - fromNode.z),
+        from: edge.from, to: edge.to, edgeId,
+        angle: Math.atan2(fwdTarget.x - fromNode.x, fwdTarget.z - fromNode.z),
       });
-
-      // Reverse half-edge
       halfEdges.push({
-        from: edge.to,
-        to: edge.from,
-        edgeId,
-        angle: Math.atan2(fromNode.x - toNode.x, fromNode.z - toNode.z),
+        from: edge.to, to: edge.from, edgeId,
+        angle: Math.atan2(revTarget.x - toNode.x, revTarget.z - toNode.z),
       });
     }
 
@@ -331,36 +251,57 @@ export class PlanarGraph {
       hes.sort((a, b) => a.angle - b.angle);
     }
 
-    // For each half-edge, find the "next" half-edge in the face
-    const nextHE = new Map(); // "from-to" -> next half-edge key
+    // For each half-edge (u→v), find twin (v→u) in sorted list at v,
+    // then take the predecessor (wrapping). This gives the "next" half-edge
+    // in the face to the left of the directed edge.
+    const nextHE = new Map();
 
     for (const he of halfEdges) {
       const outHEs = outgoing.get(he.to);
       if (!outHEs || outHEs.length === 0) continue;
 
-      const fromNode = this.nodes.get(he.from);
-      const toNode = this.nodes.get(he.to);
-      const arrivalAngle = Math.atan2(fromNode.x - toNode.x, fromNode.z - toNode.z);
-
-      let bestIdx = -1;
+      // Find twin: the half-edge at he.to going back to he.from with same edgeId
+      let twinIdx = -1;
       for (let i = 0; i < outHEs.length; i++) {
-        if (outHEs[i].to === he.from && outHEs[i].edgeId === he.edgeId) continue; // skip twin
-        if (bestIdx === -1) { bestIdx = i; continue; }
-
-        const diff = normalizeAngle(outHEs[i].angle - arrivalAngle);
-        const bestDiff = normalizeAngle(outHEs[bestIdx].angle - arrivalAngle);
-        if (diff < bestDiff) bestIdx = i;
+        if (outHEs[i].to === he.from && outHEs[i].edgeId === he.edgeId) {
+          twinIdx = i;
+          break;
+        }
       }
+      if (twinIdx < 0) continue;
 
-      if (bestIdx >= 0) {
-        const key = `${he.from}-${he.to}`;
-        nextHE.set(key, `${outHEs[bestIdx].from}-${outHEs[bestIdx].to}`);
-      }
+      // Predecessor in sorted order (wrapping)
+      const prevIdx = (twinIdx - 1 + outHEs.length) % outHEs.length;
+      const prev = outHEs[prevIdx];
+
+      const key = `${he.from}-${he.to}`;
+      nextHE.set(key, `${prev.from}-${prev.to}`);
     }
+
+    return { nextHE, outgoing };
+  }
+
+  /**
+   * Extract faces with their edge IDs via edge-loop walking.
+   * Returns arrays of { nodeIds, edgeIds } forming closed polygons.
+   * @returns {Array<{ nodeIds: number[], edgeIds: number[] }>}
+   */
+  facesWithEdges() {
+    if (this.edges.size === 0) return [];
+
+    // Build node pair → edgeId lookup (both directions)
+    const edgeLookup = new Map();
+    for (const [edgeId, edge] of this.edges) {
+      edgeLookup.set(`${edge.from}-${edge.to}`, edgeId);
+      edgeLookup.set(`${edge.to}-${edge.from}`, edgeId);
+    }
+
+    const { nextHE } = this._buildHalfEdgeNext();
 
     // Walk face loops
     const visited = new Set();
     const faces = [];
+    const maxSteps = this.edges.size * 2 + 1;
 
     for (const startKey of nextHE.keys()) {
       if (visited.has(startKey)) continue;
@@ -368,7 +309,6 @@ export class PlanarGraph {
       const faceNodes = [];
       let current = startKey;
       let steps = 0;
-      const maxSteps = this.nodes.size + 1;
 
       while (!visited.has(current) && steps < maxSteps) {
         visited.add(current);
@@ -378,9 +318,7 @@ export class PlanarGraph {
         current = nextHE.get(current);
         if (!current) break;
         if (current === startKey) {
-          // Closed loop
           if (faceNodes.length >= 3) {
-            // Look up edge IDs for consecutive node pairs
             const edgeIds = [];
             for (let i = 0; i < faceNodes.length; i++) {
               const a = faceNodes[i];
@@ -433,6 +371,51 @@ export class PlanarGraph {
     }
     this.nodes.delete(nodeId);
     this._adjacency.delete(nodeId);
+  }
+
+  /**
+   * Merge node `from` into node `into`.
+   * Rewires all edges touching `from` to point to `into`,
+   * removes any self-loops created, then deletes `from`.
+   */
+  mergeNodes(from, into) {
+    const fromAdj = this._adjacency.get(from);
+    if (!fromAdj) return;
+
+    const intoAdj = this._adjacency.get(into);
+
+    // Process each edge incident to `from`
+    for (const { edgeId, neighborId } of [...fromAdj]) {
+      const edge = this.edges.get(edgeId);
+      if (!edge) continue;
+
+      // Rewire edge endpoints
+      if (edge.from === from) edge.from = into;
+      if (edge.to === from) edge.to = into;
+
+      // Check for self-loop
+      if (edge.from === edge.to) {
+        this._removeEdge(edgeId);
+        continue;
+      }
+
+      // Move adjacency entry to `into`
+      intoAdj.push({ edgeId, neighborId });
+
+      // Fix neighborId at the OTHER end of this edge
+      const otherAdj = this._adjacency.get(neighborId);
+      if (otherAdj) {
+        for (const entry of otherAdj) {
+          if (entry.edgeId === edgeId && entry.neighborId === from) {
+            entry.neighborId = into;
+          }
+        }
+      }
+    }
+
+    // Delete the merged node
+    this.nodes.delete(from);
+    this._adjacency.delete(from);
   }
 
   /**
