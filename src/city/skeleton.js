@@ -85,7 +85,10 @@ export function buildSkeletonRoads(map) {
   // forcing them to find alternative routes and create genuine cycles.
   _addExtraEdges(map, extraConnections);
 
-  // 7. Place bridges where skeleton roads cross rivers.
+  // 7. Compact graph: merge adjacent nodes, deduplicate parallel edges
+  map.graph.compact(map.cellSize * 1.5);
+
+  // 8. Place bridges where skeleton roads cross rivers.
   placeBridges(map);
 }
 
