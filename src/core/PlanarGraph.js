@@ -419,6 +419,76 @@ export class PlanarGraph {
   }
 
   /**
+   * Merge nearby nodes and deduplicate parallel edges.
+   * @param {number} snapDist - Maximum distance to merge nodes
+   */
+  compact(snapDist) {
+    const HIERARCHY_RANK = { arterial: 1, collector: 2, local: 3, track: 4 };
+
+    // --- Pass 1: Merge nearby nodes via Union-Find ---
+    const ids = [...this.nodes.keys()];
+    const parent = new Map();
+    for (const id of ids) parent.set(id, id);
+
+    const find = (x) => {
+      while (parent.get(x) !== x) {
+        parent.set(x, parent.get(parent.get(x))); // path compression
+        x = parent.get(x);
+      }
+      return x;
+    };
+
+    const union = (a, b) => {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra !== rb) parent.set(rb, ra);
+    };
+
+    for (let i = 0; i < ids.length; i++) {
+      const ni = this.nodes.get(ids[i]);
+      if (!ni) continue;
+      for (let j = i + 1; j < ids.length; j++) {
+        const nj = this.nodes.get(ids[j]);
+        if (!nj) continue;
+        const dx = ni.x - nj.x;
+        const dz = ni.z - nj.z;
+        if (Math.sqrt(dx * dx + dz * dz) <= snapDist) {
+          union(ids[i], ids[j]);
+        }
+      }
+    }
+
+    for (const id of ids) {
+      const root = find(id);
+      if (root !== id && this.nodes.has(id)) {
+        this.mergeNodes(id, root);
+      }
+    }
+
+    // --- Pass 2: Deduplicate edges ---
+    const groups = new Map(); // "min-max" -> [edge, ...]
+    for (const edge of this.edges.values()) {
+      const lo = Math.min(edge.from, edge.to);
+      const hi = Math.max(edge.from, edge.to);
+      const key = `${lo}-${hi}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(edge);
+    }
+
+    for (const [, edgeGroup] of groups) {
+      if (edgeGroup.length <= 1) continue;
+      // Sort by hierarchy rank (best first)
+      edgeGroup.sort((a, b) =>
+        (HIERARCHY_RANK[a.hierarchy] ?? 99) - (HIERARCHY_RANK[b.hierarchy] ?? 99)
+      );
+      // Keep first (best), remove rest
+      for (let i = 1; i < edgeGroup.length; i++) {
+        this._removeEdge(edgeGroup[i].id);
+      }
+    }
+  }
+
+  /**
    * Get all dead-end nodes (degree 1).
    */
   deadEnds() {

@@ -264,6 +264,50 @@ describe('PlanarGraph', () => {
     expect(g.edges.size).toBe(0);
   });
 
+  it('compact merges adjacent nodes and deduplicates edges', () => {
+    const g = new PlanarGraph();
+    const a = g.addNode(0, 0);
+    const b = g.addNode(8, 0);
+    const c = g.addNode(100, 0);
+    g.addEdge(a, c, { hierarchy: 'arterial' });
+    g.addEdge(b, c, { hierarchy: 'collector' });
+
+    g.compact(15);
+
+    expect(g.nodes.size).toBe(2);
+    expect(g.edges.size).toBe(1);
+    const edge = [...g.edges.values()][0];
+    expect(edge.hierarchy).toBe('arterial');
+  });
+
+  it('compact removes self-loops from merged adjacent pair', () => {
+    const g = new PlanarGraph();
+    const a = g.addNode(0, 0);
+    const b = g.addNode(5, 0);
+    const c = g.addNode(100, 0);
+    g.addEdge(a, b);
+    g.addEdge(a, c);
+
+    g.compact(15);
+
+    expect(g.nodes.size).toBe(2);
+    expect(g.edges.size).toBe(1);
+  });
+
+  it('compact does not merge distant nodes', () => {
+    const g = new PlanarGraph();
+    const a = g.addNode(0, 0);
+    const b = g.addNode(50, 0);
+    const c = g.addNode(100, 0);
+    g.addEdge(a, b);
+    g.addEdge(b, c);
+
+    g.compact(15);
+
+    expect(g.nodes.size).toBe(3);
+    expect(g.edges.size).toBe(2);
+  });
+
   it('faces uses polyline direction for angle computation', () => {
     const g = new PlanarGraph();
 
