@@ -52,7 +52,7 @@ export function buildSkeletonRoads(map) {
     costFn,
     connections,
     roadGrid: map.roadGrid,
-    smooth: { simplifyEpsilon: 1.0, chaikinIterations: 0 },
+    smooth: { simplifyEpsilon: 1.0 },
     originX: map.originX,
     originZ: map.originZ,
   });

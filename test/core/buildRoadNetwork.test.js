@@ -23,7 +23,7 @@ describe('buildRoadNetwork', () => {
       costFn: flatCost,
       connections,
       roadGrid,
-      smooth: { simplifyEpsilon: 1.0, chaikinIterations: 0 },
+      smooth: { simplifyEpsilon: 1.0 },
     });
 
     // Should produce merged segments (fewer than 2 separate roads)
@@ -46,7 +46,7 @@ describe('buildRoadNetwork', () => {
         { from: { gx: 5, gz: 15 }, to: { gx: 25, gz: 15 }, hierarchy: 'local' },
       ],
       roadGrid,
-      smooth: { simplifyEpsilon: 1.0, chaikinIterations: 0 },
+      smooth: { simplifyEpsilon: 1.0 },
     });
 
     // Road cells should be stamped
@@ -57,7 +57,7 @@ describe('buildRoadNetwork', () => {
     expect(stamped).toBeGreaterThan(10);
   });
 
-  it('produces world-coord polylines when smoothing is enabled', () => {
+  it('produces quantized world-coord polylines with origin offset', () => {
     const w = 40, h = 40;
     const roadGrid = new Grid2D(w, h, { type: 'uint8' });
 
@@ -68,30 +68,7 @@ describe('buildRoadNetwork', () => {
         { from: { gx: 5, gz: 20 }, to: { gx: 35, gz: 20 }, hierarchy: 'arterial' },
       ],
       roadGrid,
-      smooth: { simplifyEpsilon: 1.0, chaikinIterations: 3 },
-      originX: 100, originZ: 200,
-    });
-
-    expect(results.length).toBeGreaterThan(0);
-    const r = results[0];
-    expect(r.polyline).not.toBeNull();
-    // Polyline should be in world coords (offset by origin)
-    expect(r.polyline[0].x).toBeGreaterThanOrEqual(100);
-    expect(r.polyline[0].z).toBeGreaterThanOrEqual(200);
-  });
-
-  it('produces quantized polylines when chaikinIterations=0', () => {
-    const w = 40, h = 40;
-    const roadGrid = new Grid2D(w, h, { type: 'uint8' });
-
-    const results = buildRoadNetwork({
-      width: w, height: h, cellSize: 10,
-      costFn: flatCost,
-      connections: [
-        { from: { gx: 5, gz: 20 }, to: { gx: 35, gz: 20 }, hierarchy: 'arterial' },
-      ],
-      roadGrid,
-      smooth: { simplifyEpsilon: 1.0, chaikinIterations: 0 },
+      smooth: { simplifyEpsilon: 1.0 },
       originX: 100, originZ: 200,
     });
 
@@ -122,7 +99,7 @@ describe('buildRoadNetwork', () => {
       costFn: flatCost,
       connections,
       roadGrid,
-      smooth: { simplifyEpsilon: 1.0, chaikinIterations: 0 },
+      smooth: { simplifyEpsilon: 1.0 },
     });
 
     // After merge, shared segments should be deduplicated.

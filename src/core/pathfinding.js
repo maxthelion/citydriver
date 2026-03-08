@@ -237,35 +237,6 @@ function perpDist(px, pz, ax, az, bx, bz) {
 }
 
 /**
- * Smooth a path with Chaikin's corner-cutting.
- */
-export function smoothPath(path, cellSize, iterations = 2) {
-  if (path.length === 0) return [];
-  if (path.length === 1) return [{ x: path[0].gx * cellSize, z: path[0].gz * cellSize }];
-
-  let points = path.map(p => ({ x: p.gx * cellSize, z: p.gz * cellSize }));
-
-  for (let iter = 0; iter < iterations; iter++) {
-    if (points.length < 2) break;
-    const smoothed = [points[0]];
-
-    for (let i = 0; i < points.length - 1; i++) {
-      const p0 = points[i];
-      const p1 = points[i + 1];
-      smoothed.push(
-        { x: 0.75 * p0.x + 0.25 * p1.x, z: 0.75 * p0.z + 0.25 * p1.z },
-        { x: 0.25 * p0.x + 0.75 * p1.x, z: 0.25 * p0.z + 0.75 * p1.z },
-      );
-    }
-
-    smoothed.push(points[points.length - 1]);
-    points = smoothed;
-  }
-
-  return points;
-}
-
-/**
  * Convert grid-coord path to world-coord polyline.
  * Quantizes to half-cell resolution and removes consecutive duplicates.
  */

@@ -11,14 +11,11 @@
  * full connectivity.
  */
 
-import { findPath, terrainCostFunction, simplifyPath } from '../core/pathfinding.js';
+import { terrainCostFunction } from '../core/pathfinding.js';
 import { distance2D } from '../core/math.js';
 import { Grid2D } from '../core/Grid2D.js';
 import { UnionFind } from '../core/UnionFind.js';
-import { mergeRoadPaths } from '../core/mergeRoadPaths.js';
-
-const HIER_RANK = { arterial: 1, collector: 2, local: 3, track: 4 };
-const RANK_HIER = { 1: 'arterial', 2: 'collector', 3: 'local', 4: 'track' };
+import { buildRoadNetwork } from '../core/buildRoadNetwork.js';
 
 /**
  * @param {object} params
@@ -78,74 +75,34 @@ export function generateRoads(params, settlements, elevation, slope, waterMask, 
            distance2D(b.from.gx, b.from.gz, b.to.gx, b.to.gz);
   });
 
-  // ============================================================
-  // Pathfind all connections, stamp onto roadGrid
-  // ============================================================
-
-  const rawPaths = []; // { cells, rank } for mergeRoadPaths
-
-  // Include existing roads so the merge can split them at new junctions
-  for (const road of existingRoads) {
-    const cells = road.rawPath || road.path;
-    if (cells && cells.length >= 2) {
-      // All paths get rank 1 for uniform merge; hierarchy assigned post-merge
-      rawPaths.push({ cells, rank: 1, hierarchy: road.hierarchy || 'local' });
-    }
-  }
-
-  for (const conn of connections) {
+  // Filter out already-connected pairs
+  const newConnections = connections.filter(conn => {
     const pairKey = `${conn.from.gx},${conn.from.gz}-${conn.to.gx},${conn.to.gz}`;
-    if (existingPairs.has(pairKey)) continue;
+    return !existingPairs.has(pairKey);
+  });
 
-    const result = findPath(
-      conn.from.gx, conn.from.gz,
-      conn.to.gx, conn.to.gz,
-      width, height, roadAwareCost,
-    );
+  // Collect existing road paths for the merge
+  const existingPathData = existingRoads
+    .filter(r => (r.rawPath || r.path)?.length >= 2)
+    .map(r => ({ cells: r.rawPath || r.path, hierarchy: r.hierarchy || 'local' }));
 
-    if (result) {
-      for (const p of result.path) roadGrid.set(p.gx, p.gz, 1);
-      rawPaths.push({ cells: result.path, rank: 1, hierarchy: conn.hierarchy || 'local' });
-    }
-  }
+  // Shared pipeline: pathfind → merge → simplify → smooth
+  const builtRoads = buildRoadNetwork({
+    width, height, cellSize,
+    costFn: roadAwareCost,
+    connections: newConnections,
+    roadGrid,
+    existingPaths: existingPathData,
+    smooth: { simplifyEpsilon: 1.5 },
+  });
 
-  // ============================================================
-  // Merge shared segments
-  // ============================================================
-
-  const merged = mergeRoadPaths(rawPaths);
-
-  // Build cell → best hierarchy lookup from original paths
-  const cellBestHier = new Map();
-  for (const p of rawPaths) {
-    const rank = HIER_RANK[p.hierarchy] || 4;
-    for (const c of p.cells) {
-      const key = `${c.gx},${c.gz}`;
-      const prev = cellBestHier.get(key) || 9;
-      if (rank < prev) cellBestHier.set(key, rank);
-    }
-  }
-
-  const roads = [];
-  for (const seg of merged) {
-    if (seg.cells.length < 2) continue;
-    const simplified = simplifyPath(seg.cells, 1.5);
-
-    // Derive hierarchy from best original path that used these cells
-    let bestRank = 9;
-    for (const c of seg.cells) {
-      const r = cellBestHier.get(`${c.gx},${c.gz}`) || 9;
-      if (r < bestRank) bestRank = r;
-    }
-
-    roads.push({
-      from: { gx: seg.cells[0].gx, gz: seg.cells[0].gz },
-      to: { gx: seg.cells[seg.cells.length - 1].gx, gz: seg.cells[seg.cells.length - 1].gz },
-      path: simplified,
-      rawPath: seg.cells,
-      hierarchy: RANK_HIER[bestRank] || 'local',
-    });
-  }
+  const roads = builtRoads.map(r => ({
+    from: r.from,
+    to: r.to,
+    path: r.path,
+    rawPath: r.cells,
+    hierarchy: r.hierarchy,
+  }));
 
   return { roads, roadGrid };
 }

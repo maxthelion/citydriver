@@ -4,14 +4,14 @@
  * Given a set of connections (from/to pairs) and a grid with a cost function:
  * 1. Pathfind each connection (stamping roadGrid after each for reuse discount)
  * 2. Merge shared segments via mergeRoadPaths
- * 3. Simplify (RDP) + smooth (Chaikin) the merged segments
+ * 3. Simplify (RDP) + quantize to world coordinates
  * 4. Return the results for the caller to handle
  *
  * This is the abstraction the spec called for — both generateRoads.js and
  * skeleton.js call this instead of implementing the pipeline independently.
  */
 
-import { findPath, simplifyPath, smoothPath, gridPathToWorldPolyline } from './pathfinding.js';
+import { findPath, simplifyPath, gridPathToWorldPolyline } from './pathfinding.js';
 import { mergeRoadPaths } from './mergeRoadPaths.js';
 
 const HIER_RANK = { arterial: 1, collector: 2, local: 3, track: 4 };
@@ -26,7 +26,7 @@ const RANK_HIER = { 1: 'arterial', 2: 'collector', 3: 'local', 4: 'track' };
  * @param {Array} options.connections - [{ from: {gx,gz}, to: {gx,gz}, hierarchy }]
  * @param {import('./Grid2D.js').Grid2D} options.roadGrid - Stamped during pathfinding for reuse
  * @param {Array} [options.existingPaths] - [{ cells, hierarchy }] to include in merge
- * @param {object} [options.smooth] - { simplifyEpsilon, chaikinIterations }
+ * @param {object} [options.smooth] - { simplifyEpsilon }
  * @param {number} [options.originX=0] - World origin for coordinate conversion
  * @param {number} [options.originZ=0]
  * @returns {Array<{ cells, polyline, hierarchy, from, to }>}
@@ -40,7 +40,7 @@ export function buildRoadNetwork(options) {
     originX = 0, originZ = 0,
   } = options;
 
-  const { simplifyEpsilon = 1.0, chaikinIterations = 4 } = smooth;
+  const { simplifyEpsilon = 1.0 } = smooth;
 
   // Collect all raw cell paths for merging
   const rawPaths = [];
@@ -109,17 +109,8 @@ export function buildRoadNetwork(options) {
     }
     const hierarchy = RANK_HIER[bestRank] || 'local';
 
-    // Convert to world coordinates
-    let polyline;
-    if (chaikinIterations > 0) {
-      const smoothed = smoothPath(simplified, cellSize, chaikinIterations);
-      polyline = smoothed.map(p => ({
-        x: p.x + originX,
-        z: p.z + originZ,
-      }));
-    } else {
-      polyline = gridPathToWorldPolyline(simplified, cellSize, originX, originZ);
-    }
+    // Convert to world coordinates (quantized, deduped)
+    const polyline = gridPathToWorldPolyline(simplified, cellSize, originX, originZ);
 
     results.push({
       cells: seg.cells,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findPath, terrainCostFunction, simplifyPath, smoothPath, gridPathToWorldPolyline } from '../../src/core/pathfinding.js';
+import { findPath, terrainCostFunction, simplifyPath, gridPathToWorldPolyline } from '../../src/core/pathfinding.js';
 import { Grid2D } from '../../src/core/Grid2D.js';
 
 describe('pathfinding', () => {
@@ -80,19 +80,4 @@ describe('pathfinding', () => {
     }
   });
 
-  it('smoothPath produces world coordinates', () => {
-    const path = [
-      { gx: 0, gz: 0 },
-      { gx: 5, gz: 0 },
-      { gx: 5, gz: 5 },
-    ];
-    const smooth = smoothPath(path, 10, 1);
-    // Should start at world (0,0) and end at (50,50)
-    expect(smooth[0].x).toBeCloseTo(0);
-    expect(smooth[0].z).toBeCloseTo(0);
-    expect(smooth[smooth.length - 1].x).toBeCloseTo(50);
-    expect(smooth[smooth.length - 1].z).toBeCloseTo(50);
-    // Should have more points than original
-    expect(smooth.length).toBeGreaterThan(path.length);
-  });
 });
