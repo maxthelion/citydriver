@@ -12,6 +12,7 @@ import { findPath } from '../core/pathfinding.js';
 import { buildRoadNetwork } from '../core/buildRoadNetwork.js';
 import { UnionFind } from '../core/UnionFind.js';
 import { distance2D } from '../core/math.js';
+import { placeBridges } from './bridges.js';
 
 // Importance weight for hierarchy computation
 function importanceTierWeight(tier) {
@@ -51,7 +52,7 @@ export function buildSkeletonRoads(map) {
     costFn,
     connections,
     roadGrid: map.roadGrid,
-    smooth: { simplifyEpsilon: 1.0, chaikinIterations: 4 },
+    smooth: { simplifyEpsilon: 1.0, chaikinIterations: 0 },
     originX: map.originX,
     originZ: map.originZ,
   });
@@ -83,6 +84,9 @@ export function buildSkeletonRoads(map) {
   // These are pathfound with a cost function that penalizes existing roads,
   // forcing them to find alternative routes and create genuine cycles.
   _addExtraEdges(map, extraConnections);
+
+  // 7. Place bridges where skeleton roads cross rivers.
+  placeBridges(map);
 }
 
 /**
