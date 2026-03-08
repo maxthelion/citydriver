@@ -1,5 +1,5 @@
 import { buildSkeletonRoads, addRoadToGraph } from '../skeleton.js';
-import { findPath, simplifyPath, smoothPath } from '../../core/pathfinding.js';
+import { findPath, simplifyPath, gridPathToWorldPolyline } from '../../core/pathfinding.js';
 import { Grid2D } from '../../core/Grid2D.js';
 import { SeededRandom } from '../../core/rng.js';
 
@@ -29,7 +29,12 @@ export class DesireLines {
       return this._accumulateAndTrace(OD_PAIRS_PRIMARY, PRIMARY_THRESHOLD, 'collector');
     }
     if (this._tick === 3) {
-      return this._accumulateAndTrace(OD_PAIRS_SECONDARY, SECONDARY_THRESHOLD, 'local');
+      this._accumulateAndTrace(OD_PAIRS_SECONDARY, SECONDARY_THRESHOLD, 'local');
+      // Always continue to dead-end connection pass
+      return true;
+    }
+    if (this._tick <= 6) {
+      return this._connectDeadEnds();
     }
     return false;
   }
@@ -111,13 +116,8 @@ export class DesireLines {
 
       const gridPath = extended.map(i => ({ gx: i % w, gz: (i - i % w) / w }));
       const simplified = simplifyPath(gridPath, 1.0);
-      const worldPoints = smoothPath(simplified, map.cellSize, 2);
-      if (worldPoints.length < 2) continue;
-
-      const polyline = worldPoints.map(p => ({
-        x: p.x + map.originX,
-        z: p.z + map.originZ,
-      }));
+      const polyline = gridPathToWorldPolyline(simplified, map.cellSize, map.originX, map.originZ);
+      if (polyline.length < 2) continue;
 
       map.addFeature('road', {
         polyline,
@@ -217,6 +217,90 @@ export class DesireLines {
       }
     }
     return null;
+  }
+
+  /**
+   * Extend dead-end graph nodes along their direction until they hit
+   * another road, creating junction connections and enclosed faces.
+   * Returns true if any connections were made.
+   */
+  _connectDeadEnds() {
+    const map = this.map;
+    const graph = map.graph;
+    const MAX_EXTEND = 40;
+    const MAX_PER_TICK = 15;
+
+    const deadEnds = graph.deadEnds();
+    if (deadEnds.length === 0) return false;
+
+    let connected = 0;
+
+    for (const nodeId of deadEnds) {
+      if (connected >= MAX_PER_TICK) break;
+
+      const node = graph.getNode(nodeId);
+      const neighbors = graph.neighbors(nodeId);
+      if (neighbors.length !== 1) continue;
+
+      // Get direction: from the neighbor toward the dead end
+      const neighborNode = graph.getNode(neighbors[0]);
+      const dx = node.x - neighborNode.x;
+      const dz = node.z - neighborNode.z;
+      const len = Math.sqrt(dx * dx + dz * dz);
+      if (len < 1) continue;
+
+      const dirX = dx / len;
+      const dirZ = dz / len;
+
+      const startGx = Math.round((node.x - map.originX) / map.cellSize);
+      const startGz = Math.round((node.z - map.originZ) / map.cellSize);
+
+      // Walk in edge direction — DON'T stop at water/unbuildable, just skip past them.
+      // Check for road cells first (they may sit on low-buildability terrain).
+      let hitGx = -1, hitGz = -1;
+      for (let step = 3; step <= MAX_EXTEND; step++) {
+        const gx = Math.round(startGx + dirX * step);
+        const gz = Math.round(startGz + dirZ * step);
+        if (gx < 1 || gx >= map.width - 1 || gz < 1 || gz >= map.height - 1) break;
+
+        // Road check FIRST — if we hit a road, connect to it regardless of terrain
+        if (map.roadGrid.get(gx, gz) > 0) {
+          hitGx = gx;
+          hitGz = gz;
+          break;
+        }
+        // Don't break on water/unbuildable — keep walking, the road may be beyond
+      }
+
+      if (hitGx < 0) continue;
+
+      // Pathfind using 'nucleus' preset — tolerates low buildability
+      const costFn = map.createPathCost('nucleus');
+      const result = findPath(startGx, startGz, hitGx, hitGz, map.width, map.height, costFn);
+      if (!result || result.path.length < 2) continue;
+
+      const simplified = simplifyPath(result.path, 1.0);
+      const polyline = gridPathToWorldPolyline(simplified, map.cellSize, map.originX, map.originZ);
+      if (polyline.length < 2) continue;
+
+      map.addFeature('road', {
+        polyline,
+        width: 6,
+        hierarchy: 'local',
+        importance: 0.3,
+        source: 'desire',
+      });
+
+      addRoadToGraph(map, polyline, 6, 'local');
+
+      for (const p of result.path) {
+        map.roadGrid.set(p.gx, p.gz, 1);
+      }
+
+      connected++;
+    }
+
+    return connected > 0;
   }
 }
 

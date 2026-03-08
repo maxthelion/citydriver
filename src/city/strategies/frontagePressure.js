@@ -1,5 +1,5 @@
 import { buildSkeletonRoads } from '../skeleton.js';
-import { findPath, simplifyPath, smoothPath } from '../../core/pathfinding.js';
+import { findPath, simplifyPath, gridPathToWorldPolyline } from '../../core/pathfinding.js';
 
 const PLOT_DEPTH = 35; // meters
 const BLOCK_LENGTH_MAX = 80; // meters
@@ -159,15 +159,9 @@ export class FrontagePressure {
         const result = findPath(fromGx, fromGz, toGx, toGz, map.width, map.height, costFn);
         if (!result || result.path.length < 2) continue;
 
-        // Simplify and smooth the path
+        // Simplify and convert to world coords
         const simplified = simplifyPath(result.path, 1.0);
-        const smoothed = smoothPath(simplified, map.cellSize, 2);
-
-        // smoothPath returns coords relative to (0,0), add origin
-        const worldPoly = smoothed.map(p => ({
-          x: p.x + map.originX,
-          z: p.z + map.originZ,
-        }));
+        const worldPoly = gridPathToWorldPolyline(simplified, map.cellSize, map.originX, map.originZ);
 
         if (worldPoly.length < 2) continue;
 

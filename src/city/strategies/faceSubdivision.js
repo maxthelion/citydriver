@@ -1,8 +1,9 @@
 import { buildSkeletonRoads } from '../skeleton.js';
-import { findPath, simplifyPath, smoothPath } from '../../core/pathfinding.js';
+import { findPath, simplifyPath, gridPathToWorldPolyline } from '../../core/pathfinding.js';
 
 const TARGET_BLOCK_AREA = 4000; // ~60x60m
 const MAX_SUBDIVISIONS_PER_TICK = 5;
+const MAX_SUBDIVISION_TICKS = 20;
 
 export class FaceSubdivision {
   constructor(map) {
@@ -16,36 +17,20 @@ export class FaceSubdivision {
       buildSkeletonRoads(this.map);
       return true;
     }
-    // Skeleton now includes extra edges beyond MST, creating cycles.
-    // We can go straight to face subdivision.
+    if (this._tick > MAX_SUBDIVISION_TICKS + 1) return false;
     return this._subdivide();
   }
 
   _subdivide() {
     const map = this.map;
-    const graph = map.graph;
-
-    const faces = graph.facesWithEdges();
+    const faces = map.extractFaces({ minArea: TARGET_BLOCK_AREA + 1 });
     if (faces.length === 0) return false;
 
-    const oversized = [];
-    for (const face of faces) {
-      const { nodeIds } = face;
-      if (new Set(nodeIds).size !== nodeIds.length) continue;
-
-      const area = signedArea(nodeIds, graph);
-      if (area <= 0) continue;
-      if (area <= TARGET_BLOCK_AREA) continue;
-
-      oversized.push({ ...face, area });
-    }
-
-    if (oversized.length === 0) return false;
-
-    oversized.sort((a, b) => b.area - a.area);
+    // Sort largest first
+    faces.sort((a, b) => b.area - a.area);
 
     let subdivided = 0;
-    for (const face of oversized) {
+    for (const face of faces) {
       if (subdivided >= MAX_SUBDIVISIONS_PER_TICK) break;
       if (this._splitFace(face)) subdivided++;
     }
@@ -55,24 +40,37 @@ export class FaceSubdivision {
 
   _splitFace(face) {
     const map = this.map;
-    const graph = map.graph;
-    const { edgeIds } = face;
+    const polygon = face.polygon;
+    if (polygon.length < 4) return false;
 
-    // Find two longest edges
-    const edgeLengths = [];
-    for (const eid of edgeIds) {
-      const polyline = graph.edgePolyline(eid);
-      edgeLengths.push({ edgeId: eid, length: polylineLength(polyline) });
+    // Find the two longest sides of the polygon
+    const sides = [];
+    for (let i = 0; i < polygon.length; i++) {
+      const a = polygon[i];
+      const b = polygon[(i + 1) % polygon.length];
+      const dx = b.x - a.x, dz = b.z - a.z;
+      sides.push({ idx: i, length: Math.sqrt(dx * dx + dz * dz), a, b });
     }
-    edgeLengths.sort((a, b) => b.length - a.length);
-    if (edgeLengths.length < 2) return false;
+    sides.sort((a, b) => b.length - a.length);
 
-    const edgeA = edgeLengths[0];
-    const edgeB = edgeLengths[1];
+    if (sides.length < 2) return false;
 
-    const midA = polylineMidpoint(graph.edgePolyline(edgeA.edgeId));
-    const midB = polylineMidpoint(graph.edgePolyline(edgeB.edgeId));
-    if (!midA || !midB) return false;
+    // Pick two longest sides that aren't adjacent (opposite-ish)
+    const sideA = sides[0];
+    let sideB = null;
+    for (let i = 1; i < sides.length; i++) {
+      const diff = Math.abs(sides[i].idx - sideA.idx);
+      const wrap = polygon.length - diff;
+      if (Math.min(diff, wrap) > 1) {
+        sideB = sides[i];
+        break;
+      }
+    }
+    if (!sideB) sideB = sides[1]; // fallback to adjacent if no better option
+
+    // Midpoints of the two sides
+    const midA = { x: (sideA.a.x + sideA.b.x) / 2, z: (sideA.a.z + sideA.b.z) / 2 };
+    const midB = { x: (sideB.a.x + sideB.b.x) / 2, z: (sideB.a.z + sideB.b.z) / 2 };
 
     const gxA = Math.round((midA.x - map.originX) / map.cellSize);
     const gzA = Math.round((midA.z - map.originZ) / map.cellSize);
@@ -87,25 +85,8 @@ export class FaceSubdivision {
     if (!result || result.path.length < 2) return false;
 
     const simplified = simplifyPath(result.path, 1.0);
-    const worldPoints = smoothPath(simplified, map.cellSize, 1);
-    if (worldPoints.length < 2) return false;
-
-    const polyline = worldPoints.map(p => ({
-      x: p.x + map.originX,
-      z: p.z + map.originZ,
-    }));
-
-    // Split the two face edges at their midpoints
-    const midNodeA = graph.splitEdge(edgeA.edgeId, midA.x, midA.z);
-    const midNodeB = graph.splitEdge(edgeB.edgeId, midB.x, midB.z);
-
-    // Add connecting edge to graph
-    const intermediatePoints = polyline.slice(1, -1);
-    graph.addEdge(midNodeA, midNodeB, {
-      points: intermediatePoints,
-      width: 6,
-      hierarchy: 'local',
-    });
+    const polyline = gridPathToWorldPolyline(simplified, map.cellSize, map.originX, map.originZ);
+    if (polyline.length < 2) return false;
 
     map.addFeature('road', {
       polyline,
@@ -117,52 +98,4 @@ export class FaceSubdivision {
 
     return true;
   }
-}
-
-function signedArea(nodeIds, graph) {
-  let area = 0;
-  for (let i = 0; i < nodeIds.length; i++) {
-    const a = graph.getNode(nodeIds[i]);
-    const b = graph.getNode(nodeIds[(i + 1) % nodeIds.length]);
-    area += (a.x * b.z - b.x * a.z);
-  }
-  return area / 2;
-}
-
-function polylineLength(pts) {
-  let len = 0;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const dx = pts[i + 1].x - pts[i].x;
-    const dz = pts[i + 1].z - pts[i].z;
-    len += Math.sqrt(dx * dx + dz * dz);
-  }
-  return len;
-}
-
-function polylineMidpoint(pts) {
-  if (pts.length === 0) return null;
-  if (pts.length === 1) return { x: pts[0].x, z: pts[0].z };
-
-  const totalLen = polylineLength(pts);
-  if (totalLen === 0) return { x: pts[0].x, z: pts[0].z };
-
-  const halfLen = totalLen / 2;
-  let accumulated = 0;
-
-  for (let i = 0; i < pts.length - 1; i++) {
-    const dx = pts[i + 1].x - pts[i].x;
-    const dz = pts[i + 1].z - pts[i].z;
-    const segLen = Math.sqrt(dx * dx + dz * dz);
-
-    if (accumulated + segLen >= halfLen) {
-      const t = (halfLen - accumulated) / segLen;
-      return {
-        x: pts[i].x + dx * t,
-        z: pts[i].z + dz * t,
-      };
-    }
-    accumulated += segLen;
-  }
-
-  return { x: pts[pts.length - 1].x, z: pts[pts.length - 1].z };
 }

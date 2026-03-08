@@ -1,5 +1,5 @@
 import { buildSkeletonRoads } from '../skeleton.js';
-import { findPath, simplifyPath, smoothPath } from '../../core/pathfinding.js';
+import { findPath, simplifyPath, gridPathToWorldPolyline } from '../../core/pathfinding.js';
 
 const PLOT_DEPTH = 35; // meters, distance for offset curves
 const BLOCK_LENGTH = 70; // meters, spacing for cross streets
@@ -295,13 +295,7 @@ export class OffsetInfill {
 
           if (pathResult && pathResult.path.length >= 2 && pathResult.path.length <= maxPathCells) {
             const simplified = simplifyPath(pathResult.path, 0.5);
-            const smoothed = smoothPath(simplified, map.cellSize, 2);
-
-            // Add origin offset
-            const polyline = smoothed.map(p => ({
-              x: p.x + map.originX,
-              z: p.z + map.originZ,
-            }));
+            const polyline = gridPathToWorldPolyline(simplified, map.cellSize, map.originX, map.originZ);
 
             if (polyline.length >= 2) {
               const result = addRoadToMap(map, polyline, 'cross-street');
