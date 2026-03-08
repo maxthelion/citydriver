@@ -424,60 +424,37 @@ export function compactRoads(map, snapDist) {
   const roads = map.roads.filter(r => r.source === 'skeleton');
   if (roads.length === 0) return;
 
-  // --- Pass 1: Snap nearby polyline vertices ---
-  // Collect all unique vertices across all road polylines
-  const allPts = [];
-  for (const road of roads) {
-    for (const p of road.polyline) {
-      allPts.push(p);
-    }
-  }
+  // --- Pass 1: Snap polyline ENDPOINTS to nearest representative ---
+  // Only endpoints (first/last point) participate in snapping.
+  // This merges roads that start/end at nearby positions without
+  // distorting intermediate vertices along a road's path.
+  const reps = []; // [{x, z}]
+  const snapDistSq = snapDist * snapDist;
 
-  // Union-Find to group nearby points
-  const parent = new Map();
-  for (let i = 0; i < allPts.length; i++) parent.set(i, i);
-
-  function find(x) {
-    while (parent.get(x) !== x) {
-      parent.set(x, parent.get(parent.get(x)));
-      x = parent.get(x);
-    }
-    return x;
-  }
-
-  function union(a, b) {
-    const ra = find(a), rb = find(b);
-    if (ra !== rb) parent.set(rb, ra);
-  }
-
-  // O(n²) — fine for skeleton roads (typically <2000 vertices)
-  for (let i = 0; i < allPts.length; i++) {
-    for (let j = i + 1; j < allPts.length; j++) {
-      const dx = allPts[i].x - allPts[j].x;
-      const dz = allPts[i].z - allPts[j].z;
-      if (dx * dx + dz * dz <= snapDist * snapDist) {
-        union(i, j);
+  function snapPoint(p) {
+    let bestDist = snapDistSq;
+    let bestRep = null;
+    for (const rep of reps) {
+      const dx = p.x - rep.x, dz = p.z - rep.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bestDist) {
+        bestDist = d2;
+        bestRep = rep;
       }
     }
+    if (bestRep) {
+      p.x = bestRep.x;
+      p.z = bestRep.z;
+    } else {
+      reps.push({ x: p.x, z: p.z });
+    }
   }
 
-  // Compute centroid for each group
-  const groups = new Map(); // root → { sumX, sumZ, count }
-  for (let i = 0; i < allPts.length; i++) {
-    const root = find(i);
-    if (!groups.has(root)) groups.set(root, { sumX: 0, sumZ: 0, count: 0 });
-    const g = groups.get(root);
-    g.sumX += allPts[i].x;
-    g.sumZ += allPts[i].z;
-    g.count++;
-  }
-
-  // Snap each point to its group centroid (quantized to half-cell)
-  const half = map.cellSize * 0.5;
-  for (let i = 0; i < allPts.length; i++) {
-    const g = groups.get(find(i));
-    allPts[i].x = Math.round((g.sumX / g.count) / half) * half;
-    allPts[i].z = Math.round((g.sumZ / g.count) / half) * half;
+  for (const road of roads) {
+    const poly = road.polyline;
+    if (poly.length < 2) continue;
+    snapPoint(poly[0]);
+    snapPoint(poly[poly.length - 1]);
   }
 
   // --- Pass 1b: Deduplicate consecutive identical points in each polyline ---
