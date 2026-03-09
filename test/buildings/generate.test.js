@@ -162,6 +162,57 @@ describe('generateBuilding', () => {
     expect(maxY).toBeCloseTo(expectedPeak, 1);
   });
 
+  it('wing roof does not exceed main wall height', () => {
+    const style = getClimateStyle('temperate');
+    for (let seed = 0; seed < 50; seed++) {
+      const recipe = buildRecipe(style, 'large', 0.5, seed);
+      if (recipe.wings.length === 0) continue;
+      for (const wing of recipe.wings) {
+        const wingWallTop = wing.floors * style.floorHeight;
+        const mainWallTop = recipe.floors * style.floorHeight;
+        expect(wingWallTop).toBeLessThan(mainWallTop);
+      }
+      return;
+    }
+  });
+
+  it('buildings with wings have more wall vertices than without', () => {
+    const style = getClimateStyle('temperate');
+    let withWings = null, withoutWings = null;
+    for (let seed = 0; seed < 100; seed++) {
+      const recipe = buildRecipe(style, 'large', 0.5, seed);
+      if (recipe.wings.length > 0 && !withWings) withWings = recipe;
+      if (recipe.wings.length === 0 && !withoutWings) withoutWings = recipe;
+      if (withWings && withoutWings) break;
+    }
+    if (!withWings || !withoutWings) return;
+    const gWith = generateBuilding(style, withWings);
+    const gWithout = generateBuilding(style, withoutWings);
+    const wallsWith = gWith.getObjectByName('walls').geometry.attributes.position.count;
+    const wallsWithout = gWithout.getObjectByName('walls').geometry.attributes.position.count;
+    expect(wallsWith).toBeGreaterThan(wallsWithout);
+  });
+
+  it('has window geometry', () => {
+    const style = getClimateStyle('temperate');
+    const recipe = buildRecipe(style, 'medium', 0, 42);
+    const group = generateBuilding(style, recipe);
+    const windows = group.getObjectByName('windows');
+    expect(windows).toBeDefined();
+    expect(windows.geometry.attributes.position.array.length).toBeGreaterThan(0);
+  });
+
+  it('wider building has more window vertices', () => {
+    const style = getClimateStyle('continental');
+    const smallRecipe = buildRecipe(style, 'small', 0, 42);
+    const largeRecipe = buildRecipe(style, 'large', 0, 42);
+    const smallGroup = generateBuilding(style, smallRecipe);
+    const largeGroup = generateBuilding(style, largeRecipe);
+    const smallCount = smallGroup.getObjectByName('windows').geometry.attributes.position.count;
+    const largeCount = largeGroup.getObjectByName('windows').geometry.attributes.position.count;
+    expect(largeCount).toBeGreaterThan(smallCount);
+  });
+
   it('mansard roof has vertices at two distinct heights above walls', () => {
     const style = getClimateStyle('mediterranean'); // mediterranean uses mansard
     expect(style.roofType).toBe('mansard');

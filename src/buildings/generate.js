@@ -51,58 +51,192 @@ function computeVolumes(recipe) {
 }
 
 /**
- * Generate wall geometry for a single volume.
- * 4 wall quads: front (z=z0), back (z=z1), left (x=x0), right (x=x1).
+ * Check if a test point (offset slightly from a wall center in the normal
+ * direction) is inside any other volume. Used to cull interior wall faces.
  */
-function generateWalls(vol, wallHeight) {
+function isInsideOtherVolume(testX, testY, testZ, vol, allVolumes, style) {
+  for (const other of allVolumes) {
+    if (other === vol) continue;
+    const otherWallTop = other.floors * style.floorHeight;
+    if (
+      testX > other.x && testX < other.x + other.width &&
+      testZ > other.z && testZ < other.z + other.depth &&
+      testY < otherWallTop
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Compute the wall face definitions for a volume.
+ * Returns an array of { v0, v1, v2, v3, nx, ny, nz, wallLength, axis } objects,
+ * one per face. Faces whose outward test point lies inside another volume are excluded.
+ */
+function getExteriorWallFaces(vol, wallHeight, allVolumes, style) {
   const x0 = vol.x;
   const x1 = vol.x + vol.width;
   const z0 = vol.z;
   const z1 = vol.z + vol.depth;
   const y0 = 0;
   const y1 = wallHeight;
+  const EPS = 0.05; // outward offset for inside test
+
+  // Define all 4 wall faces
+  const faces = [
+    // Front face (z = z0, normal toward -Z)
+    {
+      v0: [x0, y1, z0], v1: [x1, y1, z0],
+      v2: [x0, y0, z0], v3: [x1, y0, z0],
+      nx: 0, ny: 0, nz: -1,
+      wallLength: vol.width, axis: 'x',
+    },
+    // Back face (z = z1, normal toward +Z)
+    {
+      v0: [x1, y1, z1], v1: [x0, y1, z1],
+      v2: [x1, y0, z1], v3: [x0, y0, z1],
+      nx: 0, ny: 0, nz: 1,
+      wallLength: vol.width, axis: 'x',
+    },
+    // Left face (x = x0, normal toward -X)
+    {
+      v0: [x0, y1, z1], v1: [x0, y1, z0],
+      v2: [x0, y0, z1], v3: [x0, y0, z0],
+      nx: -1, ny: 0, nz: 0,
+      wallLength: vol.depth, axis: 'z',
+    },
+    // Right face (x = x1, normal toward +X)
+    {
+      v0: [x1, y1, z0], v1: [x1, y1, z1],
+      v2: [x1, y0, z0], v3: [x1, y0, z1],
+      nx: 1, ny: 0, nz: 0,
+      wallLength: vol.depth, axis: 'z',
+    },
+  ];
+
+  // Filter out interior faces
+  const exterior = [];
+  for (const face of faces) {
+    // Center of the wall face
+    const cx = (face.v0[0] + face.v3[0]) / 2;
+    const cy = (face.v0[1] + face.v2[1]) / 2;
+    const cz = (face.v0[2] + face.v3[2]) / 2;
+    // Test point offset outward by EPS
+    const testX = cx + face.nx * EPS;
+    const testY = cy;
+    const testZ = cz + face.nz * EPS;
+
+    if (!isInsideOtherVolume(testX, testY, testZ, vol, allVolumes, style)) {
+      exterior.push(face);
+    }
+  }
+  return exterior;
+}
+
+/**
+ * Generate wall geometry for a single volume, skipping interior faces
+ * that are occluded by another volume.
+ */
+function generateWalls(vol, wallHeight, allVolumes, style) {
+  const faces = getExteriorWallFaces(vol, wallHeight, allVolumes, style);
 
   const positions = [];
   const normals = [];
   const indices = [];
 
   function addQuad(v0, v1, v2, v3, nx, ny, nz) {
-    // v0--v1
-    // |  / |
-    // v2--v3
     const base = positions.length / 3;
     positions.push(...v0, ...v1, ...v2, ...v3);
     normals.push(nx, ny, nz, nx, ny, nz, nx, ny, nz, nx, ny, nz);
     indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
   }
 
-  // Front face (z = z0, normal toward -Z)
-  addQuad(
-    [x0, y1, z0], [x1, y1, z0],
-    [x0, y0, z0], [x1, y0, z0],
-    0, 0, -1
-  );
+  for (const face of faces) {
+    addQuad(face.v0, face.v1, face.v2, face.v3, face.nx, face.ny, face.nz);
+  }
 
-  // Back face (z = z1, normal toward +Z)
-  addQuad(
-    [x1, y1, z1], [x0, y1, z1],
-    [x1, y0, z1], [x0, y0, z1],
-    0, 0, 1
-  );
+  return { positions, normals, indices };
+}
 
-  // Left face (x = x0, normal toward -X)
-  addQuad(
-    [x0, y1, z1], [x0, y1, z0],
-    [x0, y0, z1], [x0, y0, z0],
-    -1, 0, 0
-  );
+/**
+ * Generate window geometry for a single volume's exterior walls.
+ * Windows are dark quads offset 0.01m from the wall surface.
+ */
+function generateWindows(vol, wallHeight, allVolumes, style) {
+  const faces = getExteriorWallFaces(vol, wallHeight, allVolumes, style);
 
-  // Right face (x = x1, normal toward +X)
-  addQuad(
-    [x1, y1, z0], [x1, y1, z1],
-    [x1, y0, z0], [x1, y0, z1],
-    1, 0, 0
-  );
+  const positions = [];
+  const normals = [];
+  const indices = [];
+
+  function addQuad(v0, v1, v2, v3, nx, ny, nz) {
+    const base = positions.length / 3;
+    positions.push(...v0, ...v1, ...v2, ...v3);
+    normals.push(nx, ny, nz, nx, ny, nz, nx, ny, nz, nx, ny, nz);
+    indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+  }
+
+  const spacing = style.windowSpacing;
+  const winW = style.windowWidth;
+  const floorH = style.floorHeight;
+  const OFFSET = 0.01;
+
+  for (const face of faces) {
+    const wallLen = face.wallLength;
+
+    // Number of windows along this wall
+    const count = Math.max(1, Math.floor((wallLen - spacing * 0.5) / spacing));
+
+    // Total span occupied by windows array
+    const totalSpan = (count - 1) * spacing;
+
+    for (let floor = 0; floor < vol.floors; floor++) {
+      const winBottom = floor * floorH + floorH * 0.3;
+      const winHeight = style.windowHeight * (1 - style.windowHeightDecay * floor);
+      const winTop = winBottom + winHeight;
+
+      // Skip if window top is within 0.1m of the ceiling
+      const ceiling = (floor + 1) * floorH;
+      if (winTop > ceiling - 0.1) continue;
+
+      for (let wi = 0; wi < count; wi++) {
+        // Center position along wall for this window
+        const t = (wallLen - totalSpan) / 2 + wi * spacing;
+        const halfW = winW / 2;
+        const tLeft = t - halfW;
+        const tRight = t + halfW;
+
+        // Compute world-space corners
+        // The wall quad has v2 as bottom-left and v3 as bottom-right
+        // along the wall's length axis.
+        let p0, p1, p2, p3; // top-left, top-right, bottom-left, bottom-right
+
+        if (face.axis === 'x') {
+          // Wall runs along X axis
+          // v2 and v3 are the bottom corners; figure out x direction
+          const xMin = Math.min(face.v2[0], face.v3[0]);
+          const z = face.v0[2] + face.nz * OFFSET;
+
+          p0 = [xMin + tLeft, winTop, z];
+          p1 = [xMin + tRight, winTop, z];
+          p2 = [xMin + tLeft, winBottom, z];
+          p3 = [xMin + tRight, winBottom, z];
+        } else {
+          // Wall runs along Z axis
+          const zMin = Math.min(face.v2[2], face.v3[2]);
+          const x = face.v0[0] + face.nx * OFFSET;
+
+          p0 = [x, winTop, zMin + tLeft];
+          p1 = [x, winTop, zMin + tRight];
+          p2 = [x, winBottom, zMin + tLeft];
+          p3 = [x, winBottom, zMin + tRight];
+        }
+
+        addQuad(p0, p1, p2, p3, face.nx, face.ny, face.nz);
+      }
+    }
+  }
 
   return { positions, normals, indices };
 }
@@ -544,11 +678,11 @@ export function generateBuilding(style, recipe) {
   const group = new THREE.Group();
   const volumes = computeVolumes(recipe);
 
-  // --- Walls ---
+  // --- Walls (with interior face clipping) ---
   const wallParts = [];
   for (const vol of volumes) {
     const wallHeight = vol.floors * style.floorHeight;
-    wallParts.push(generateWalls(vol, wallHeight));
+    wallParts.push(generateWalls(vol, wallHeight, volumes, style));
   }
   const wallData = mergeGeometryData(wallParts);
   const wallGeometry = buildGeometry(wallData);
@@ -556,6 +690,24 @@ export function generateBuilding(style, recipe) {
   const wallMesh = new THREE.Mesh(wallGeometry, wallMaterial);
   wallMesh.name = 'walls';
   group.add(wallMesh);
+
+  // --- Windows ---
+  const windowParts = [];
+  for (const vol of volumes) {
+    const wallHeight = vol.floors * style.floorHeight;
+    windowParts.push(generateWindows(vol, wallHeight, volumes, style));
+  }
+  const windowData = mergeGeometryData(windowParts);
+  const windowGeometry = buildGeometry(windowData);
+  const windowMaterial = new THREE.MeshLambertMaterial({
+    color: recipe.windowColor,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+  const windowMesh = new THREE.Mesh(windowGeometry, windowMaterial);
+  windowMesh.name = 'windows';
+  group.add(windowMesh);
 
   // --- Roofs ---
   const roofParts = [];
