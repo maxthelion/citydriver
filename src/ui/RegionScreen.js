@@ -3,7 +3,7 @@ import { generateRegion } from '../regional/pipeline.js';
 import { runValidators } from '../validators/framework.js';
 import { getRegionalValidators } from '../regional/validators.js';
 import { renderMap, drawSettlements, drawRivers, drawRoads } from '../rendering/mapRenderer.js';
-import { buildRegionTerrain, buildWaterPlane, buildSettlementMarkers, buildRegionRoads, buildRegionRiverMeshes } from '../rendering/regionPreview3D.js';
+import { buildRegionTerrain, buildWaterPlane, buildSettlementMarkers, buildRegionRoads, buildRegionRiverMeshes, buildCityBoundary } from '../rendering/regionPreview3D.js';
 import { createScorePanel, updateScorePanel } from './ScorePanel.js';
 import { SeededRandom } from '../core/rng.js';
 
@@ -47,6 +47,10 @@ export class RegionScreen {
     this._preview3D.style.cssText = 'flex:1;position:relative;';
     this._root.appendChild(this._preview3D);
 
+    // Land cover legend overlay
+    this._legend = this._buildLegend();
+    this._preview3D.appendChild(this._legend);
+
     // Right: 2D map + controls
     const rightPanel = document.createElement('div');
     rightPanel.style.cssText = 'width:320px;display:flex;flex-direction:column;padding:10px;background:#1a1a1a';
@@ -79,7 +83,7 @@ export class RegionScreen {
 
     // Buttons
     const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex;gap:8px;margin-top:8px';
+    btnRow.style.cssText = 'display:flex;gap:8px;margin-top:8px;flex-wrap:wrap';
 
     this._regenBtn = this._makeBtn('Regenerate', () => {
       this._seed = parseInt(this._seedInput.value) || Math.floor(Math.random() * 999999);
@@ -118,6 +122,7 @@ export class RegionScreen {
       btnRow.appendChild(this._compareBtn);
     }
 
+
     rightPanel.appendChild(btnRow);
 
     // Score panel
@@ -138,14 +143,11 @@ export class RegionScreen {
 
   _generate() {
     const rng = new SeededRandom(this._seed);
-    const edges = ['north', 'south', 'east', 'west'];
-    const coastEdges = [edges[rng.int(0, 3)]];
     this._layers = generateRegion({
       width: 128,
       height: 128,
-      cellSize: 50,
+      cellSize: 200,
       seaLevel: 0,
-      coastEdges,
     }, rng);
 
     // Run validators
@@ -193,29 +195,42 @@ export class RegionScreen {
     sun.position.set(200, 400, 300);
     scene.add(sun);
 
+    // Scale the world so it renders at a consistent visual size regardless of cellSize.
+    // Reference size: 6400 world units (the old 128*50m extent).
+    const elevation = this._layers.getGrid('elevation');
+    const worldSize = elevation.width * elevation.cellSize;
+    const renderScale = 6400 / worldSize;
+    const worldGroup = new THREE.Group();
+    worldGroup.scale.set(renderScale, renderScale, renderScale);
+    scene.add(worldGroup);
+    this._worldGroup = worldGroup;
+
     // Add terrain
     const terrainMesh = buildRegionTerrain(this._layers);
-    scene.add(terrainMesh);
+    worldGroup.add(terrainMesh);
 
     const waterPlane = buildWaterPlane(this._layers);
-    scene.add(waterPlane);
+    worldGroup.add(waterPlane);
 
     const { group: markerGroup, markers } = buildSettlementMarkers(this._layers);
-    scene.add(markerGroup);
+    worldGroup.add(markerGroup);
     this._3dMarkers = markers;
 
     const roadLines = buildRegionRoads(this._layers);
-    scene.add(roadLines);
+    worldGroup.add(roadLines);
 
     const riverMeshes = buildRegionRiverMeshes(this._layers);
-    scene.add(riverMeshes);
+    worldGroup.add(riverMeshes);
+
+    const { line: cityLine, update: cityUpdate } = buildCityBoundary(this._layers);
+    worldGroup.add(cityLine);
+    this._cityBoundaryUpdate = cityUpdate;
 
     // Orbit camera
     const camera = new THREE.PerspectiveCamera(50, w / h, 10, 20000);
     this._camera = camera;
-    const elevation = this._layers.getGrid('elevation');
-    const worldSize = elevation.width * elevation.cellSize;
-    camera.position.set(worldSize * 0.5, worldSize * 0.4, worldSize * 0.5);
+    // Camera positioned relative to the scaled render size (6400 reference)
+    camera.position.set(6400 * 0.5, 6400 * 0.4, 6400 * 0.5);
     camera.lookAt(0, 0, 0);
 
     // Raycaster for 3D picking
@@ -229,16 +244,17 @@ export class RegionScreen {
     // Update ring state for initial selection
     this._updateRings();
 
-    // Simple auto-orbit
+    // Simple auto-orbit (use reference size 6400 for consistent visual)
     let angle = 0;
+    const refSize = 6400;
     const animate = () => {
       if (!this._renderer3D) return;
       requestAnimationFrame(animate);
       angle += 0.003;
-      const radius = worldSize * 0.9;
+      const radius = refSize * 0.9;
       camera.position.set(
         Math.sin(angle) * radius,
-        worldSize * 0.45,
+        refSize * 0.45,
         Math.cos(angle) * radius,
       );
       camera.lookAt(0, 0, 0);
@@ -269,6 +285,7 @@ export class RegionScreen {
 
     this._redrawMap();
     this._updateRings();
+    if (this._cityBoundaryUpdate) this._cityBoundaryUpdate(settlement);
   }
 
   _redrawMap() {
@@ -370,6 +387,37 @@ export class RegionScreen {
     if (closest && closestDist < 20) {
       this._selectSettlement(closest);
     }
+  }
+
+  _buildLegend() {
+    const legend = document.createElement('div');
+    legend.style.cssText = 'position:absolute;bottom:12px;left:12px;background:rgba(0,0,0,0.7);padding:8px 12px;border-radius:6px;font-family:monospace;font-size:11px;color:#ccc;pointer-events:none';
+
+    const entries = [
+      ['Water',         '#1a4d99'],
+      ['Farmland',      '#8ca633'],
+      ['Forest',        '#145210'],
+      ['Moorland',      '#736650'],
+      ['Marsh',         '#4d734d'],
+      ['Settlement',    '#997f66'],
+      ['Open woodland', '#4d8026'],
+      ['Bare rock',     '#8c857a'],
+      ['Scrubland',     '#807a40'],
+    ];
+
+    for (const [label, color] of entries) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;margin:2px 0';
+      const swatch = document.createElement('span');
+      swatch.style.cssText = `display:inline-block;width:12px;height:12px;border-radius:2px;background:${color}`;
+      const text = document.createElement('span');
+      text.textContent = label;
+      row.appendChild(swatch);
+      row.appendChild(text);
+      legend.appendChild(row);
+    }
+
+    return legend;
   }
 
   dispose() {

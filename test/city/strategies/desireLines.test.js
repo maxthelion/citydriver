@@ -20,29 +20,24 @@ describe('DesireLines', () => {
     expect(map.roads.length).toBeGreaterThan(0);
 
     for (const road of map.roads) {
-      expect(road.source).toBe('skeleton');
+      expect(['skeleton', 'bridge']).toContain(road.source);
     }
   });
 
-  it('adds desire-line roads on second tick', { timeout: 15000 }, () => {
+  it('adds desire-line roads by third tick', { timeout: 15000 }, () => {
     const { map, strategy } = makeStrategy();
     strategy.tick(); // skeleton
+    strategy.tick(); // primary desire lines
+    strategy.tick(); // secondary desire lines
 
-    const roadsBefore = map.roads.length;
-    const more = strategy.tick(); // primary desire lines
+    // Primary or secondary pass should produce some desire roads
+    const desireRoads = map.roads.filter(r => r.source === 'desire');
+    expect(desireRoads.length).toBeGreaterThan(0);
 
-    expect(typeof more).toBe('boolean');
-
-    if (more) {
-      const desireRoads = map.roads.filter(r => r.source === 'desire');
-      expect(desireRoads.length).toBeGreaterThan(0);
-      expect(map.roads.length).toBeGreaterThan(roadsBefore);
-
-      for (const road of desireRoads) {
-        expect(road.width).toBe(6);
-        expect(road.polyline.length).toBeGreaterThanOrEqual(2);
-        expect(['collector', 'local']).toContain(road.hierarchy);
-      }
+    for (const road of desireRoads) {
+      expect(road.width).toBe(6);
+      expect(road.polyline.length).toBeGreaterThanOrEqual(2);
+      expect(['collector', 'local']).toContain(road.hierarchy);
     }
   });
 
@@ -61,13 +56,16 @@ describe('DesireLines', () => {
     }
   });
 
-  it('stops growing after tick 3', { timeout: 15000 }, () => {
+  it('stops growing after all ticks complete', { timeout: 15000 }, () => {
     const { strategy } = makeStrategy();
-    strategy.tick(); // skeleton
-    strategy.tick(); // primary
-    strategy.tick(); // secondary
-
-    const more = strategy.tick(); // should be false
+    let ticks = 0;
+    let more = true;
+    while (more && ticks < 10) {
+      more = strategy.tick();
+      ticks++;
+    }
+    // Should terminate within 7 ticks (1 skeleton + 2 desire + up to 3 dead-end + done)
+    expect(ticks).toBeLessThanOrEqual(7);
     expect(more).toBe(false);
   });
 });

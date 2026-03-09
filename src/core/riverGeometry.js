@@ -4,6 +4,11 @@
  * path smoothing, and segment-to-vector-path conversion.
  */
 
+// Regional-level stamp fractions (paintPathsOntoWaterMask is regional-only).
+// Larger fraction than city to prevent gaps between coarse cells.
+const REGIONAL_STAMP_FRACTION = 0.75;
+const REGIONAL_STEP_FRACTION = 0.5;
+
 /**
  * Chaikin corner-cutting: smooths a polyline of {x, z, accumulation} points.
  */
@@ -170,7 +175,7 @@ export function paintPathsOntoWaterMask(waterMask, riverPaths, cellSize, width, 
       const segLen = Math.sqrt(dx * dx + dz * dz);
       if (segLen < 0.01) continue;
 
-      const stepSize = cellSize * 0.5;
+      const stepSize = cellSize * REGIONAL_STEP_FRACTION;
       const steps = Math.ceil(segLen / stepSize);
 
       for (let s = 0; s <= steps; s++) {
@@ -181,7 +186,7 @@ export function paintPathsOntoWaterMask(waterMask, riverPaths, cellSize, width, 
 
         // Ensure at least the cell containing the point is painted,
         // even when halfW < cellSize (common at regional resolution)
-        const effectiveRadius = Math.max(halfW, cellSize * 0.75);
+        const effectiveRadius = Math.max(halfW, cellSize * REGIONAL_STAMP_FRACTION);
         const cellRadius = Math.ceil(effectiveRadius / cellSize);
         const cgx = Math.floor(px / cellSize);
         const cgz = Math.floor(pz / cellSize);

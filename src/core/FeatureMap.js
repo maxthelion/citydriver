@@ -12,6 +12,18 @@
 import { Grid2D } from './Grid2D.js';
 import { PlanarGraph } from './PlanarGraph.js';
 import { riverHalfWidth, channelProfile } from './riverGeometry.js';
+import { RIVER_STAMP_FRACTION, STAMP_STEP_FRACTION } from '../city/constants.js';
+
+// Land value source weights
+const LV_TOWN_CENTER = 1.0;
+const LV_WATERFRONT = 0.2;
+const LV_HILLTOP = 0.9;
+const LV_JUNCTION = 0.75;
+const LV_BRIDGE = 0.85;
+const LV_HILLTOP_MIN_PROMINENCE = 2;    // meters above local average
+const LV_HILLTOP_PROMINENCE_SCALE = 8;  // prominence for max value
+const LV_BLUR_RADIUS = 20;              // cells (~200m at 10m resolution)
+const LV_BUILDABLE_FLOOR = 0.2;         // min value for buildable land
 
 // Buildability slope scoring table (from technical-reference.md)
 function slopeScore(slope) {
@@ -240,6 +252,50 @@ export class FeatureMap {
     return dist;
   }
 
+  /**
+   * BFS land distance into water cells, 4-connected.
+   * For each water cell, distance to nearest land. Narrow rivers = low values.
+   * Stored as this.waterDepth for the path cost function to use.
+   */
+  computeWaterDepth() {
+    const cutoff = 20;
+    this.waterDepth = new Grid2D(this.width, this.height, {
+      type: 'float32',
+      cellSize: this.cellSize,
+      fill: cutoff + 1,
+    });
+
+    const queue = [];
+    for (let gz = 0; gz < this.height; gz++) {
+      for (let gx = 0; gx < this.width; gx++) {
+        if (this.waterMask.get(gx, gz) === 0) {
+          this.waterDepth.set(gx, gz, 0);
+          queue.push(gx | (gz << 16));
+        }
+      }
+    }
+
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    let head = 0;
+    while (head < queue.length) {
+      const packed = queue[head++];
+      const cx = packed & 0xFFFF;
+      const cz = packed >> 16;
+      const cd = this.waterDepth.get(cx, cz);
+      if (cd >= cutoff) continue;
+
+      for (const [dx, dz] of dirs) {
+        const nx = cx + dx;
+        const nz = cz + dz;
+        if (nx < 0 || nx >= this.width || nz < 0 || nz >= this.height) continue;
+        if (this.waterDepth.get(nx, nz) > cd + 1) {
+          this.waterDepth.set(nx, nz, cd + 1);
+          queue.push(nx | (nz << 16));
+        }
+      }
+    }
+  }
+
   // --- Road stamping ---
 
   _stampRoad(feature) {
@@ -260,7 +316,7 @@ export class FeatureMap {
       const segLen = Math.sqrt(dx * dx + dz * dz);
       if (segLen < 0.01) continue;
 
-      const stepSize = this.cellSize * 0.5;
+      const stepSize = this.cellSize * STAMP_STEP_FRACTION;
       const steps = Math.ceil(segLen / stepSize);
 
       for (let s = 0; s <= steps; s++) {
@@ -268,7 +324,7 @@ export class FeatureMap {
         const px = ax + dx * t;
         const pz = az + dz * t;
 
-        const effectiveRadius = Math.max(halfWidth, this.cellSize * 0.75);
+        const effectiveRadius = Math.max(halfWidth, this.cellSize * RIVER_STAMP_FRACTION);
         const cellRadius = Math.ceil(effectiveRadius / this.cellSize);
         const cgx = Math.round((px - this.originX) / this.cellSize);
         const cgz = Math.round((pz - this.originZ) / this.cellSize);
@@ -286,8 +342,8 @@ export class FeatureMap {
               this.roadGrid.set(gx, gz, 1);
               this.buildability.set(gx, gz, 0);
 
-              // Bridge detection: road crossing water
-              if (this.waterMask.get(gx, gz) > 0) {
+              // Only stamp bridgeGrid for explicit bridge features
+              if (feature.bridge && this.waterMask.get(gx, gz) > 0) {
                 this.bridgeGrid.set(gx, gz, 1);
               }
             }
@@ -313,7 +369,7 @@ export class FeatureMap {
       const segLen = Math.sqrt(dx * dx + dz * dz);
       if (segLen < 0.01) continue;
 
-      const stepSize = this.cellSize * 0.5;
+      const stepSize = this.cellSize * STAMP_STEP_FRACTION;
       const steps = Math.ceil(segLen / stepSize);
 
       for (let s = 0; s <= steps; s++) {
@@ -326,11 +382,8 @@ export class FeatureMap {
         const bWidth = b.width || riverHalfWidth(b.accumulation || 1) * 2;
         const halfW = (aWidth * (1 - t) + bWidth * t) / 2;
 
-        // Stamp circle for waterMask
-        // At fine resolution (cellSize <= 10), use actual river width — no inflation needed.
-        // At coarse resolution (cellSize > 10), inflate to cellSize*0.75 to avoid gaps.
-        const minRadius = this.cellSize > 10 ? this.cellSize * 0.75 : this.cellSize * 0.4;
-        const effectiveRadius = Math.max(halfW, minRadius);
+        // FeatureMap is always city-level — use tight stamp fraction.
+        const effectiveRadius = Math.max(halfW, this.cellSize * RIVER_STAMP_FRACTION);
         const cellRadius = Math.ceil(effectiveRadius / this.cellSize);
         const cgx = Math.round((px - this.originX) / this.cellSize);
         const cgz = Math.round((pz - this.originZ) / this.cellSize);
@@ -404,12 +457,13 @@ export class FeatureMap {
    */
   createPathCost(preset = 'growth') {
     const presets = {
-      anchor:    { slopePenalty: 10, unbuildableCost: Infinity, reuseDiscount: 0.15, plotPenalty: 5.0 },
+      anchor:    { slopePenalty: 10, unbuildableCost: 15,       reuseDiscount: 0.01, plotPenalty: 5.0 },
       growth:    { slopePenalty: 10, unbuildableCost: Infinity, reuseDiscount: 0.5,  plotPenalty: 5.0 },
       nucleus:   { slopePenalty: 5,  unbuildableCost: 12,       reuseDiscount: 0.1,  plotPenalty: 3.0 },
       shortcuts: { slopePenalty: 8,  unbuildableCost: 20,       reuseDiscount: 1.0,  plotPenalty: 3.0 },
       satellite: { slopePenalty: 10, unbuildableCost: Infinity, reuseDiscount: 0.15, plotPenalty: 5.0 },
       bridge:    { slopePenalty: 3,  unbuildableCost: 8,        reuseDiscount: 0.1,  plotPenalty: 5.0 },
+      extra:     { slopePenalty: 10, unbuildableCost: 15,       reuseDiscount: 0.01, plotPenalty: 5.0 },
     };
 
     const p = presets[preset] || presets.growth;
@@ -419,6 +473,7 @@ export class FeatureMap {
     const buildability = this.buildability;
     const roadGrid = this.roadGrid;
     const bridgeGrid = this.bridgeGrid;
+    const waterDepth = this.waterDepth;
 
     return (fromGx, fromGz, toGx, toGz) => {
       const dx = toGx - fromGx;
@@ -447,7 +502,15 @@ export class FeatureMap {
       const b = buildability.get(toGx, toGz);
       if (b < 0.01) {
         if (!isFinite(unbuildableCost)) return Infinity;
-        cost += unbuildableCost;
+        // Narrow water crossings: scale cost by depth from land.
+        // Depth 1-3 cells (narrow rivers) = moderate cost.
+        // Depth 4+ = increasingly expensive, discouraging wide crossings.
+        if (waterDepth) {
+          const depth = waterDepth.get(toGx, toGz);
+          cost += unbuildableCost * depth;
+        } else {
+          cost += unbuildableCost;
+        }
       } else if (b < 0.3) {
         cost *= 1 + 2 * (1 - b / 0.3);
       }
@@ -525,7 +588,7 @@ export class FeatureMap {
         const segLen = Math.sqrt(dx * dx + dz * dz);
         if (segLen < 0.01) continue;
 
-        const steps = Math.ceil(segLen / (this.cellSize * 0.5));
+        const steps = Math.ceil(segLen / (this.cellSize * STAMP_STEP_FRACTION));
         for (let s = 0; s <= steps; s++) {
           const t = s / steps;
           const px = a.x + dx * t;
@@ -533,8 +596,7 @@ export class FeatureMap {
           const aWidth = a.width || riverHalfWidth(a.accumulation || 1) * 2;
           const bWidth = b.width || riverHalfWidth(b.accumulation || 1) * 2;
           const halfW = (aWidth * (1 - t) + bWidth * t) / 2;
-          const minR = this.cellSize > 10 ? this.cellSize * 0.75 : this.cellSize * 0.4;
-          const effectiveRadius = Math.max(halfW, minR);
+          const effectiveRadius = Math.max(halfW, this.cellSize * RIVER_STAMP_FRACTION);
           const cellRadius = Math.ceil(effectiveRadius / this.cellSize);
           const cgx = Math.round((px - this.originX) / this.cellSize);
           const cgz = Math.round((pz - this.originZ) / this.cellSize);
@@ -588,7 +650,7 @@ export class FeatureMap {
         const segLen = Math.sqrt(dx * dx + dz * dz);
         if (segLen < 0.01) continue;
 
-        const steps = Math.ceil(segLen / (this.cellSize * 0.5));
+        const steps = Math.ceil(segLen / (this.cellSize * STAMP_STEP_FRACTION));
         for (let s = 0; s <= steps; s++) {
           const t = s / steps;
           const px = a.x + dx * t;
@@ -647,7 +709,7 @@ export class FeatureMap {
       const cx = Math.round((this.settlement.gx * rcs - this.originX) / this.cellSize);
       const cz = Math.round((this.settlement.gz * rcs - this.originZ) / this.cellSize);
       if (cx >= 0 && cx < w && cz >= 0 && cz < h) {
-        raw[cz * w + cx] = 1.0;
+        raw[cz * w + cx] = LV_TOWN_CENTER;
       }
     }
 
@@ -660,7 +722,7 @@ export class FeatureMap {
             this.waterMask.get(gx + 1, gz) > 0 ||
             this.waterMask.get(gx, gz - 1) > 0 ||
             this.waterMask.get(gx, gz + 1) > 0) {
-          raw[gz * w + gx] = Math.max(raw[gz * w + gx], 0.8);
+          raw[gz * w + gx] = Math.max(raw[gz * w + gx], LV_WATERFRONT);
         }
       }
     }
@@ -682,8 +744,8 @@ export class FeatureMap {
           }
           if (!localMax) continue;
           const prominence = elev - (localSum / localCount);
-          if (prominence > 2) {
-            const v = Math.min(1, prominence / 8) * 0.7;
+          if (prominence > LV_HILLTOP_MIN_PROMINENCE) {
+            const v = Math.min(1, prominence / LV_HILLTOP_PROMINENCE_SCALE) * LV_HILLTOP;
             raw[gz * w + gx] = Math.max(raw[gz * w + gx], v);
           }
         }
@@ -705,7 +767,7 @@ export class FeatureMap {
           }
         }
         if (dirs >= 3) {
-          raw[gz * w + gx] = Math.max(raw[gz * w + gx], 0.6);
+          raw[gz * w + gx] = Math.max(raw[gz * w + gx], LV_JUNCTION);
         }
       }
     }
@@ -714,14 +776,13 @@ export class FeatureMap {
     for (let gz = 0; gz < h; gz++) {
       for (let gx = 0; gx < w; gx++) {
         if (this.bridgeGrid.get(gx, gz) > 0) {
-          raw[gz * w + gx] = Math.max(raw[gz * w + gx], 0.85);
+          raw[gz * w + gx] = Math.max(raw[gz * w + gx], LV_BRIDGE);
         }
       }
     }
 
     // 2. Gaussian blur (separable, two-pass)
-    const radius = 20; // cells (~200m at 10m resolution)
-    const blurred = _gaussianBlur2D(raw, w, h, radius);
+    const blurred = _gaussianBlur2D(raw, w, h, LV_BLUR_RADIUS);
 
     // 3. Normalize to 0-1
     let maxVal = 0;
@@ -734,10 +795,14 @@ export class FeatureMap {
       }
     }
 
-    // 4. Write to grid
+    // 4. Write to grid, with a floor for buildable land
     for (let gz = 0; gz < h; gz++) {
       for (let gx = 0; gx < w; gx++) {
-        this.landValue.set(gx, gz, blurred[gz * w + gx]);
+        let v = blurred[gz * w + gx];
+        if (this.waterMask.get(gx, gz) === 0 && this.buildability.get(gx, gz) > LV_BUILDABLE_FLOOR) {
+          v = Math.max(v, LV_BUILDABLE_FLOOR);
+        }
+        this.landValue.set(gx, gz, v);
       }
     }
   }
@@ -889,6 +954,195 @@ export class FeatureMap {
     };
   }
 
+  // --- Bitmap face extraction ---
+
+  /**
+   * Extract enclosed faces (city blocks) from the grid by flood-filling
+   * regions bounded by roads, water, and unbuildable terrain.
+   *
+   * Returns array of { polygon, area, centroid } where polygon is an array
+   * of {x, z} world-coord points tracing the face boundary.
+   *
+   * @param {object} [options]
+   * @param {number} [options.minArea=2000] - Min face area in m² to include
+   * @param {number} [options.maxArea] - Max face area in m² (default: half map area)
+   * @param {number} [options.simplifyEpsilon=1.5] - RDP simplification tolerance in cells
+   * @returns {Array<{polygon: Array<{x,z}>, area: number, centroid: {x,z}}>}
+   */
+  extractFaces(options = {}) {
+    const w = this.width;
+    const h = this.height;
+    const cs = this.cellSize;
+    const {
+      minArea = 2000,
+      maxArea = w * h * cs * cs * 0.5,
+      simplifyEpsilon = 1.5,
+    } = options;
+
+    const minCells = Math.ceil(minArea / (cs * cs));
+    const maxCells = Math.floor(maxArea / (cs * cs));
+
+    // Build boundary mask: 1 = boundary (road, water, unbuildable, edge)
+    const boundary = new Uint8Array(w * h);
+    for (let gz = 0; gz < h; gz++) {
+      for (let gx = 0; gx < w; gx++) {
+        const idx = gz * w + gx;
+        if (gx === 0 || gx === w - 1 || gz === 0 || gz === h - 1 ||
+            this.roadGrid.get(gx, gz) > 0 ||
+            this.waterMask.get(gx, gz) > 0 ||
+            this.buildability.get(gx, gz) < 0.1) {
+          boundary[idx] = 1;
+        }
+      }
+    }
+
+    // Flood-fill to find connected regions
+    const label = new Int32Array(w * h); // 0 = unlabeled
+    let nextLabel = 1;
+    const regionSizes = new Map(); // label -> cell count
+
+    for (let gz = 1; gz < h - 1; gz++) {
+      for (let gx = 1; gx < w - 1; gx++) {
+        const idx = gz * w + gx;
+        if (boundary[idx] || label[idx]) continue;
+
+        // BFS flood fill
+        const lbl = nextLabel++;
+        const queue = [idx];
+        label[idx] = lbl;
+        let count = 0;
+
+        while (queue.length > 0) {
+          const ci = queue.pop();
+          count++;
+          const cx = ci % w;
+          const cz = (ci - cx) / w;
+
+          // 4-connected neighbors
+          for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+            const nx = cx + dx, nz = cz + dz;
+            if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
+            const ni = nz * w + nx;
+            if (boundary[ni] || label[ni]) continue;
+            label[ni] = lbl;
+            queue.push(ni);
+          }
+        }
+
+        regionSizes.set(lbl, count);
+      }
+    }
+
+    // Extract contours and build faces for valid regions
+    const faces = [];
+
+    for (const [lbl, size] of regionSizes) {
+      if (size < minCells || size > maxCells) continue;
+
+      const contour = this._traceContour(label, lbl, w, h);
+      if (contour.length < 3) continue;
+
+      // Simplify contour (RDP in grid space)
+      const simplified = this._simplifyContour(contour, simplifyEpsilon);
+      if (simplified.length < 3) continue;
+
+      // Convert to world coords
+      const polygon = simplified.map(p => ({
+        x: this.originX + p.gx * cs,
+        z: this.originZ + p.gz * cs,
+      }));
+
+      // Compute area and centroid
+      const area = size * cs * cs;
+      let cx = 0, cz = 0;
+      for (const p of polygon) { cx += p.x; cz += p.z; }
+      cx /= polygon.length;
+      cz /= polygon.length;
+
+      faces.push({ polygon, area, centroid: { x: cx, z: cz } });
+    }
+
+    return faces;
+  }
+
+  /**
+   * Trace the contour of a labeled region using Moore neighborhood tracing.
+   * Returns array of {gx, gz} grid coords forming a closed boundary.
+   */
+  _traceContour(label, lbl, w, h) {
+    // Find starting pixel: leftmost pixel on the topmost row of the region
+    let startIdx = -1;
+    for (let gz = 0; gz < h && startIdx < 0; gz++) {
+      for (let gx = 0; gx < w && startIdx < 0; gx++) {
+        if (label[gz * w + gx] === lbl) startIdx = gz * w + gx;
+      }
+    }
+    if (startIdx < 0) return [];
+
+    const startGx = startIdx % w;
+    const startGz = (startIdx - startGx) / w;
+
+    // Moore neighborhood tracing (clockwise)
+    // Directions: 0=right, 1=down-right, 2=down, 3=down-left, 4=left, 5=up-left, 6=up, 7=up-right
+    const dx = [1, 1, 0, -1, -1, -1, 0, 1];
+    const dz = [0, 1, 1, 1, 0, -1, -1, -1];
+
+    const contour = [];
+    let cx = startGx, cz = startGz;
+    let dir = 6; // start looking up (entered from below since we found topmost)
+
+    const maxSteps = w * h;
+    for (let step = 0; step < maxSteps; step++) {
+      contour.push({ gx: cx, gz: cz });
+
+      // Search clockwise from (dir + 5) % 8 (backtrack direction + 1)
+      let searchDir = (dir + 5) % 8;
+      let found = false;
+
+      for (let i = 0; i < 8; i++) {
+        const nx = cx + dx[searchDir];
+        const nz = cz + dz[searchDir];
+
+        if (nx >= 0 && nx < w && nz >= 0 && nz < h && label[nz * w + nx] === lbl) {
+          dir = searchDir;
+          cx = nx;
+          cz = nz;
+          found = true;
+          break;
+        }
+        searchDir = (searchDir + 1) % 8;
+      }
+
+      if (!found) break;
+      if (cx === startGx && cz === startGz) break;
+    }
+
+    return contour;
+  }
+
+  /**
+   * Simplify a contour using Ramer-Douglas-Peucker algorithm.
+   */
+  _simplifyContour(contour, epsilon) {
+    if (contour.length <= 3) return contour;
+
+    let maxDist = 0, maxIdx = 0;
+    const first = contour[0], last = contour[contour.length - 1];
+
+    for (let i = 1; i < contour.length - 1; i++) {
+      const d = _pointLineDistSq(contour[i].gx, contour[i].gz, first.gx, first.gz, last.gx, last.gz);
+      if (d > maxDist) { maxDist = d; maxIdx = i; }
+    }
+
+    if (Math.sqrt(maxDist) > epsilon) {
+      const left = this._simplifyContour(contour.slice(0, maxIdx + 1), epsilon);
+      const right = this._simplifyContour(contour.slice(maxIdx), epsilon);
+      return left.slice(0, -1).concat(right);
+    }
+
+    return [first, last];
+  }
+
   _pointInPolygon(x, z, polygon) {
     let inside = false;
     for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -900,4 +1154,14 @@ export class FeatureMap {
     }
     return inside;
   }
+}
+
+/** Squared distance from point (px,pz) to line segment (ax,az)-(bx,bz). */
+function _pointLineDistSq(px, pz, ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az;
+  const lenSq = dx * dx + dz * dz;
+  if (lenSq === 0) return (px - ax) ** 2 + (pz - az) ** 2;
+  let t = ((px - ax) * dx + (pz - az) * dz) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return (px - ax - t * dx) ** 2 + (pz - az - t * dz) ** 2;
 }

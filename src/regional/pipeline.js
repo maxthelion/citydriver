@@ -8,6 +8,7 @@
  */
 
 import { LayerStack } from '../core/LayerStack.js';
+import { generateTectonics } from './generateTectonics.js';
 import { generateGeology } from './generateGeology.js';
 import { generateTerrain } from './generateTerrain.js';
 import { generateHydrology } from './generateHydrology.js';
@@ -25,9 +26,9 @@ import { growSettlements } from './growSettlements.js';
  * @param {number} [params.height=256]
  * @param {number} [params.cellSize=50]
  * @param {number} [params.seaLevel=0]
- * @param {number} [params.bandDirection] - Geology band angle
- * @param {number} [params.bandCount] - Number of rock type transitions
- * @param {number} [params.intrusionCount] - Igneous intrusions
+ * @param {string[]} [params.coastEdges] - Override coast edge placement
+ * @param {number} [params.plateAngle] - Override plate angle
+ * @param {number} [params.intensity] - Override tectonic intensity
  * @param {import('../core/rng.js').SeededRandom} rng
  * @returns {LayerStack}
  */
@@ -37,21 +38,26 @@ export function generateRegion(params, rng) {
     height = 256,
     cellSize = 50,
     seaLevel = 0,
-    bandDirection,
-    bandCount,
-    intrusionCount,
-    coastEdges = [],
   } = params;
 
   const layers = new LayerStack();
   layers.setData('params', { width, height, cellSize, seaLevel });
 
-  // A1. Geology
+  // A0. Tectonic context — drives everything downstream
+  const tectonics = generateTectonics({
+    coastEdges: params.coastEdges,
+    plateAngle: params.plateAngle,
+    intensity: params.intensity,
+  }, rng);
+  layers.setData('tectonics', tectonics);
+
+  // A1. Geology (driven by tectonic context)
   const geology = generateGeology({
     width, height, cellSize,
-    bandDirection: bandDirection ?? rng.range(0, Math.PI),
-    bandCount: bandCount ?? rng.int(4, 7),
-    intrusionCount: intrusionCount ?? rng.int(1, 3),
+    bandDirection: tectonics.bandDirection,
+    bandCount: tectonics.bandCount,
+    intrusionCount: tectonics.intrusionCount,
+    rockBias: tectonics.rockBias,
   }, rng);
 
   layers.setGrid('rockType', geology.rockType);
@@ -60,9 +66,9 @@ export function generateRegion(params, rng) {
   layers.setGrid('soilFertility', geology.soilFertility);
   layers.setGrid('springLine', geology.springLine);
 
-  // A2. Terrain
+  // A2. Terrain (driven by tectonic context)
   const terrain = generateTerrain(
-    { width, height, cellSize, seaLevel, coastEdges },
+    { width, height, cellSize, seaLevel, tectonics },
     geology,
     rng,
   );
@@ -179,7 +185,7 @@ export function generateRegion(params, rng) {
 
   // A5. Land Cover
   const landCover = generateLandCover(
-    { width, height, cellSize, seaLevel },
+    { width, height, cellSize, seaLevel, treeline: tectonics.treeline },
     terrain.elevation,
     terrain.slope,
     geology.soilFertility,

@@ -102,11 +102,12 @@ describe('buildRoadNetwork', () => {
       smooth: { simplifyEpsilon: 1.0 },
     });
 
-    // After merge, shared segments should be deduplicated.
-    // With reuse discount, roads 2 and 3 follow road 1's path in the shared corridor.
-    // The merge splits at divergence points, so total segments > 3 but total unique
-    // cells should be less than 3 fully independent roads (~3*41 = 123 cells).
-    // Verify merge produced some splitting (more segments than original 3 roads).
-    expect(results.length).toBeGreaterThanOrEqual(3);
+    // After snap + merge, near-parallel paths (within 2 cells) collapse into shared
+    // cells. With 3 roads offset by 1 cell, aggressive snapping may merge them
+    // into fewer segments than the original 3.
+    // Key assertion: we get fewer total cells than 3 independent roads (~123 cells).
+    const totalCells = results.reduce((sum, r) => sum + r.cells.length, 0);
+    expect(totalCells).toBeLessThan(123);
+    expect(results.length).toBeGreaterThanOrEqual(1);
   });
 });

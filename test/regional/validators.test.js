@@ -37,7 +37,7 @@ describe('Regional Validators (Phase 3)', () => {
 
   it('S_terrainSmoothness scores well', () => {
     const rng = new SeededRandom(42);
-    const layers = generateRegion({ width: 64, height: 64 }, rng);
+    const layers = generateRegion({ width: 64, height: 64, cellSize: 200 }, rng);
     const validators = getRegionalValidators(3);
     const vSmooth = validators.find(v => v.name === 'S_terrainSmoothness');
     const score = vSmooth.fn(layers);

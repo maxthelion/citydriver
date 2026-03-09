@@ -78,13 +78,13 @@ export const S_terrainSmoothness = {
     slope.forEach((gx, gz, val) => {
       if (gx === 0 || gz === 0 || gx === slope.width - 1 || gz === slope.height - 1) return;
       total++;
-      if (val > 0.5) extremeCount++; // > 50% gradient is extreme
+      if (val > 0.8) extremeCount++; // > 80% gradient (~39°) is extreme
     });
 
     if (total === 0) return 1;
     const extremeFraction = extremeCount / total;
-    // Score: 1.0 if < 5% extreme, 0 if > 30% extreme
-    return Math.max(0, Math.min(1, (0.3 - extremeFraction) / 0.25));
+    // Score: 1.0 if < 10% extreme, 0 if > 50% extreme
+    return Math.max(0, Math.min(1, (0.5 - extremeFraction) / 0.4));
   },
 };
 

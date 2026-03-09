@@ -104,30 +104,33 @@ export function generateLandCover(params, elevation, slope, soilFertility, perme
       const farmProximity = smoothstep(25, 3, sDist);     // higher near settlements
       const farmSuit = farmSlope * farmElev * fertility * farmProximity;
 
-      // Forest: moderate slope + moderate elevation + adequate rainfall (use fertility as proxy) + not too dry
-      const forestElev = smoothstep(0, 8, h) * smoothstep(treeline, treeline * 0.6, h);
-      const forestFertility = clamp(fertility * 1.5, 0, 1);
-      const forestSuit = forestElev * forestFertility * clamp(1.0 - s * 2, 0.1, 1);
+      // Forest: dominates below treeline on moderate slopes.
+      // Trees grow on poor soil too (just slower) — fertility is a mild bonus, not a gate.
+      // Sharp cutoff at treeline creates a visible treeline boundary.
+      const forestElev = smoothstep(0, 15, h) * smoothstep(treeline, treeline * 0.75, h);
+      const forestFertilityBonus = 0.5 + fertility * 0.5; // 0.5–1.0 (not a gate)
+      const forestSlope = clamp(1.0 - s * 1.5, 0.1, 1); // tolerant of moderate slopes
+      const forestSuit = forestElev * forestFertilityBonus * forestSlope;
 
-      // Moorland: high elevation + acidic soil (low fertility)
-      const moorElev = smoothstep(treeline * 0.5, treeline, h);
+      // Moorland: above treeline only. Exposed upland with no tree cover.
+      const moorElev = smoothstep(treeline * 0.75, treeline * 1.1, h);
       const moorSoil = clamp(1.0 - fertility, 0, 1);
-      const moorSuit = moorElev * (0.4 + moorSoil * 0.6);
+      const moorSuit = moorElev * (0.5 + moorSoil * 0.5);
 
       // Marsh: low elevation + impermeable rock (low permeability) + low slope
-      const marshElev = smoothstep(15, 0, h);
-      const marshPerm = clamp(1.0 - perm / 0.2, 0, 1); // high when perm < 0.2
+      const marshElev = smoothstep(treeline * 0.2, 0, h);
+      const marshPerm = clamp(1.0 - perm / 0.2, 0, 1);
       const marshSlope = clamp(1.0 - s / 0.05, 0, 1);
       const marshSuit = marshElev * marshPerm * marshSlope;
 
-      // Open woodland: transition between forest and moorland
-      const owElev = smoothstep(treeline * 0.4, treeline * 0.7, h) * smoothstep(treeline, treeline * 0.7, h);
-      const owSuit = owElev * clamp(fertility * 0.8, 0, 1) * clamp(1.0 - s * 3, 0, 1);
+      // Open woodland: transition zone just below treeline
+      const owElev = smoothstep(treeline * 0.5, treeline * 0.8, h) * smoothstep(treeline * 1.1, treeline * 0.9, h);
+      const owSuit = owElev * (0.3 + fertility * 0.4) * clamp(1.0 - s * 2, 0, 1);
 
-      // Bare rock: very high slope or very high erosion resistance at altitude
-      const bareSlope = smoothstep(0.3, 0.6, s);
-      const bareResistance = clamp((1.0 - fertility) * (1.0 - perm), 0, 1); // proxy for hard bare rock
-      const bareElev = smoothstep(treeline * 0.3, treeline, h);
+      // Bare rock: very steep slopes or above treeline with hard rock
+      const bareSlope = smoothstep(0.4, 0.7, s);
+      const bareResistance = clamp((1.0 - fertility) * (1.0 - perm), 0, 1);
+      const bareElev = smoothstep(treeline * 0.5, treeline * 1.3, h);
       const bareSuit = Math.max(bareSlope * 0.8, bareResistance * bareElev * 0.6);
 
       // Scrubland: dry, moderate slope, poor soil

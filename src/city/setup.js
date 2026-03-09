@@ -12,6 +12,7 @@ import { FeatureMap } from '../core/FeatureMap.js';
 import { PerlinNoise } from '../core/noise.js';
 import { inheritRivers } from '../core/inheritRivers.js';
 import { distance2D } from '../core/math.js';
+import { CITY_CELL_SIZE, CITY_RADIUS } from './constants.js';
 
 /**
  * Create a FeatureMap from regional layers centered on a settlement.
@@ -28,34 +29,48 @@ export function setupCity(layers, settlement, rng) {
   const regionalSlope = layers.getGrid('slope');
   const regionalWaterMask = layers.getGrid('waterMask');
 
-  // City parameters
-  const cityCellSize = 10;
-  const cityRadius = 30; // regional cells
+  // City parameters (from shared constants)
+  const cityCellSize = CITY_CELL_SIZE;
+  const cityRadius = CITY_RADIUS; // regional cells
   const scaleRatio = regionalCellSize / cityCellSize;
-  const cityGridSize = Math.round(cityRadius * 2 * scaleRatio);
+  const fullSize = Math.round(cityRadius * 2 * scaleRatio);
 
-  // World-space origin of city grid
+  // World-space origin of city grid, clipped to regional bounds
   const centerX = settlement.gx * regionalCellSize;
   const centerZ = settlement.gz * regionalCellSize;
-  const originX = centerX - (cityGridSize / 2) * cityCellSize;
-  const originZ = centerZ - (cityGridSize / 2) * cityCellSize;
+  const regionW = (regionalElevation.width - 1) * regionalCellSize;
+  const regionH = (regionalElevation.height - 1) * regionalCellSize;
+
+  let originX = centerX - (fullSize / 2) * cityCellSize;
+  let originZ = centerZ - (fullSize / 2) * cityCellSize;
+  let endX = originX + fullSize * cityCellSize;
+  let endZ = originZ + fullSize * cityCellSize;
+
+  // Clamp to regional data bounds
+  if (originX < 0) originX = 0;
+  if (originZ < 0) originZ = 0;
+  if (endX > regionW) endX = regionW;
+  if (endZ > regionH) endZ = regionH;
+
+  const cityGridW = Math.round((endX - originX) / cityCellSize);
+  const cityGridH = Math.round((endZ - originZ) / cityCellSize);
 
   // Extract and refine terrain via bilinear interpolation
-  const elevation = new Grid2D(cityGridSize, cityGridSize, {
+  const elevation = new Grid2D(cityGridW, cityGridH, {
     cellSize: cityCellSize,
     originX,
     originZ,
   });
 
-  const slope = new Grid2D(cityGridSize, cityGridSize, {
+  const slope = new Grid2D(cityGridW, cityGridH, {
     cellSize: cityCellSize,
     originX,
     originZ,
   });
 
   // Bilinear interpolation from regional to city resolution
-  for (let gz = 0; gz < cityGridSize; gz++) {
-    for (let gx = 0; gx < cityGridSize; gx++) {
+  for (let gz = 0; gz < cityGridH; gz++) {
+    for (let gx = 0; gx < cityGridW; gx++) {
       const wx = originX + gx * cityCellSize;
       const wz = originZ + gz * cityCellSize;
       const rgx = wx / regionalCellSize;
@@ -66,8 +81,8 @@ export function setupCity(layers, settlement, rng) {
 
   // Perlin detail refinement: 3 octaves, 0.4 persistence, 2m amplitude
   const noise = new PerlinNoise(rng.fork('terrain-detail'));
-  for (let gz = 0; gz < cityGridSize; gz++) {
-    for (let gx = 0; gx < cityGridSize; gx++) {
+  for (let gz = 0; gz < cityGridH; gz++) {
+    for (let gx = 0; gx < cityGridW; gx++) {
       const wx = originX + gx * cityCellSize;
       const wz = originZ + gz * cityCellSize;
       const detail = noise.fbm(wx * 0.005, wz * 0.005, {
@@ -80,35 +95,32 @@ export function setupCity(layers, settlement, rng) {
   }
 
   // Recompute slope (central difference)
-  for (let gz = 1; gz < cityGridSize - 1; gz++) {
-    for (let gx = 1; gx < cityGridSize - 1; gx++) {
+  for (let gz = 1; gz < cityGridH - 1; gz++) {
+    for (let gx = 1; gx < cityGridW - 1; gx++) {
       const dex = elevation.get(gx + 1, gz) - elevation.get(gx - 1, gz);
       const dez = elevation.get(gx, gz + 1) - elevation.get(gx, gz - 1);
       slope.set(gx, gz, Math.sqrt(dex * dex + dez * dez) / (2 * cityCellSize));
     }
   }
   // Edge slopes from nearest interior
-  for (let gx = 0; gx < cityGridSize; gx++) {
+  for (let gx = 0; gx < cityGridW; gx++) {
     slope.set(gx, 0, slope.get(gx, 1));
-    slope.set(gx, cityGridSize - 1, slope.get(gx, cityGridSize - 2));
+    slope.set(gx, cityGridH - 1, slope.get(gx, cityGridH - 2));
   }
-  for (let gz = 0; gz < cityGridSize; gz++) {
+  for (let gz = 0; gz < cityGridH; gz++) {
     slope.set(0, gz, slope.get(1, gz));
-    slope.set(cityGridSize - 1, gz, slope.get(cityGridSize - 2, gz));
+    slope.set(cityGridW - 1, gz, slope.get(cityGridW - 2, gz));
   }
 
   // Create FeatureMap
-  const map = new FeatureMap(cityGridSize, cityGridSize, cityCellSize, { originX, originZ });
+  const map = new FeatureMap(cityGridW, cityGridH, cityCellSize, { originX, originZ });
 
-  // Import waterMask from regional (bilinear + threshold)
-  for (let gz = 0; gz < cityGridSize; gz++) {
-    for (let gx = 0; gx < cityGridSize; gx++) {
-      const wx = originX + gx * cityCellSize;
-      const wz = originZ + gz * cityCellSize;
-      const rgx = wx / regionalCellSize;
-      const rgz = wz / regionalCellSize;
-      const val = regionalWaterMask.sample(rgx, rgz);
-      if (val >= 0.5) {
+  // Seed waterMask from sea level (not from regional waterMask, which has
+  // coarse 200m-resolution river stamps that look blocky at 20m).
+  // River water is handled by the inherited vector paths below.
+  for (let gz = 0; gz < cityGridH; gz++) {
+    for (let gx = 0; gx < cityGridW; gx++) {
+      if (elevation.get(gx, gz) < seaLevel) {
         map.waterMask.set(gx, gz, 1);
       }
     }
@@ -120,8 +132,8 @@ export function setupCity(layers, settlement, rng) {
     const bounds = {
       minX: originX,
       minZ: originZ,
-      maxX: originX + cityGridSize * cityCellSize,
-      maxZ: originZ + cityGridSize * cityCellSize,
+      maxX: originX + cityGridW * cityCellSize,
+      maxZ: originZ + cityGridH * cityCellSize,
     };
     const cityRivers = inheritRivers(riverPaths, bounds, {
       chaikinPasses: 1,
@@ -141,11 +153,30 @@ export function setupCity(layers, settlement, rng) {
   // Carve channels
   map.carveChannels();
 
+  // Water depth (BFS from land into water — for narrow-river path costs)
+  map.computeWaterDepth();
+
   // Store metadata (needed by computeLandValue for town center)
   map.seaLevel = seaLevel;
   map.settlement = settlement;
   map.regionalLayers = layers;
   map.rng = rng;
+
+  // Import regional settlements that fall within city bounds
+  const allSettlements = layers.getData('settlements');
+  if (allSettlements) {
+    map.regionalSettlements = allSettlements.filter(s => {
+      const wx = s.gx * regionalCellSize;
+      const wz = s.gz * regionalCellSize;
+      return wx >= originX && wx <= endX && wz >= originZ && wz <= endZ;
+    }).map(s => ({
+      ...s,
+      cityGx: Math.round((s.gx * regionalCellSize - originX) / cityCellSize),
+      cityGz: Math.round((s.gz * regionalCellSize - originZ) / cityCellSize),
+    }));
+  } else {
+    map.regionalSettlements = [];
+  }
 
   // Compute initial land value from terrain features
   map.computeLandValue();
@@ -161,6 +192,17 @@ export function setupCity(layers, settlement, rng) {
 // Nucleus placement
 // ============================================================
 
+// Placement tuning constants
+const NUCLEUS_MIN_SPACING = 15;          // min grid cells between nuclei
+const NUCLEUS_SUPPRESSION_RADIUS = 40;   // radius of value suppression after placement
+const NUCLEUS_SUPPRESSION_CORE = 0.3;    // fraction of radius with flat suppression
+const NUCLEUS_WATERFRONT_DIST = 6;       // cells from water to count as waterfront
+const NUCLEUS_WATERFRONT_RATIO = 0.5;    // max fraction of nuclei that can be waterfront
+const NUCLEUS_FLAT_BONUS = 0.6;          // score bonus for flat terrain (slope < threshold)
+const NUCLEUS_FLAT_SLOPE_MAX = 0.1;      // slope threshold for flat bonus
+const NUCLEUS_SPACING_WEIGHT = 0.3;      // weight of spacing bonus in score
+const NUCLEUS_MIN_BUILDABILITY = 0.2;    // min buildability to be a candidate
+
 // Nucleus caps by tier
 function nucleusCap(tier) {
   if (tier <= 1) return 20;
@@ -173,7 +215,6 @@ function nucleusCap(tier) {
  */
 function placeNuclei(map, tier, rng) {
   const cap = nucleusCap(tier);
-  const minSpacing = 15; // grid cells
   const nuclei = [];
 
   // Center nucleus at settlement location (nudge to nearest buildable cell if on water)
@@ -190,8 +231,8 @@ function placeNuclei(map, tier, rng) {
       for (let dz = -searchR; dz <= searchR; dz++) {
         for (let dx = -searchR; dx <= searchR; dx++) {
           const gx = centerGx + dx, gz = centerGz + dz;
-          if (gx < 3 || gx >= map.width - 3 || gz < 3 || gz >= map.height - 3) continue;
-          if (map.buildability.get(gx, gz) < 0.2) continue;
+          if (gx < 10 || gx >= map.width - 10 || gz < 10 || gz >= map.height - 10) continue;
+          if (map.buildability.get(gx, gz) < NUCLEUS_MIN_BUILDABILITY) continue;
           const d = dx * dx + dz * dz;
           if (d < bestDist) { bestDist = d; bestGx = gx; bestGz = gz; }
         }
@@ -211,15 +252,35 @@ function placeNuclei(map, tier, rng) {
     }
   }
 
-  // Build list of buildable candidate cells (sampled for speed on large grids)
+  // Build list of buildable candidate cells (sampled for speed on large grids).
+  // Use a margin large enough that nuclei have room for growth and roads,
+  // and to avoid placing them outside valid regional data when the city
+  // grid extends beyond the region boundary.
+  const margin = 10;
   const buildableCells = [];
   const step = map.width > 200 ? 3 : 1;
-  for (let gz = 3; gz < map.height - 3; gz += step) {
-    for (let gx = 3; gx < map.width - 3; gx += step) {
-      if (map.buildability.get(gx, gz) >= 0.2) {
+  for (let gz = margin; gz < map.height - margin; gz += step) {
+    for (let gx = margin; gx < map.width - margin; gx += step) {
+      if (map.buildability.get(gx, gz) >= NUCLEUS_MIN_BUILDABILITY) {
         buildableCells.push({ gx, gz });
       }
     }
+  }
+
+  // Local suppression grid — only used during placement, not written to map.landValue
+  const suppression = new Float32Array(map.width * map.height);
+
+  // Precompute distance-to-water for waterfront cap
+  const waterDist = _computeWaterDistance(map);
+
+  const maxWaterfront = Math.ceil(cap * NUCLEUS_WATERFRONT_RATIO);
+  let waterfrontCount = 0;
+
+  // Count center nucleus if it's waterfront, and apply initial suppression
+  if (nuclei.length > 0) {
+    const cn = nuclei[0];
+    if (waterDist[cn.gz * map.width + cn.gx] < NUCLEUS_WATERFRONT_DIST) waterfrontCount++;
+    _addSuppression(suppression, map.width, map.height, cn.gx, cn.gz, NUCLEUS_SUPPRESSION_RADIUS);
   }
 
   // Greedy placement: score = value * buildability, with spacing enforcement
@@ -227,18 +288,26 @@ function placeNuclei(map, tier, rng) {
     let bestScore = -1;
     let bestCell = null;
 
+    const waterfrontFull = waterfrontCount >= maxWaterfront;
+
     for (const c of buildableCells) {
+      if (waterfrontFull && waterDist[c.gz * map.width + c.gx] < NUCLEUS_WATERFRONT_DIST) continue;
+
       let minDist = Infinity;
       for (const n of nuclei) {
         const d = distance2D(c.gx, c.gz, n.gx, n.gz);
         if (d < minDist) minDist = d;
       }
-      if (minDist < minSpacing) continue;
+      if (minDist < NUCLEUS_MIN_SPACING) continue;
 
       const b = map.buildability.get(c.gx, c.gz);
-      const v = map.landValue.get(c.gx, c.gz);
-      const spacingBonus = Math.min(1, minDist / 30);
-      const score = v * b * (0.7 + 0.3 * spacingBonus);
+      const v = Math.max(0, map.landValue.get(c.gx, c.gz) - suppression[c.gz * map.width + c.gx]);
+      const spacingBonus = Math.min(1, minDist / (NUCLEUS_MIN_SPACING * 2));
+      const s = map.slope ? map.slope.get(c.gx, c.gz) : 0;
+      const flatBonus = s < NUCLEUS_FLAT_SLOPE_MAX
+        ? NUCLEUS_FLAT_BONUS * (1 - s / NUCLEUS_FLAT_SLOPE_MAX) : 0;
+      const score = (v + flatBonus) * b
+        * (1 - NUCLEUS_SPACING_WEIGHT + NUCLEUS_SPACING_WEIGHT * spacingBonus);
 
       if (score > bestScore) {
         bestScore = score;
@@ -247,6 +316,9 @@ function placeNuclei(map, tier, rng) {
     }
 
     if (!bestCell) break;
+
+    const isWaterfront = waterDist[bestCell.gz * map.width + bestCell.gx] < NUCLEUS_WATERFRONT_DIST;
+    if (isWaterfront) waterfrontCount++;
 
     const nucleusTier = nuclei.length < 3 ? 2 : (nuclei.length < 6 ? 3 : 4);
     nuclei.push({
@@ -257,11 +329,70 @@ function placeNuclei(map, tier, rng) {
       index: nuclei.length,
     });
 
-    const intensity = nucleusTier <= 2 ? 0.6 : nucleusTier <= 3 ? 0.4 : 0.25;
-    map._spreadValue(bestCell.gx, bestCell.gz, intensity, 15);
+    _addSuppression(suppression, map.width, map.height, bestCell.gx, bestCell.gz, NUCLEUS_SUPPRESSION_RADIUS);
   }
 
   return nuclei;
+}
+
+/**
+ * BFS distance from each land cell to nearest water cell.
+ */
+function _computeWaterDistance(map) {
+  const w = map.width, h = map.height;
+  const dist = new Uint8Array(w * h).fill(255);
+  const queue = [];
+
+  // Seed with water cells
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      if (map.waterMask.get(gx, gz) > 0) {
+        dist[gz * w + gx] = 0;
+        queue.push(gz * w + gx);
+      }
+    }
+  }
+
+  // BFS
+  let head = 0;
+  while (head < queue.length) {
+    const idx = queue[head++];
+    const gx = idx % w, gz = (idx - gx) / w;
+    const d = dist[idx] + 1;
+    if (d > 30) continue; // only need nearby distances
+    for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nx = gx + dx, nz = gz + dz;
+      if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
+      const nIdx = nz * w + nx;
+      if (d < dist[nIdx]) {
+        dist[nIdx] = d;
+        queue.push(nIdx);
+      }
+    }
+  }
+
+  return dist;
+}
+
+/**
+ * Add suppression to a local array (not the map) so subsequent nuclei spread out.
+ */
+function _addSuppression(suppression, w, h, cx, cz, radius) {
+  const coreRadius = radius * NUCLEUS_SUPPRESSION_CORE;
+  const rSq = radius * radius;
+  for (let dz = -radius; dz <= radius; dz++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const gx = cx + dx, gz = cz + dz;
+      if (gx < 0 || gx >= w || gz < 0 || gz >= h) continue;
+      const distSq = dx * dx + dz * dz;
+      if (distSq > rSq) continue;
+      const dist = Math.sqrt(distSq);
+      // Full suppression within core, quadratic falloff beyond
+      const amount = dist <= coreRadius ? 1.0
+        : ((1 - (dist - coreRadius) / (radius - coreRadius)) ** 2);
+      suppression[gz * w + gx] += amount;
+    }
+  }
 }
 
 /**

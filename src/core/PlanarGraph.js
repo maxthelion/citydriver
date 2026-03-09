@@ -577,12 +577,201 @@ export class PlanarGraph {
 
     return visited.size === this.nodes.size;
   }
+
+  /**
+   * Detect small or thin faces that indicate near-duplicate roads.
+   * Works on faces of any edge count, not just triangles.
+   *
+   * Uses isoperimetric ratio: 4π·area / perimeter² (1.0 for circle, 0 for degenerate).
+   *
+   * @param {object} [options]
+   * @param {number} [options.maxArea=3000] - Faces with area below this are candidates (m²)
+   * @param {number} [options.maxCompactness=0.12] - Faces thinner than this are slivers
+   * @returns {Array<{nodeIds, edgeIds, area, perimeter, compactness, edges}>}
+   */
+  detectSliverFaces(options = {}) {
+    const { maxArea = 3000, maxCompactness = 0.12 } = options;
+    const faces = this.facesWithEdges();
+    const slivers = [];
+    const FOUR_PI = 4 * Math.PI;
+
+    for (const face of faces) {
+      const n = face.nodeIds.length;
+      if (n < 3) continue;
+
+      // Build polygon from node positions
+      const pts = face.nodeIds.map(id => this.nodes.get(id));
+      if (pts.some(p => !p)) continue;
+
+      // Shoelace area (signed — skip outer face which winds opposite)
+      let signedArea = 0;
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        signedArea += pts[i].x * pts[j].z - pts[j].x * pts[i].z;
+      }
+      signedArea /= 2;
+      const area = Math.abs(signedArea);
+
+      if (area > maxArea) continue;
+
+      // Perimeter using actual edge polylines
+      let perimeter = 0;
+      for (const eid of face.edgeIds) {
+        const poly = this.edgePolyline(eid);
+        for (let i = 0; i < poly.length - 1; i++) {
+          const dx = poly[i + 1].x - poly[i].x;
+          const dz = poly[i + 1].z - poly[i].z;
+          perimeter += Math.sqrt(dx * dx + dz * dz);
+        }
+      }
+
+      if (perimeter < 0.01) continue;
+      const compactness = FOUR_PI * area / (perimeter * perimeter);
+
+      if (compactness < maxCompactness) {
+        slivers.push({
+          nodeIds: face.nodeIds,
+          edgeIds: face.edgeIds,
+          area: Math.round(area),
+          perimeter: Math.round(perimeter),
+          compactness: Math.round(compactness * 1000) / 1000,
+          edges: n,
+        });
+      }
+    }
+
+    slivers.sort((a, b) => a.compactness - b.compactness);
+    return slivers;
+  }
+
+  /**
+   * Detect pairs of edges whose polylines cross without a shared node
+   * at the intersection. These are graph errors in a planar embedding.
+   *
+   * @returns {Array<{edgeA, edgeB, x, z}>} crossing locations
+   */
+  detectCrossingEdges() {
+    const crossings = [];
+    const edgeList = [...this.edges.values()];
+
+    for (let i = 0; i < edgeList.length; i++) {
+      const eA = edgeList[i];
+      const polyA = this.edgePolyline(eA.id);
+      if (polyA.length < 2) continue;
+
+      for (let j = i + 1; j < edgeList.length; j++) {
+        const eB = edgeList[j];
+
+        // Skip edges that share a node — they legitimately meet at endpoints
+        if (eA.from === eB.from || eA.from === eB.to ||
+            eA.to === eB.from || eA.to === eB.to) continue;
+
+        const polyB = this.edgePolyline(eB.id);
+        if (polyB.length < 2) continue;
+
+        // Test all segment pairs
+        for (let a = 0; a < polyA.length - 1; a++) {
+          for (let b = 0; b < polyB.length - 1; b++) {
+            const pt = _segmentIntersection(
+              polyA[a].x, polyA[a].z, polyA[a + 1].x, polyA[a + 1].z,
+              polyB[b].x, polyB[b].z, polyB[b + 1].x, polyB[b + 1].z,
+            );
+            if (pt) {
+              crossings.push({ edgeA: eA.id, edgeB: eB.id, x: pt.x, z: pt.z });
+              break; // one crossing per edge pair is enough
+            }
+          }
+          if (crossings.length > 0 && crossings[crossings.length - 1].edgeA === eA.id &&
+              crossings[crossings.length - 1].edgeB === eB.id) break;
+        }
+      }
+    }
+
+    return crossings;
+  }
+
+  /**
+   * Detect nodes where two edges meet at a very shallow angle.
+   * Indicates near-parallel roads that should probably be merged.
+   *
+   * @param {number} [maxAngleDeg=5] - Angles below this (degrees) are flagged
+   * @returns {Array<{nodeId, edgeA, edgeB, angleDeg}>}
+   */
+  detectShallowAngles(maxAngleDeg = 5) {
+    const maxRad = maxAngleDeg * Math.PI / 180;
+    const results = [];
+
+    for (const [nodeId, adj] of this._adjacency) {
+      if (adj.length < 2) continue;
+
+      // Compute outgoing angle for each edge at this node
+      const angles = [];
+      for (const { edgeId } of adj) {
+        const edge = this.edges.get(edgeId);
+        if (!edge) continue;
+        const node = this.nodes.get(nodeId);
+        const pts = edge.points || [];
+
+        // Direction leaving this node along the edge
+        let target;
+        if (edge.from === nodeId) {
+          target = pts.length > 0 ? pts[0] : this.nodes.get(edge.to);
+        } else {
+          target = pts.length > 0 ? pts[pts.length - 1] : this.nodes.get(edge.from);
+        }
+
+        const angle = Math.atan2(target.x - node.x, target.z - node.z);
+        angles.push({ edgeId, angle });
+      }
+
+      // Check all pairs at this node
+      for (let i = 0; i < angles.length; i++) {
+        for (let j = i + 1; j < angles.length; j++) {
+          let diff = Math.abs(angles[i].angle - angles[j].angle);
+          if (diff > Math.PI) diff = 2 * Math.PI - diff;
+          if (diff < maxRad) {
+            results.push({
+              nodeId,
+              edgeA: angles[i].edgeId,
+              edgeB: angles[j].edgeId,
+              angleDeg: Math.round(diff * 180 / Math.PI * 10) / 10,
+            });
+          }
+        }
+      }
+    }
+
+    return results;
+  }
 }
 
 function normalizeAngle(a) {
   while (a < 0) a += Math.PI * 2;
   while (a >= Math.PI * 2) a -= Math.PI * 2;
   return a;
+}
+
+/**
+ * Segment-segment intersection test.
+ * Returns {x, z} if segments (ax,az)-(bx,bz) and (cx,cz)-(dx,dz) cross,
+ * or null if they don't. Uses parametric form, excludes endpoint-only touches.
+ */
+function _segmentIntersection(ax, az, bx, bz, cx, cz, dx, dz) {
+  const dABx = bx - ax, dABz = bz - az;
+  const dCDx = dx - cx, dCDz = dz - cz;
+  const denom = dABx * dCDz - dABz * dCDx;
+  if (Math.abs(denom) < 1e-10) return null; // parallel
+
+  const dACx = cx - ax, dACz = cz - az;
+  const t = (dACx * dCDz - dACz * dCDx) / denom;
+  const u = (dACx * dABz - dACz * dABx) / denom;
+
+  // Strict interior crossing (exclude exact endpoints to avoid false positives)
+  const EPS = 0.001;
+  if (t > EPS && t < 1 - EPS && u > EPS && u < 1 - EPS) {
+    return { x: ax + t * dABx, z: az + t * dABz };
+  }
+  return null;
 }
 
 function pointToSegmentDistSq(px, pz, ax, az, bx, bz) {

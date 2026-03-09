@@ -13,6 +13,7 @@ import { buildRoadNetwork } from '../core/buildRoadNetwork.js';
 import { UnionFind } from '../core/UnionFind.js';
 import { distance2D } from '../core/math.js';
 import { PlanarGraph } from '../core/PlanarGraph.js';
+import { Grid2D } from '../core/Grid2D.js';
 import { placeBridges } from './bridges.js';
 
 // Importance weight for hierarchy computation
@@ -34,17 +35,31 @@ export function buildSkeletonRoads(map) {
   const layers = map.regionalLayers;
   const nuclei = map.nuclei;
 
-  // 2. Collect road connections — MST + anchors (no extras yet)
+  // Debug grids
+  map.debugAnchorGrid = new Grid2D(map.width, map.height, { type: 'uint8' });
+  map.debugMstGrid = new Grid2D(map.width, map.height, { type: 'uint8' });
+  map.debugExtraGrid = new Grid2D(map.width, map.height, { type: 'uint8' });
+  map.roadPopularity = new Grid2D(map.width, map.height, { type: 'uint8' });
+
+  // 2. Collect ALL connections in one list — tag by source.
+  //    Order matters: anchors first (stamped for reuse), then MST, then extras.
+  //    All go through one buildRoadNetwork call so _snapPaths merges across groups.
   const { mstConnections, extraConnections } = getMSTConnections(map, nuclei);
+  const anchorConnections = getAnchorConnections(map, layers);
+
   const connections = [];
-  connections.push(...getAnchorConnections(map, layers));
-  connections.push(...mstConnections);
+  for (const c of anchorConnections) connections.push({ ...c, tag: 'anchor' });
+  for (const c of mstConnections) connections.push({ ...c, tag: 'mst' });
+  for (const c of extraConnections) connections.push({ ...c, tag: 'extra' });
 
   if (connections.length === 0) {
-    connections.push(...getFallbackConnections(map));
+    for (const c of getFallbackConnections(map)) connections.push({ ...c, tag: 'mst' });
   }
 
-  // 3. Shared pipeline: pathfind → merge → smooth (MST + anchors only)
+  // 3. Single pipeline: pathfind → snap → merge → simplify.
+  //    Reuse discount is 99% — paths converge onto existing road cells.
+  //    Extras are pathfound last so they get the discount from anchors + MST.
+  //    Snap + merge operates on ALL paths together, eliminating cross-group parallels.
   const costFn = map.createPathCost('anchor');
   const builtRoads = buildRoadNetwork({
     width: map.width,
@@ -56,9 +71,11 @@ export function buildSkeletonRoads(map) {
     smooth: { simplifyEpsilon: 1.0 },
     originX: map.originX,
     originZ: map.originZ,
+    tagGrids: { anchor: map.debugAnchorGrid, mst: map.debugMstGrid, extra: map.debugExtraGrid },
+    popularityGrid: map.roadPopularity,
   });
 
-  // 4. Add merged roads as features (no graph yet — built at end)
+  // 4. Add merged roads as features
   for (const road of builtRoads) {
     if (!road.polyline || road.polyline.length < 2) continue;
 
@@ -78,9 +95,6 @@ export function buildSkeletonRoads(map) {
   // 5. Connect any nuclei that ended up far from the road network.
   _connectDisconnectedNuclei(map);
 
-  // 6. Add extra edges (cycle creators) AFTER the main skeleton.
-  _addExtraEdges(map, extraConnections);
-
   // 7. Compact road polylines: snap nearby vertices, remove duplicates.
   //    Then rebuild the graph from the cleaned roads.
   compactRoads(map, map.cellSize * 1.5);
@@ -88,6 +102,16 @@ export function buildSkeletonRoads(map) {
 
   // 8. Place bridges where skeleton roads cross rivers.
   placeBridges(map);
+
+  // 9. Resolve graph issues: crossing edges and shallow angles.
+  //    Each fix can create new instances of the other, so loop until stable.
+  for (let pass = 0; pass < 5; pass++) {
+    const crossings = map.graph.detectCrossingEdges().length;
+    const shallows = map.graph.detectShallowAngles(DETECT_ANGLE_DEG).length;
+    if (crossings === 0 && shallows === 0) break;
+    if (crossings > 0) resolveCrossingEdges(map);
+    if (shallows > 0) resolveShallowAngles(map);
+  }
 }
 
 /**
@@ -234,52 +258,6 @@ function getFallbackConnections(map) {
   ];
 }
 
-/**
- * Add extra edges that create cycles in the graph.
- * Pathfound AFTER the main skeleton with a cost that penalizes existing roads,
- * forcing genuinely different routes.
- */
-function _addExtraEdges(map, extraConnections) {
-  if (extraConnections.length === 0) return;
-
-  // Cost function that penalizes cells already on roads (opposite of reuse discount)
-  const baseCostFn = map.createPathCost('growth');
-  const avoidRoadCostFn = (fromGx, fromGz, toGx, toGz) => {
-    const base = baseCostFn(fromGx, fromGz, toGx, toGz);
-    if (!isFinite(base)) return base;
-    // Penalize cells that already have roads — force alternative routes
-    if (map.roadGrid.get(toGx, toGz) > 0) return base * 5;
-    return base;
-  };
-
-  for (const conn of extraConnections) {
-    const result = findPath(
-      conn.from.gx, conn.from.gz,
-      conn.to.gx, conn.to.gz,
-      map.width, map.height, avoidRoadCostFn,
-    );
-    if (!result || result.path.length < 2) continue;
-
-    // Stamp onto roadGrid
-    for (const p of result.path) {
-      map.roadGrid.set(p.gx, p.gz, 1);
-    }
-
-    const simplified = _simplifyPathInline(result.path, 1.0);
-    const smoothed = gridPathToWorldPolyline(simplified, map.cellSize, map.originX, map.originZ);
-
-    if (smoothed.length < 2) continue;
-
-    const width = 6 + 0.45 * 10;
-    map.addFeature('road', {
-      polyline: smoothed,
-      width,
-      hierarchy: conn.hierarchy,
-      importance: 0.45,
-      source: 'skeleton',
-    });
-  }
-}
 
 /** Simplified RDP for grid paths. */
 function _simplifyPathInline(path, epsilon) {
@@ -349,9 +327,10 @@ function _connectDisconnectedNuclei(map) {
     const result = findPath(n.gx, n.gz, bestGx, bestGz, map.width, map.height, costFn);
     if (!result || result.path.length < 2) continue;
 
-    // Stamp road grid
+    // Stamp road grid + debug grid
     for (const p of result.path) {
       map.roadGrid.set(p.gx, p.gz, 1);
+      if (map.debugMstGrid) map.debugMstGrid.set(p.gx, p.gz, 1);
     }
 
     // Simplify and smooth
@@ -470,29 +449,75 @@ export function compactRoads(map, snapDist) {
     road.polyline = deduped;
   }
 
-  // --- Pass 2: Remove duplicate roads with same endpoints ---
-  // Key by normalized start+end position
+  // --- Pass 2: Remove duplicate/parallel roads ---
+  // Two roads are duplicates if they share both endpoints (after snapping).
+  // Two roads are parallel if they share one endpoint and the other endpoints
+  // are within snapDist of each other.
+  const toRemove = new Set();
+
+  // Normalize endpoint pair for a road (direction-agnostic)
+  function endpointKey(road) {
+    const s = road.polyline[0], e = road.polyline[road.polyline.length - 1];
+    return s.x < e.x || (s.x === e.x && s.z <= e.z)
+      ? `${s.x},${s.z}-${e.x},${e.z}`
+      : `${e.x},${e.z}-${s.x},${s.z}`;
+  }
+
+  // 2a: Exact endpoint duplicates
   const roadsByEndpoints = new Map();
   for (const road of roads) {
     if (road.polyline.length < 2) continue;
-    const s = road.polyline[0];
-    const e = road.polyline[road.polyline.length - 1];
-    // Normalize: smaller coord first
-    const key = s.x < e.x || (s.x === e.x && s.z <= e.z)
-      ? `${s.x},${s.z}-${e.x},${e.z}`
-      : `${e.x},${e.z}-${s.x},${s.z}`;
+    const key = endpointKey(road);
     if (!roadsByEndpoints.has(key)) roadsByEndpoints.set(key, []);
     roadsByEndpoints.get(key).push(road);
   }
 
-  const toRemove = new Set();
   for (const [, group] of roadsByEndpoints) {
     if (group.length <= 1) continue;
-    // Keep the road with best hierarchy
     group.sort((a, b) =>
       (HIER_RANK[a.hierarchy] || 9) - (HIER_RANK[b.hierarchy] || 9));
     for (let i = 1; i < group.length; i++) {
       toRemove.add(group[i].id);
+    }
+  }
+
+  // 2b: Near-parallel roads — share one endpoint, other endpoints close.
+  // Group roads by each endpoint they touch, then within each group
+  // find pairs whose OTHER endpoints are within snapDist.
+  const roadsByVertex = new Map(); // "x,z" → [{ road, otherEnd }]
+  for (const road of roads) {
+    if (road.polyline.length < 2 || toRemove.has(road.id)) continue;
+    const s = road.polyline[0], e = road.polyline[road.polyline.length - 1];
+    const sKey = `${s.x},${s.z}`, eKey = `${e.x},${e.z}`;
+
+    if (!roadsByVertex.has(sKey)) roadsByVertex.set(sKey, []);
+    roadsByVertex.get(sKey).push({ road, otherEnd: e });
+
+    if (!roadsByVertex.has(eKey)) roadsByVertex.set(eKey, []);
+    roadsByVertex.get(eKey).push({ road, otherEnd: s });
+  }
+
+  for (const [, entries] of roadsByVertex) {
+    if (entries.length <= 1) continue;
+    // For each pair sharing this vertex, check if other ends are close
+    for (let i = 0; i < entries.length; i++) {
+      if (toRemove.has(entries[i].road.id)) continue;
+      for (let j = i + 1; j < entries.length; j++) {
+        if (toRemove.has(entries[j].road.id)) continue;
+        const dx = entries[i].otherEnd.x - entries[j].otherEnd.x;
+        const dz = entries[i].otherEnd.z - entries[j].otherEnd.z;
+        if (dx * dx + dz * dz <= snapDistSq) {
+          // Keep the one with better hierarchy (or longer polyline if tied)
+          const ri = entries[i].road, rj = entries[j].road;
+          const rankI = HIER_RANK[ri.hierarchy] || 9;
+          const rankJ = HIER_RANK[rj.hierarchy] || 9;
+          if (rankI <= rankJ) {
+            toRemove.add(rj.id);
+          } else {
+            toRemove.add(ri.id);
+          }
+        }
+      }
     }
   }
 
@@ -525,4 +550,308 @@ export function rebuildGraphFromRoads(map) {
 
   // Compact graph nodes too
   map.graph.compact(map.cellSize * 1.5);
+}
+
+// ============================================================
+// Crossing edge resolution
+// ============================================================
+
+/**
+ * Resolve crossing edges by splitting both at the intersection point,
+ * creating a proper junction node where roads cross.
+ *
+ * Operates on the PlanarGraph only.
+ *
+ * @param {import('../core/FeatureMap.js').FeatureMap} map
+ */
+export function resolveCrossingEdges(map) {
+  const graph = map.graph;
+
+  for (let iter = 0; iter < 50; iter++) {
+    const crossings = graph.detectCrossingEdges();
+    if (crossings.length === 0) break;
+
+    // Process one crossing at a time (splitting changes edge IDs)
+    const { edgeA, edgeB, x, z } = crossings[0];
+    if (!graph.getEdge(edgeA) || !graph.getEdge(edgeB)) continue;
+
+    // Split edge A at the crossing point → new node
+    const nodeA = graph.splitEdge(edgeA, x, z);
+
+    // Split edge B at the same point → another new node
+    // (edgeB ID is still valid since we only split edgeA)
+    const nodeB = graph.splitEdge(edgeB, x, z);
+
+    // Merge the two new nodes into one junction
+    if (nodeA !== nodeB) {
+      graph.mergeNodes(nodeB, nodeA);
+    }
+  }
+
+  // Clean up any short edges or duplicates from splits
+  graph.compact(map.cellSize * 1.5);
+}
+
+// ============================================================
+// Shallow angle resolution
+// ============================================================
+
+const DETECT_ANGLE_DEG = 10;   // flag pairs below this
+const BRANCH_ANGLE_RAD = 15 * Math.PI / 180; // merge until this divergence
+
+/**
+ * Resolve shallow angles by merging near-parallel edges.
+ *
+ * Three strategies, tried in order per shallow-angle pair:
+ *
+ * 1. **Divergence walk** — walk along the longer (base) edge; when the
+ *    direction to the shorter (merge) edge's far end diverges by > 15°,
+ *    split the base there and re-route the merge edge from the split point.
+ *
+ * 2. **Projection merge** — if the walk finds no divergence (collinear edges),
+ *    project the merge edge's far end onto the base polyline. If close, split
+ *    the base there and merge the far node into the split point.
+ *
+ * 3. **Stub removal** — if the merge edge is very short and projection didn't
+ *    apply, just remove it and merge its far node into the shared node.
+ *
+ * Operates on the PlanarGraph only — road features are unchanged.
+ *
+ * @param {import('../core/FeatureMap.js').FeatureMap} map
+ */
+export function resolveShallowAngles(map) {
+  const graph = map.graph;
+  const step = map.cellSize * 2;
+  const snapDist = map.cellSize * 3;
+  const compactDist = map.cellSize * 1.5;
+
+  // Outer loop: compact after each batch of resolutions can create new
+  // shallow angles from merged nodes. Repeat until stable.
+  for (let pass = 0; pass < 10; pass++) {
+    let batchResolved = false;
+
+    for (let iter = 0; iter < 50; iter++) {
+      const shallows = graph.detectShallowAngles(DETECT_ANGLE_DEG);
+      if (shallows.length === 0) break;
+
+      let resolved = false;
+
+      for (const { nodeId, edgeA: eAId, edgeB: eBId } of shallows) {
+        const eA = graph.getEdge(eAId);
+        const eB = graph.getEdge(eBId);
+        if (!eA || !eB) continue;
+
+        const polyA = _orientedPoly(graph, eA, nodeId);
+        const polyB = _orientedPoly(graph, eB, nodeId);
+        if (polyA.length < 2 || polyB.length < 2) continue;
+
+        const lenA = _polyLenCalc(polyA);
+        const lenB = _polyLenCalc(polyB);
+
+        // Base = longer edge (walk along this). Merge = shorter (absorbed).
+        let baseEdge, mergeEdge, basePoly, mergePoly, baseLen, mergeLen;
+        if (lenA >= lenB) {
+          baseEdge = eA; mergeEdge = eB; basePoly = polyA; mergePoly = polyB;
+          baseLen = lenA; mergeLen = lenB;
+        } else {
+          baseEdge = eB; mergeEdge = eA; basePoly = polyB; mergePoly = polyA;
+          baseLen = lenB; mergeLen = lenA;
+        }
+
+        const mergeFarId = mergeEdge.from === nodeId ? mergeEdge.to : mergeEdge.from;
+        const mergeFar = graph.getNode(mergeFarId);
+        if (!mergeFar) continue;
+
+        // --- Strategy 1: Divergence walk ---
+        // Start walking at least compactDist+1 from shared node so the split
+        // point won't be merged back into the shared node by compact().
+        let splitDist = -1;
+        const sampleStep = Math.min(step, baseLen / 4);
+        const startDist = Math.max(sampleStep, compactDist + 1);
+
+        if (sampleStep >= 1 && baseLen > startDist + sampleStep) {
+          for (let d = startDist; d < baseLen - sampleStep; d += sampleStep) {
+            const pt = _pointAtDist(basePoly, d);
+            const fwd = _pointAtDist(basePoly, Math.min(d + sampleStep, baseLen));
+            if (!pt || !fwd) continue;
+
+            const baseAng = Math.atan2(fwd.x - pt.x, fwd.z - pt.z);
+            const mergeAng = Math.atan2(mergeFar.x - pt.x, mergeFar.z - pt.z);
+
+            let diff = Math.abs(baseAng - mergeAng);
+            if (diff > Math.PI) diff = 2 * Math.PI - diff;
+
+            if (diff >= BRANCH_ANGLE_RAD && diff <= Math.PI - BRANCH_ANGLE_RAD) {
+              splitDist = d;
+              break;
+            }
+          }
+        }
+
+        if (splitDist >= 0) {
+          const splitPt = _pointAtDist(basePoly, splitDist);
+          if (!splitPt) continue;
+
+          const newNodeId = graph.splitEdge(baseEdge.id, splitPt.x, splitPt.z);
+          graph._removeEdge(mergeEdge.id);
+
+          if (newNodeId !== mergeFarId && !graph.neighbors(newNodeId).includes(mergeFarId)) {
+            const trimmedPts = _trimWeakPoly(mergePoly, splitDist);
+            graph.addEdge(newNodeId, mergeFarId, {
+              points: trimmedPts,
+              width: mergeEdge.width,
+              hierarchy: mergeEdge.hierarchy,
+            });
+          }
+          resolved = true;
+          batchResolved = true;
+          break;
+        }
+
+        // --- Strategy 2: Projection merge (collinear / stub) ---
+        const proj = _projectOntoPolyline(basePoly, mergeFar.x, mergeFar.z);
+
+        if (proj && proj.dist < snapDist) {
+          graph._removeEdge(mergeEdge.id);
+
+          // If projection is near an endpoint (within compact radius),
+          // merge into that endpoint to avoid compact undoing the split.
+          const baseFarId = baseEdge.from === nodeId ? baseEdge.to : baseEdge.from;
+
+          if (proj.distAlong <= compactDist) {
+            // Near shared node: merge far node into shared node
+            if (mergeFarId !== nodeId) {
+              graph.mergeNodes(mergeFarId, nodeId);
+            }
+          } else if (proj.distAlong >= baseLen - compactDist) {
+            // Near base far end: merge far node into base far endpoint
+            if (mergeFarId !== baseFarId) {
+              graph.mergeNodes(mergeFarId, baseFarId);
+            }
+          } else {
+            // Interior: split base, merge far node into split point
+            const splitPt = _pointAtDist(basePoly, proj.distAlong);
+            const newNodeId = graph.splitEdge(baseEdge.id, splitPt.x, splitPt.z);
+            if (newNodeId !== mergeFarId) {
+              graph.mergeNodes(mergeFarId, newNodeId);
+            }
+          }
+          resolved = true;
+          batchResolved = true;
+          break;
+        }
+
+        // --- Strategy 3: Remove very short stub ---
+        if (mergeLen < snapDist) {
+          graph._removeEdge(mergeEdge.id);
+          if (graph.degree(mergeFarId) === 0) {
+            graph.removeNode(mergeFarId);
+          }
+          resolved = true;
+          batchResolved = true;
+          break;
+        }
+      }
+
+      if (!resolved) break;
+    }
+
+    // Clean up duplicates/near-nodes created by merges in this pass.
+    // Compact can merge nearby nodes, potentially creating new shallow
+    // angles. Loop until none remain (or pass limit reached).
+    graph.compact(compactDist);
+
+    if (graph.detectShallowAngles(DETECT_ANGLE_DEG).length === 0) break;
+  }
+}
+
+/** Get edge polyline oriented so it starts at the given node. */
+function _orientedPoly(graph, edge, fromNodeId) {
+  const poly = graph.edgePolyline(edge.id);
+  if (edge.from !== fromNodeId) poly.reverse();
+  return poly;
+}
+
+/** Total length of a polyline. */
+function _polyLenCalc(poly) {
+  let len = 0;
+  for (let i = 0; i < poly.length - 1; i++) {
+    const dx = poly[i + 1].x - poly[i].x;
+    const dz = poly[i + 1].z - poly[i].z;
+    len += Math.sqrt(dx * dx + dz * dz);
+  }
+  return len;
+}
+
+/** Interpolate a point at a given distance along a polyline. */
+function _pointAtDist(poly, dist) {
+  let remaining = dist;
+  for (let i = 0; i < poly.length - 1; i++) {
+    const dx = poly[i + 1].x - poly[i].x;
+    const dz = poly[i + 1].z - poly[i].z;
+    const segLen = Math.sqrt(dx * dx + dz * dz);
+    if (remaining <= segLen + 1e-9) {
+      const t = segLen > 0 ? remaining / segLen : 0;
+      return { x: poly[i].x + t * dx, z: poly[i].z + t * dz };
+    }
+    remaining -= segLen;
+  }
+  return poly[poly.length - 1];
+}
+
+/**
+ * Project a point onto a polyline.
+ * @returns {{ dist: number, distAlong: number }} perpendicular distance and distance along polyline
+ */
+function _projectOntoPolyline(poly, px, pz) {
+  let bestDist = Infinity;
+  let bestAlong = 0;
+  let along = 0;
+
+  for (let i = 0; i < poly.length - 1; i++) {
+    const ax = poly[i].x, az = poly[i].z;
+    const bx = poly[i + 1].x, bz = poly[i + 1].z;
+    const dx = bx - ax, dz = bz - az;
+    const segLen = Math.sqrt(dx * dx + dz * dz);
+
+    if (segLen < 1e-9) { along += segLen; continue; }
+
+    let t = ((px - ax) * dx + (pz - az) * dz) / (segLen * segLen);
+    t = Math.max(0, Math.min(1, t));
+
+    const projX = ax + t * dx, projZ = az + t * dz;
+    const d = Math.sqrt((px - projX) ** 2 + (pz - projZ) ** 2);
+
+    if (d < bestDist) {
+      bestDist = d;
+      bestAlong = along + t * segLen;
+    }
+    along += segLen;
+  }
+
+  return { dist: bestDist, distAlong: bestAlong };
+}
+
+/**
+ * Trim the initial shared portion of the weak polyline.
+ * Skip first `skipDist` of distance, return remaining interior points
+ * (excluding endpoints which become graph nodes).
+ */
+function _trimWeakPoly(poly, skipDist) {
+  const result = [];
+  let dist = 0;
+  let pastMerge = false;
+
+  for (let i = 1; i < poly.length - 1; i++) {
+    const dx = poly[i].x - poly[i - 1].x;
+    const dz = poly[i].z - poly[i - 1].z;
+    dist += Math.sqrt(dx * dx + dz * dz);
+
+    if (dist > skipDist) pastMerge = true;
+    if (pastMerge) {
+      result.push({ x: poly[i].x, z: poly[i].z });
+    }
+  }
+
+  return result;
 }

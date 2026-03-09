@@ -20,9 +20,9 @@ describe('OffsetInfill', () => {
     expect(map.roads.length).toBeGreaterThan(0);
     expect(map.graph.edges.size).toBeGreaterThan(0);
 
-    // All roads from tick 1 should be skeleton roads
+    // All roads from tick 1 should be skeleton or bridge roads
     for (const road of map.roads) {
-      expect(road.source).toBe('skeleton');
+      expect(['skeleton', 'bridge']).toContain(road.source);
     }
   });
 

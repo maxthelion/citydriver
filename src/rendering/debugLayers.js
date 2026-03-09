@@ -193,6 +193,20 @@ export function renderComposite(ctx, map) {
     }
   }
 
+  // Regional settlement markers (colored by tier)
+  if (map.regionalSettlements) {
+    for (const s of map.regionalSettlements) {
+      const r = s.tier === 1 ? 6 : s.tier === 2 ? 4 : 3;
+      ctx.fillStyle = s.tier === 1 ? '#ff0000' : s.tier === 2 ? '#ff8800' : '#ffff00';
+      ctx.beginPath();
+      ctx.arc(s.cityGx, s.cityGz, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
+  }
+
   // Nucleus markers
   if (map.nuclei) {
     const typeColors = {
@@ -237,14 +251,42 @@ export function renderPathCost(ctx, map, preset = 'growth') {
     }
   }
 
+  // Use log scale so road discount is visible against flat terrain
+  const logMax = Math.log1p(maxCost);
+
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
       const idx = gz * width + gx;
       if (costs[idx] < 0) {
-        ctx.fillStyle = '#330000';
+        ctx.fillStyle = '#000';
       } else {
-        ctx.fillStyle = heatColor(costs[idx] / (maxCost || 1));
+        const v = 1 - Math.log1p(costs[idx]) / (logMax || 1);
+        ctx.fillStyle = gray(v);
       }
+      ctx.fillRect(gx, gz, 1, 1);
+    }
+  }
+}
+
+/**
+ * Land value heatmap (warm = high value, cool = low).
+ */
+export function renderLandValue(ctx, map) {
+  const { width, height } = map;
+
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      if (map.waterMask.get(gx, gz) > 0) {
+        ctx.fillStyle = '#1a3355';
+        ctx.fillRect(gx, gz, 1, 1);
+        continue;
+      }
+      const v = map.landValue.get(gx, gz);
+      // Purple (low) → orange (mid) → yellow (high)
+      const r = Math.round(Math.min(255, v * 400));
+      const g = Math.round(Math.min(255, v * v * 300));
+      const b = Math.round(Math.max(0, 80 - v * 200));
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.fillRect(gx, gz, 1, 1);
     }
   }
@@ -255,6 +297,100 @@ export function renderPathCost(ctx, map, preset = 'growth') {
  */
 export function renderNuclei(ctx, map) {
   renderComposite(ctx, map);
+}
+
+/**
+ * Road popularity: brighter = more original A* paths share this cell.
+ */
+export function renderRoadPopularity(ctx, map) {
+  const { width, height } = map;
+  if (!map.roadPopularity) return;
+
+  // Find max popularity for normalization
+  let maxPop = 1;
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      const v = map.roadPopularity.get(gx, gz);
+      if (v > maxPop) maxPop = v;
+    }
+  }
+
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      if (map.waterMask.get(gx, gz) > 0) {
+        ctx.fillStyle = '#0a1a2e';
+      } else {
+        const pop = map.roadPopularity.get(gx, gz);
+        if (pop === 0) {
+          ctx.fillStyle = '#111';
+        } else {
+          // Yellow-orange heat: more popular = brighter
+          const t = pop / maxPop;
+          const r = Math.round(255 * Math.min(1, t * 2));
+          const g = Math.round(200 * Math.min(1, t * 1.5));
+          const b = Math.round(50 * t);
+          ctx.fillStyle = `rgb(${r},${g},${b})`;
+        }
+      }
+      ctx.fillRect(gx, gz, 1, 1);
+    }
+  }
+}
+
+/**
+ * Water depth: distance from land into water. Brighter = deeper.
+ */
+export function renderWaterDepth(ctx, map) {
+  const { width, height } = map;
+  if (!map.waterDepth) return;
+
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      if (map.waterMask.get(gx, gz) === 0) {
+        ctx.fillStyle = '#ddeedd';
+      } else {
+        const depth = map.waterDepth.get(gx, gz);
+        // Shallow = bright cyan, deep = dark blue
+        const t = Math.min(1, depth / 10);
+        const r = Math.round(30 * (1 - t));
+        const g = Math.round(200 * (1 - t) + 40);
+        const b = Math.round(220 - 100 * t);
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+      }
+      ctx.fillRect(gx, gz, 1, 1);
+    }
+  }
+}
+
+/**
+ * Road sources: red = anchor (regional imports), green = MST, blue = extras.
+ */
+export function renderRoadSources(ctx, map) {
+  const { width, height } = map;
+
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      // Dark base
+      if (map.waterMask.get(gx, gz) > 0) {
+        ctx.fillStyle = '#0a1a2e';
+      } else {
+        ctx.fillStyle = '#1a1a1a';
+      }
+      ctx.fillRect(gx, gz, 1, 1);
+
+      // Overlay road sources (priority: anchor > mst > extra)
+      if (map.debugAnchorGrid && map.debugAnchorGrid.get(gx, gz) > 0) {
+        ctx.fillStyle = '#ff4444';
+        ctx.fillRect(gx, gz, 1, 1);
+      } else if (map.debugMstGrid && map.debugMstGrid.get(gx, gz) > 0) {
+        ctx.fillStyle = '#44ff44';
+        ctx.fillRect(gx, gz, 1, 1);
+      } else if (map.debugExtraGrid && map.debugExtraGrid.get(gx, gz) > 0) {
+        ctx.fillStyle = '#4488ff';
+        ctx.fillRect(gx, gz, 1, 1);
+      }
+    }
+  }
 }
 
 /**
@@ -269,7 +405,11 @@ export const LAYERS = [
   { name: 'Water Type', render: renderWaterType },
   { name: 'Bridge Grid', render: renderBridgeGrid },
   { name: 'Road Grid', render: renderRoadGrid },
+  { name: 'Land Value', render: renderLandValue },
   { name: 'Nuclei', render: renderNuclei },
   { name: 'Path Cost (growth)', render: (ctx, map) => renderPathCost(ctx, map, 'growth') },
   { name: 'Path Cost (nucleus)', render: (ctx, map) => renderPathCost(ctx, map, 'nucleus') },
+  { name: 'Road Sources', render: renderRoadSources },
+  { name: 'Road Popularity', render: renderRoadPopularity },
+  { name: 'Water Depth', render: renderWaterDepth },
 ];

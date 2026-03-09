@@ -1,12 +1,19 @@
 /**
  * Debug viewer for city generation.
- * Shows the FeatureMap state with layer selection, tick controls, and seed input.
+ * Two modes:
+ *   - City overview: shows full FeatureMap with grid overlay. Minimap = region.
+ *   - Cell detail: zoomed schematic of a grid cell. Minimap = city overview.
+ * Click a grid cell to zoom in. Click "Back to City" or press Escape to zoom out.
  */
 
 import { setupCity } from '../city/setup.js';
 import { buildSkeleton } from '../city/skeleton.js';
 import { LAYERS } from '../rendering/debugLayers.js';
+import { renderMap, drawRivers, drawRoads, drawSettlements } from '../rendering/mapRenderer.js';
 import { SeededRandom } from '../core/rng.js';
+
+const GRID_DIVISIONS = 6; // city split into 6x6 cells
+const DETAIL_SCALE = 4;   // detail view renders at 4x grid resolution
 
 export class DebugScreen {
   constructor(container, layers, settlement, seed, onBack) {
@@ -19,6 +26,9 @@ export class DebugScreen {
     this.currentTick = -1;
     this.currentLayerIndex = 0;
     this._disposed = false;
+
+    // Cell detail state
+    this._selectedCell = null; // { col, row } or null = overview mode
 
     this._buildUI();
     this._generate();
@@ -35,7 +45,8 @@ export class DebugScreen {
     canvasArea.style.cssText = 'flex:1; display:flex; align-items:center; justify-content:center; padding:10px;';
 
     this.canvas = document.createElement('canvas');
-    this.canvas.style.cssText = 'image-rendering:pixelated; border:1px solid #444;';
+    this.canvas.style.cssText = 'image-rendering:pixelated; border:1px solid #444; cursor:crosshair;';
+    this.canvas.addEventListener('click', (e) => this._onCanvasClick(e));
     canvasArea.appendChild(this.canvas);
     wrapper.appendChild(canvasArea);
 
@@ -48,6 +59,12 @@ export class DebugScreen {
     title.style.cssText = 'font-size:16px; font-weight:bold; color:#88aaff;';
     title.textContent = 'V5 Debug Viewer';
     panel.appendChild(title);
+
+    // Minimap
+    this.minimapCanvas = document.createElement('canvas');
+    this.minimapCanvas.style.cssText = 'width:100%; aspect-ratio:1; border:1px solid #444; image-rendering:pixelated; cursor:crosshair;';
+    this.minimapCanvas.addEventListener('click', (e) => this._onMinimapClick(e));
+    panel.appendChild(this.minimapCanvas);
 
     // Seed controls
     const seedRow = document.createElement('div');
@@ -121,6 +138,14 @@ export class DebugScreen {
     wrapper.appendChild(panel);
     this.container.appendChild(wrapper);
 
+    // Escape key to zoom out
+    this._onKeyDown = (e) => {
+      if (e.key === 'Escape' && this._selectedCell) {
+        this._selectCell(null);
+      }
+    };
+    document.addEventListener('keydown', this._onKeyDown);
+
     this._updateLayerButtons();
   }
 
@@ -142,9 +167,19 @@ export class DebugScreen {
     const rng = new SeededRandom(this.seed);
     this.map = setupCity(this.layers, this.settlement, rng.fork('city'));
     this.currentTick = 0;
+    this._selectedCell = null;
     this.tickLabel.textContent = 'Tick: 0 (setup)';
+
+    const url = new URL(location.href);
+    url.searchParams.set('seed', this.seed);
+    url.searchParams.set('mode', 'debug');
+    url.searchParams.set('gx', this.settlement.gx);
+    url.searchParams.set('gz', this.settlement.gz);
+    history.replaceState(null, '', url);
+
     this._updateInfo();
     this._setupCanvas();
+    this._renderMinimap();
     this._render();
   }
 
@@ -157,7 +192,6 @@ export class DebugScreen {
       buildSkeleton(this.map);
       this.tickLabel.textContent = 'Tick: 1 (skeleton)';
     } else {
-      // Future: growth ticks
       this.tickLabel.textContent = `Tick: ${this.currentTick} (no growth yet)`;
     }
 
@@ -167,29 +201,88 @@ export class DebugScreen {
 
   _reset() {
     this.seed = parseInt(this.seedInput.value) || 42;
+    this._generate();
+  }
 
-    // Update URL
+  // --- Canvas setup ---
+
+  _setupCanvas() {
+    if (!this.map) return;
+
+    if (this._selectedCell) {
+      const cellW = Math.floor(this.map.width / GRID_DIVISIONS);
+      const cellH = Math.floor(this.map.height / GRID_DIVISIONS);
+      this.canvas.width = cellW * DETAIL_SCALE;
+      this.canvas.height = cellH * DETAIL_SCALE;
+      this.canvas.style.imageRendering = 'auto';
+    } else {
+      this.canvas.width = this.map.width;
+      this.canvas.height = this.map.height;
+      this.canvas.style.imageRendering = 'pixelated';
+    }
+
+    const maxDisplaySize = Math.min(window.innerWidth - 320, window.innerHeight - 40);
+    const scale = Math.max(1, Math.floor(maxDisplaySize / Math.max(this.canvas.width, this.canvas.height)));
+    this.canvas.style.width = `${this.canvas.width * scale}px`;
+    this.canvas.style.height = `${this.canvas.height * scale}px`;
+  }
+
+  // --- Click handling ---
+
+  _selectCell(cell) {
+    this._selectedCell = cell;
+    this._updateURL();
+    this._setupCanvas();
+    this._renderMinimap();
+    this._render();
+  }
+
+  _updateURL() {
     const url = new URL(location.href);
     url.searchParams.set('seed', this.seed);
     url.searchParams.set('mode', 'debug');
     url.searchParams.set('gx', this.settlement.gx);
     url.searchParams.set('gz', this.settlement.gz);
+    if (this._selectedCell) {
+      url.searchParams.set('col', this._selectedCell.col);
+      url.searchParams.set('row', this._selectedCell.row);
+    } else {
+      url.searchParams.delete('col');
+      url.searchParams.delete('row');
+    }
     history.replaceState(null, '', url);
-
-    this._generate();
   }
 
-  _setupCanvas() {
+  _onCanvasClick(e) {
     if (!this.map) return;
-    this.canvas.width = this.map.width;
-    this.canvas.height = this.map.height;
 
-    // Scale canvas for display
-    const maxDisplaySize = Math.min(window.innerWidth - 320, window.innerHeight - 40);
-    const scale = Math.floor(maxDisplaySize / Math.max(this.map.width, this.map.height));
-    this.canvas.style.width = `${this.map.width * Math.max(1, scale)}px`;
-    this.canvas.style.height = `${this.map.height * Math.max(1, scale)}px`;
+    if (this._selectedCell) {
+      // Detail view — click to go back to overview
+      this._selectCell(null);
+    } else {
+      // Overview — pick a grid cell
+      const rect = this.canvas.getBoundingClientRect();
+      const px = (e.clientX - rect.left) / rect.width;
+      const pz = (e.clientY - rect.top) / rect.height;
+      const col = Math.min(GRID_DIVISIONS - 1, Math.floor(px * GRID_DIVISIONS));
+      const row = Math.min(GRID_DIVISIONS - 1, Math.floor(pz * GRID_DIVISIONS));
+      this._selectCell({ col, row });
+    }
   }
+
+  _onMinimapClick(e) {
+    if (!this.map || !this._selectedCell) return;
+
+    // Minimap is showing city — click to change cell
+    const rect = this.minimapCanvas.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width;
+    const pz = (e.clientY - rect.top) / rect.height;
+    const col = Math.min(GRID_DIVISIONS - 1, Math.max(0, Math.floor(px * GRID_DIVISIONS)));
+    const row = Math.min(GRID_DIVISIONS - 1, Math.max(0, Math.floor(pz * GRID_DIVISIONS)));
+    this._selectCell({ col, row });
+  }
+
+  // --- Rendering ---
 
   _render() {
     if (!this.map || this._disposed) return;
@@ -197,11 +290,258 @@ export class DebugScreen {
     const ctx = this.canvas.getContext('2d');
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
+    if (this._selectedCell) {
+      this._renderDetail(ctx);
+    } else {
+      this._renderOverview(ctx);
+    }
+  }
+
+  _renderOverview(ctx) {
+    // Render current layer
     const layer = LAYERS[this.currentLayerIndex];
     if (layer && layer.render) {
       layer.render(ctx, this.map);
     }
+
+    // Draw grid overlay
+    const cellW = this.map.width / GRID_DIVISIONS;
+    const cellH = this.map.height / GRID_DIVISIONS;
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 0.5;
+    for (let i = 1; i < GRID_DIVISIONS; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * cellW, 0);
+      ctx.lineTo(i * cellW, this.map.height);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i * cellH);
+      ctx.lineTo(this.map.width, i * cellH);
+      ctx.stroke();
+    }
   }
+
+  _renderDetail(ctx) {
+    const { col, row } = this._selectedCell;
+    const cellW = Math.floor(this.map.width / GRID_DIVISIONS);
+    const cellH = Math.floor(this.map.height / GRID_DIVISIONS);
+    const startGx = col * cellW;
+    const startGz = row * cellH;
+    const S = DETAIL_SCALE;
+
+    // Draw the layer clipped to this cell, scaled up
+    const layer = LAYERS[this.currentLayerIndex];
+    if (layer && layer.render) {
+      const offscreen = document.createElement('canvas');
+      offscreen.width = this.map.width;
+      offscreen.height = this.map.height;
+      const offCtx = offscreen.getContext('2d');
+      layer.render(offCtx, this.map);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(offscreen, startGx, startGz, cellW, cellH, 0, 0, cellW * S, cellH * S);
+    }
+
+    // World-space bounds of this cell
+    const map = this.map;
+    const wxMin = map.originX + startGx * map.cellSize;
+    const wzMin = map.originZ + startGz * map.cellSize;
+    const wxMax = wxMin + cellW * map.cellSize;
+    const wzMax = wzMin + cellH * map.cellSize;
+
+    // Helper: world coords to scaled canvas coords
+    const toLocal = (wx, wz) => ({
+      x: ((wx - wxMin) / map.cellSize) * S,
+      y: ((wz - wzMin) / map.cellSize) * S,
+    });
+
+    // Draw road polylines
+    for (const road of map.roads) {
+      if (!road.polyline || road.polyline.length < 2) continue;
+
+      let inView = false;
+      for (const p of road.polyline) {
+        if (p.x >= wxMin && p.x <= wxMax && p.z >= wzMin && p.z <= wzMax) {
+          inView = true;
+          break;
+        }
+      }
+      if (!inView) continue;
+
+      const hierColors = { arterial: '#ff6644', collector: '#ffaa44', local: '#cccc88', structural: '#aaaa66' };
+      ctx.strokeStyle = hierColors[road.hierarchy] || '#cccc88';
+      const baseWidth = road.hierarchy === 'arterial' ? 2 : road.hierarchy === 'collector' ? 1.5 : 1;
+      ctx.lineWidth = baseWidth * S;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      ctx.beginPath();
+      for (let i = 0; i < road.polyline.length; i++) {
+        const p = toLocal(road.polyline[i].x, road.polyline[i].z);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+    }
+
+    // Draw river polylines
+    for (const river of map.rivers) {
+      if (!river.polyline || river.polyline.length < 2) continue;
+
+      let inView = false;
+      for (const p of river.polyline) {
+        if (p.x >= wxMin && p.x <= wxMax && p.z >= wzMin && p.z <= wzMax) {
+          inView = true;
+          break;
+        }
+      }
+      if (!inView) continue;
+
+      ctx.strokeStyle = '#4488cc';
+      ctx.lineWidth = 3 * S;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (let i = 0; i < river.polyline.length; i++) {
+        const p = toLocal(river.polyline[i].x, river.polyline[i].z);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+    }
+
+    // Draw nucleus markers
+    const typeColors = {
+      waterfront: '#00aaff', market: '#ff4444', hilltop: '#ffaa00',
+      valley: '#44cc44', roadside: '#aa44ff', suburban: '#888888',
+    };
+    for (const n of map.nuclei) {
+      const wx = map.originX + n.gx * map.cellSize;
+      const wz = map.originZ + n.gz * map.cellSize;
+      if (wx < wxMin || wx > wxMax || wz < wzMin || wz > wzMax) continue;
+
+      const p = toLocal(wx, wz);
+      ctx.fillStyle = typeColors[n.type] || '#ffffff';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 4 * S, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // Draw regional settlement markers (colored by tier)
+    if (map.regionalSettlements) {
+      for (const s of map.regionalSettlements) {
+        const wx = map.originX + s.cityGx * map.cellSize;
+        const wz = map.originZ + s.cityGz * map.cellSize;
+        if (wx < wxMin || wx > wxMax || wz < wzMin || wz > wzMax) continue;
+
+        const p = toLocal(wx, wz);
+        const r = (s.tier === 1 ? 8 : s.tier === 2 ? 6 : 4) * S;
+        ctx.fillStyle = s.tier === 1 ? '#ff0000' : s.tier === 2 ? '#ff8800' : '#ffff00';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5 * S;
+        ctx.stroke();
+      }
+    }
+
+    // Draw graph nodes
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    for (const [, node] of map.graph.nodes) {
+      if (node.x < wxMin || node.x > wxMax || node.z < wzMin || node.z > wzMax) continue;
+      const p = toLocal(node.x, node.z);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 2 * S, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Label
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = `${12 * S}px monospace`;
+    ctx.fillText(`Cell (${col},${row})  [Esc/click to go back]`, 4 * S, 16 * S);
+  }
+
+  // --- Minimap ---
+
+  _renderMinimap() {
+    if (!this.layers || !this.map) return;
+
+    if (this._selectedCell) {
+      this._renderCityMinimap();
+    } else {
+      this._renderRegionMinimap();
+    }
+  }
+
+  _renderRegionMinimap() {
+    renderMap(this.layers, this.minimapCanvas);
+    const ctx = this.minimapCanvas.getContext('2d');
+    drawRivers(this.layers, ctx);
+    drawRoads(this.layers, ctx);
+    drawSettlements(this.layers, ctx);
+
+    // Draw city bounding box
+    const params = this.layers.getData('params');
+    const rcs = params.cellSize;
+    const map = this.map;
+
+    const x0 = map.originX / rcs;
+    const z0 = map.originZ / rcs;
+    const x1 = (map.originX + map.width * map.cellSize) / rcs;
+    const z1 = (map.originZ + map.height * map.cellSize) / rcs;
+
+    ctx.strokeStyle = '#ff4444';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x0, z0, x1 - x0, z1 - z0);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(this.settlement.gx, this.settlement.gz, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  _renderCityMinimap() {
+    const map = this.map;
+
+    // Render the current layer at minimap resolution
+    this.minimapCanvas.width = map.width;
+    this.minimapCanvas.height = map.height;
+    const ctx = this.minimapCanvas.getContext('2d');
+
+    const layer = LAYERS[this.currentLayerIndex];
+    if (layer && layer.render) {
+      layer.render(ctx, map);
+    }
+
+    // Draw grid
+    const cellW = map.width / GRID_DIVISIONS;
+    const cellH = map.height / GRID_DIVISIONS;
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 0.5;
+    for (let i = 1; i < GRID_DIVISIONS; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * cellW, 0);
+      ctx.lineTo(i * cellW, map.height);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i * cellH);
+      ctx.lineTo(map.width, i * cellH);
+      ctx.stroke();
+    }
+
+    // Highlight selected cell
+    const { col, row } = this._selectedCell;
+    ctx.strokeStyle = '#ff4444';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(col * cellW, row * cellH, cellW, cellH);
+  }
+
+  // --- Info ---
 
   _updateInfo() {
     if (!this.map) return;
@@ -213,6 +553,10 @@ export class DebugScreen {
     info.push(`Rivers: ${this.map.rivers.length}`);
     info.push(`Nuclei: ${this.map.nuclei.length}`);
     info.push(`Graph: ${this.map.graph.nodes.size} nodes, ${this.map.graph.edges.size} edges`);
+    const slivers = this.map.graph.detectSliverFaces();
+    const crossings = this.map.graph.detectCrossingEdges();
+    const shallow = this.map.graph.detectShallowAngles(5);
+    info.push(`Slivers: ${slivers.length}, Crossings: ${crossings.length}, Shallow: ${shallow.length}`);
 
     if (this.map.nuclei.length > 0) {
       const typeCounts = {};
@@ -231,6 +575,9 @@ export class DebugScreen {
 
   dispose() {
     this._disposed = true;
+    if (this._onKeyDown) {
+      document.removeEventListener('keydown', this._onKeyDown);
+    }
     this.container.innerHTML = '';
   }
 }

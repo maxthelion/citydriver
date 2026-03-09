@@ -92,11 +92,12 @@ describe('FeatureMap', () => {
       ],
     });
 
-    // Add road crossing vertically
+    // Add bridge road crossing vertically
     map.addFeature('road', {
       polyline: [{ x: 250, z: 0 }, { x: 250, z: 500 }],
       width: 10,
       hierarchy: 'collector',
+      bridge: true,
     });
 
     let bridgeCells = 0;

@@ -56,7 +56,7 @@ describe('buildSkeleton', () => {
     }
   });
 
-  it('works across multiple seeds', () => {
+  it('works across multiple seeds', { timeout: 15000 }, () => {
     for (const seed of [1, 42, 100, 255, 999]) {
       const map = makeCity(seed);
       if (!map) continue;

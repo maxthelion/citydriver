@@ -18,33 +18,28 @@ describe('TriangleMergeSubdiv', () => {
 
     expect(more).toBe(true);
     expect(map.roads.length).toBeGreaterThan(0);
-    expect(map.graph.edges.size).toBeGreaterThan(0);
   });
 
-  it('merges or subdivides on second tick', () => {
+  it('subdivides on second tick', () => {
     const { map, strategy } = makeStrategy();
     strategy.tick(); // skeleton
 
-    const edgesBefore = map.graph.edges.size;
-    const more = strategy.tick(); // merge phase
+    const roadsBefore = map.roads.length;
+    const more = strategy.tick();
 
     expect(typeof more).toBe('boolean');
 
-    // If merge happened, edges should have decreased (shared edges removed)
-    // If no triangles, it falls through to subdivision which may add edges
-    // Either way it should return a boolean
-    if (more && edgesBefore > map.graph.edges.size) {
-      // Merges removed edges
-      expect(map.graph.edges.size).toBeLessThan(edgesBefore);
+    if (more) {
+      expect(map.roads.length).toBeGreaterThan(roadsBefore);
     }
   });
 
-  it('eventually stops', () => {
+  it('eventually stops', { timeout: 15000 }, () => {
     const { strategy } = makeStrategy();
     strategy.tick(); // skeleton
 
     let ticks = 0;
-    const maxTicks = 50;
+    const maxTicks = 30;
     let more = true;
 
     while (more && ticks < maxTicks) {

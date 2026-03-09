@@ -32,7 +32,7 @@ describe('Regional Pipeline', () => {
     // Should have some variation
     expect(max - min).toBeGreaterThan(5);
     // But not extreme
-    expect(max).toBeLessThan(500);
+    expect(max).toBeLessThan(2500);
     expect(min).toBeGreaterThan(-500);
   });
 

@@ -1,5 +1,5 @@
 /**
- * A2. Terrain generation driven by geology.
+ * A2. Terrain generation driven by geology and tectonics.
  * Hard rock = highlands, soft rock = lowlands.
  * Geological boundaries create escarpments.
  * Per-rock noise character: granite = rugged, chalk = smooth, clay = flat.
@@ -10,14 +10,115 @@ import { PerlinNoise } from '../core/noise.js';
 import { smoothstep, clamp } from '../core/math.js';
 import { getRockInfo } from './generateGeology.js';
 
+// --- Tuning constants ---
+
+// Resistance smoothing iterations (box blur)
+const RESISTANCE_SMOOTH_PASSES = 6;
+
+// Per-rock noise modulation: frequency = BASE + resistance * SCALE
+const ROCK_FREQ_BASE = 0.5;
+const ROCK_FREQ_SCALE = 1.0;
+const ROCK_AMP_BASE = 0.3;
+const ROCK_AMP_SCALE = 0.7;
+
+// Continental tilt (meters): BASE + intensity * SCALE
+const TILT_BASE = 80;
+const TILT_SCALE = 220;
+
+// Base elevation from geology: BASE + smoothResistance * SCALE
+const BASE_HEIGHT_MIN = 10;
+const BASE_HEIGHT_SCALE = 25;
+
+// Mountain ridge noise parameters
+const MOUNTAIN_WARP_FREQ = 2;
+const MOUNTAIN_WARP_AMP = 0.15;
+const MOUNTAIN_WARP_OCTAVES = 3;
+const MOUNTAIN_STRETCH_ALONG = 0.4;  // low freq along ridges (elongated)
+const MOUNTAIN_STRETCH_ACROSS = 1.0; // higher freq across ridges (sharper)
+const MOUNTAIN_NOISE_OCTAVES = 4;
+const MOUNTAIN_NOISE_LACUNARITY = 2.2;
+const MOUNTAIN_NOISE_GAIN = 2.0;
+const MOUNTAIN_NOISE_OFFSET = 1.0;
+const MOUNTAIN_NOISE_H = 0.85;
+const MOUNTAIN_NOISE_FREQ = 1.8;
+
+// Asymmetric profile
+const ASYM_OFFSET = 0.03;        // normalized sample offset
+const ASYM_MAX_STRENGTH = 0.3;   // blended with intensity
+
+// Mountain field centering (fraction of amplitude to subtract)
+const MOUNTAIN_CENTER_FRAC = 0.35;
+
+// Detail modulation: BASE + mountainInfluence * detailRidgeStrength * SCALE
+const DETAIL_MOD_BASE = 0.3;
+const DETAIL_MOD_SCALE = 0.7;
+
+// Large-scale terrain undulation
+const LARGE_TERRAIN_FREQ = 3;
+const LARGE_TERRAIN_OCTAVES = 4;
+const LARGE_TERRAIN_PERSISTENCE = 0.45;
+const LARGE_TERRAIN_AMP_BASE = 40;
+const LARGE_TERRAIN_AMP_ROCK = 30;  // scaled by smoothResistance
+const LARGE_TERRAIN_AMP_INTENSITY = 60; // scaled by intensity
+
+// Detail ridge noise
+const DETAIL_WARP_FREQ = 3;
+const DETAIL_WARP_AMP = 0.25;
+const DETAIL_WARP_OCTAVES = 3;
+const DETAIL_RIDGE_OCTAVES = 5;
+const DETAIL_RIDGE_LACUNARITY = 2.1;
+const DETAIL_RIDGE_GAIN = 2.0;
+const DETAIL_RIDGE_OFFSET = 1.0;
+const DETAIL_RIDGE_H = 0.9;
+const DETAIL_RIDGE_FREQ = 6;
+const DETAIL_RIDGE_AMP_BASE = 100;
+const DETAIL_RIDGE_AMP_SCALE = 400;  // 100–500m with intensity
+const DETAIL_RIDGE_CENTER_FRAC = 0.4;
+
+// Medium-scale detail
+const MED_DETAIL_FREQ = 8;
+const MED_DETAIL_OCTAVES = 3;
+const MED_DETAIL_PERSISTENCE = 0.4;
+const MED_DETAIL_AMP = 20;
+
+// Small-scale roughness
+const SMALL_DETAIL_FREQ = 20;
+const SMALL_DETAIL_AMP = 8;
+
+// Ridge blend with geology (smoothstep range on resistance)
+const RIDGE_BLEND_LOW = 0.25;
+const RIDGE_BLEND_HIGH = 0.7;
+
+// Coast field: contour-based coastline shaping
+const COAST_BAY_WARP_FREQ = 2;     // domain warp for organic shapes
+const COAST_BAY_WARP_AMP = 0.12;
+const COAST_BAY_WARP_OCTAVES = 3;
+const COAST_BAY_FREQ = 4;          // large bays/headlands
+const COAST_BAY_OCTAVES = 4;
+const COAST_BAY_PERSISTENCE = 0.5;
+const COAST_BAY_AMP = 0.13;        // normalized — ~13% of map width
+const COAST_DETAIL_FREQ = 10;      // smaller coastal indentations
+const COAST_DETAIL_AMP = 0.03;
+const COAST_GEO_STRENGTH = 0.05;   // geology headland/bay influence
+const COAST_FALLOFF_WIDTH = 0.06;  // how quickly elevation drops into ocean
+const SUB_SEA_DEPTH_BASE = 10;
+const SUB_SEA_DEPTH_SCALE = 20;
+
+// Power curve: BASE + intensity * SCALE exponent
+const POWER_CURVE_BASE = 1.3;
+const POWER_CURVE_SCALE = 0.4;
+
+// Escarpment strength
+const ESCARP_RESISTANCE_THRESHOLD = 0.15;
+const ESCARP_STRENGTH_MULT = 8;
+
 /**
- * Generate terrain (elevation and slope) driven by geology.
- *
  * @param {object} params
  * @param {number} params.width
  * @param {number} params.height
  * @param {number} [params.cellSize=50]
  * @param {number} [params.seaLevel=0]
+ * @param {object} [params.tectonics] - Tectonic context from generateTectonics
  * @param {Grid2D} geology.erosionResistance
  * @param {Grid2D} geology.rockType
  * @param {import('../core/rng.js').SeededRandom} rng
@@ -29,6 +130,7 @@ export function generateTerrain(params, geology, rng) {
     height,
     cellSize = 50,
     seaLevel = 0,
+    tectonics,
   } = params;
 
   const terrainRng = rng.fork('terrain');
@@ -36,6 +138,23 @@ export function generateTerrain(params, geology, rng) {
   const detailNoise = new PerlinNoise(terrainRng.fork('detail'));
   const ridgeNoise = new PerlinNoise(terrainRng.fork('ridge'));
   const warpNoise = new PerlinNoise(terrainRng.fork('warp'));
+  const mountainNoise = new PerlinNoise(terrainRng.fork('mountain'));
+  const mountainWarp = new PerlinNoise(terrainRng.fork('mountainWarp'));
+  const coastNoise = new PerlinNoise(terrainRng.fork('coast'));
+
+  // Tectonic context (defaults for backward compatibility)
+  const ridgeAngle = tectonics?.ridgeAngle ?? 0;
+  const ridgeAmplitude = tectonics?.ridgeAmplitude ?? 100;
+  const detailRidgeStrength = tectonics?.detailRidgeStrength ?? 0.6;
+  const asymmetryDir = tectonics?.asymmetryDir ?? { x: 1, z: 0 };
+  const intensity = tectonics?.intensity ?? 0.5;
+  const coastalShelfWidth = tectonics?.coastalShelfWidth ?? 0.2;
+
+  // Direction vectors for stretching noise along ridge axis
+  const ridgeDirX = Math.cos(ridgeAngle);  // along ridges
+  const ridgeDirZ = Math.sin(ridgeAngle);
+  const ridgePerpX = -ridgeDirZ;           // across ridges
+  const ridgePerpZ = ridgeDirX;
 
   const elevation = new Grid2D(width, height, { cellSize });
   const slope = new Grid2D(width, height, { cellSize });
@@ -48,14 +167,20 @@ export function generateTerrain(params, geology, rng) {
   for (let i = 0; i < width * height; i++) {
     smoothResistance.data[i] = erosionResistance.data[i];
   }
-  smoothElevation(smoothResistance, 6);
+  smoothElevation(smoothResistance, RESISTANCE_SMOOTH_PASSES);
 
-  // --- Per-rock noise character parameters ---
-  // Maps erosion resistance to noise frequency/amplitude multipliers:
-  //   Hard rock (granite, r~0.9): high frequency, high amplitude → rugged terrain
-  //   Medium rock (limestone, r~0.6): moderate freq/amp
-  //   Soft rock (chalk, r~0.3): low frequency, low amplitude → smooth rolling
-  //   Clay (r~0.2): very low → flat terrain
+  // Coast edges from tectonics or params
+  const coastEdges = tectonics?.coastEdges || params.coastEdges || [];
+
+  // Continental tilt height
+  const tiltHeight = TILT_BASE + intensity * TILT_SCALE;
+
+  // === Pre-compute coast field ===
+  // Contour-based coastline: positive = land, negative = ocean.
+  // The zero-crossing defines the coastline shape.
+  const coastField = _buildCoastField(
+    width, height, coastEdges, coastalShelfWidth, smoothResistance, coastNoise,
+  );
 
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
@@ -65,98 +190,121 @@ export function generateTerrain(params, geology, rng) {
       const nz = gz / height;
 
       // Per-rock noise modulation (sharp resistance for texture detail)
-      const freqMult = 0.5 + resistance * 1.0;
-      const ampMult = 0.3 + resistance * 0.7;
+      const freqMult = ROCK_FREQ_BASE + resistance * ROCK_FREQ_SCALE;
+      const ampMult = ROCK_AMP_BASE + resistance * ROCK_AMP_SCALE;
 
-      // Continental tilt: linear gradient from 0 at coast to 120 inland.
-      // Guarantees interior is always higher than coast at macro scale.
-      const coastEdges = params.coastEdges || [];
-      let coastDist = 1; // default: everything is "inland"
-      for (const edge of coastEdges) {
-        let d;
-        if (edge === 'west') d = nx;
-        else if (edge === 'east') d = 1 - nx;
-        else if (edge === 'north') d = nz;
-        else if (edge === 'south') d = 1 - nz;
-        else continue;
-        coastDist = Math.min(coastDist, d);
-      }
-      const tilt = coastDist * 120;
+      // Continental tilt from coast field (positive part only)
+      const cf = coastField.get(gx, gz);
+      const tilt = Math.max(0, cf) * tiltHeight;
 
-      // Base elevation: gentle lift on hard rock, but keep small so
-      // ridge noise shapes the mountains, not geology boundaries.
-      const baseHeight = 10 + smoothR * 25;
+      // Base elevation: gentle lift on hard rock
+      const baseHeight = BASE_HEIGHT_MIN + smoothR * BASE_HEIGHT_SCALE;
 
-      // Large-scale terrain undulation — mostly uniform so it doesn't
-      // create geology-shaped mounds. Slight resistance boost for variety.
-      const largeTerrain = noise.fbm(nx * 3, nz * 3, {
-        octaves: 4,
-        persistence: 0.45,
-        amplitude: 40 + smoothR * 30,
+      // === Large-scale mountain ranges (tectonic-driven) ===
+      const projAlong = nx * ridgeDirX + nz * ridgeDirZ;
+      const projAcross = nx * ridgePerpX + nz * ridgePerpZ;
+
+      // Domain warp for organic ridge shapes
+      const mWarpX = mountainWarp.fbm(nx * MOUNTAIN_WARP_FREQ, nz * MOUNTAIN_WARP_FREQ, {
+        octaves: MOUNTAIN_WARP_OCTAVES, amplitude: MOUNTAIN_WARP_AMP,
+      });
+      const mWarpZ = mountainWarp.fbm(nx * MOUNTAIN_WARP_FREQ + 5.7, nz * MOUNTAIN_WARP_FREQ + 3.3, {
+        octaves: MOUNTAIN_WARP_OCTAVES, amplitude: MOUNTAIN_WARP_AMP,
       });
 
-      // Domain-warped ridged multifractal for sharp mountain ridges.
-      // Stronger warp breaks circular patterns into elongated, organic ridgelines.
-      const warpX = warpNoise.fbm(nx * 3, nz * 3, { octaves: 3, amplitude: 0.25 });
-      const warpZ = warpNoise.fbm(nx * 3 + 7.3, nz * 3 + 3.1, { octaves: 3, amplitude: 0.25 });
-      const wnx = nx + warpX;
-      const wnz = nz + warpZ;
+      // Stretched coordinates: elongated along ridges, sharper across
+      const stretchedX = (projAlong * MOUNTAIN_STRETCH_ALONG + projAcross * MOUNTAIN_STRETCH_ACROSS) + mWarpX;
+      const stretchedZ = (projAlong * MOUNTAIN_STRETCH_ALONG - projAcross * MOUNTAIN_STRETCH_ACROSS) + mWarpZ;
 
-      const ridgeHeight = ridgeNoise.ridgedMultifractal(wnx, wnz, {
-        octaves: 5,
-        lacunarity: 2.1,
-        gain: 2.0,
-        offset: 1.0,
-        H: 0.9,
-        frequency: 6,
-        amplitude: 200,
+      const mountainField = mountainNoise.ridgedMultifractal(stretchedX, stretchedZ, {
+        octaves: MOUNTAIN_NOISE_OCTAVES,
+        lacunarity: MOUNTAIN_NOISE_LACUNARITY,
+        gain: MOUNTAIN_NOISE_GAIN,
+        offset: MOUNTAIN_NOISE_OFFSET,
+        H: MOUNTAIN_NOISE_H,
+        frequency: MOUNTAIN_NOISE_FREQ,
+        amplitude: ridgeAmplitude,
+      });
+
+      // Asymmetric profile: steeper on the compression-facing side
+      const asymNx = nx + asymmetryDir.x * ASYM_OFFSET;
+      const asymNz = nz + asymmetryDir.z * ASYM_OFFSET;
+      const asymProjAlong = asymNx * ridgeDirX + asymNz * ridgeDirZ;
+      const asymProjAcross = asymNx * ridgePerpX + asymNz * ridgePerpZ;
+      const asymStretchedX = (asymProjAlong * MOUNTAIN_STRETCH_ALONG + asymProjAcross * MOUNTAIN_STRETCH_ACROSS) + mWarpX;
+      const asymStretchedZ = (asymProjAlong * MOUNTAIN_STRETCH_ALONG - asymProjAcross * MOUNTAIN_STRETCH_ACROSS) + mWarpZ;
+
+      const mountainFieldOffset = mountainNoise.ridgedMultifractal(asymStretchedX, asymStretchedZ, {
+        octaves: MOUNTAIN_NOISE_OCTAVES,
+        lacunarity: MOUNTAIN_NOISE_LACUNARITY,
+        gain: MOUNTAIN_NOISE_GAIN,
+        offset: MOUNTAIN_NOISE_OFFSET,
+        H: MOUNTAIN_NOISE_H,
+        frequency: MOUNTAIN_NOISE_FREQ,
+        amplitude: ridgeAmplitude,
+      });
+
+      const asymStrength = ASYM_MAX_STRENGTH * intensity;
+      const mountainHeight = mountainField * (1 - asymStrength) + mountainFieldOffset * asymStrength;
+      const mountainCentered = mountainHeight - ridgeAmplitude * MOUNTAIN_CENTER_FRAC;
+
+      // === Detail terrain, modulated by mountain field ===
+      const mountainInfluence = clamp(mountainHeight / ridgeAmplitude, 0, 1);
+      const detailMod = DETAIL_MOD_BASE + mountainInfluence * detailRidgeStrength * DETAIL_MOD_SCALE;
+
+      // Large-scale terrain undulation
+      const largeTerrainAmp = (LARGE_TERRAIN_AMP_BASE + smoothR * LARGE_TERRAIN_AMP_ROCK + intensity * LARGE_TERRAIN_AMP_INTENSITY) * detailMod;
+      const largeTerrain = noise.fbm(nx * LARGE_TERRAIN_FREQ, nz * LARGE_TERRAIN_FREQ, {
+        octaves: LARGE_TERRAIN_OCTAVES,
+        persistence: LARGE_TERRAIN_PERSISTENCE,
+        amplitude: largeTerrainAmp,
+      });
+
+      // Domain-warped ridged multifractal for detail ridges
+      const warpX = warpNoise.fbm(nx * DETAIL_WARP_FREQ, nz * DETAIL_WARP_FREQ, {
+        octaves: DETAIL_WARP_OCTAVES, amplitude: DETAIL_WARP_AMP,
+      });
+      const warpZ = warpNoise.fbm(nx * DETAIL_WARP_FREQ + 7.3, nz * DETAIL_WARP_FREQ + 3.1, {
+        octaves: DETAIL_WARP_OCTAVES, amplitude: DETAIL_WARP_AMP,
+      });
+
+      const detailRidgeAmp = (DETAIL_RIDGE_AMP_BASE + intensity * DETAIL_RIDGE_AMP_SCALE) * detailMod;
+      const ridgeHeight = ridgeNoise.ridgedMultifractal(nx + warpX, nz + warpZ, {
+        octaves: DETAIL_RIDGE_OCTAVES,
+        lacunarity: DETAIL_RIDGE_LACUNARITY,
+        gain: DETAIL_RIDGE_GAIN,
+        offset: DETAIL_RIDGE_OFFSET,
+        H: DETAIL_RIDGE_H,
+        frequency: DETAIL_RIDGE_FREQ,
+        amplitude: detailRidgeAmp,
       });
 
       // Medium-scale detail — modulated by rock character
-      const medDetail = detailNoise.fbm(nx * 8 * freqMult, nz * 8 * freqMult, {
-        octaves: 3,
-        persistence: 0.4,
-        amplitude: 20 * ampMult,
+      const medDetail = detailNoise.fbm(nx * MED_DETAIL_FREQ * freqMult, nz * MED_DETAIL_FREQ * freqMult, {
+        octaves: MED_DETAIL_OCTAVES,
+        persistence: MED_DETAIL_PERSISTENCE,
+        amplitude: MED_DETAIL_AMP * ampMult,
       });
 
       // Small-scale roughness — rugged on hard rock, nearly absent on clay
-      const smallDetail = detailNoise.noise2D(nx * 20 * freqMult, nz * 20 * freqMult) * 8 * ampMult;
+      const smallDetail = detailNoise.noise2D(nx * SMALL_DETAIL_FREQ * freqMult, nz * SMALL_DETAIL_FREQ * freqMult) * SMALL_DETAIL_AMP * ampMult;
 
-      // Blend ridge character gradually using smoothstep over a wide resistance range.
-      // Ridge noise is always positive, so subtract approximate mean to avoid
-      // an elevation jump at the geological boundary.
-      const ridgeBlend = smoothstep(0.25, 0.7, smoothR);
-      const ridgeCentered = ridgeHeight - 80;
+      // Blend detail ridges with geology
+      const ridgeBlend = smoothstep(RIDGE_BLEND_LOW, RIDGE_BLEND_HIGH, smoothR);
+      const ridgeCentered = ridgeHeight - detailRidgeAmp * DETAIL_RIDGE_CENTER_FRAC;
       const terrainShape = largeTerrain + ridgeBlend * ridgeCentered;
-      let h = tilt + baseHeight + terrainShape + medDetail + smallDetail;
 
-      // Coastal falloff: geology-responsive.
-      // Hard rock (granite): narrow margin → cliffs and headlands
-      // Soft rock (clay): wide margin → gentle beaches and plains
-      let edgeFalloff = 0;
-      const baseMargin = 0.35 - smoothR * 0.3; // 0.35 (clay) → 0.05 (granite)
+      // Combine: tilt + base + mountains + detail
+      let h = tilt + baseHeight + mountainCentered + terrainShape + medDetail + smallDetail;
 
-      for (const edge of coastEdges) {
-        let edgeDist;
-        if (edge === 'north') edgeDist = nz;
-        else if (edge === 'south') edgeDist = 1 - nz;
-        else if (edge === 'west') edgeDist = nx;
-        else if (edge === 'east') edgeDist = 1 - nx;
-        else continue;
+      // Coastal falloff from coast field
+      // cf < 0 = ocean; ramp elevation down from coastline into ocean
+      const falloffWidth = COAST_FALLOFF_WIDTH + smoothR * COAST_FALLOFF_WIDTH;
+      const edgeFalloff = coastEdges.length > 0
+        ? clamp(smoothstep(falloffWidth, 0, cf), 0, 1)
+        : 0;
 
-        const noiseVal = noise.noise2D(
-          (edge === 'north' || edge === 'south') ? nx * 3 + 10 : nz * 3 + 10,
-          edge.charCodeAt(0) * 0.1,
-        );
-        const adjustedMargin = baseMargin + noiseVal * 0.08;
-
-        const falloff = smoothstep(adjustedMargin, 0.0, edgeDist);
-        edgeFalloff = Math.max(edgeFalloff, falloff);
-      }
-
-      // Hard rock drops steeply below sea level (deep water at cliffs);
-      // soft rock has a shallow submarine shelf.
-      const subSeaDepth = 10 + smoothR * 20;
+      const subSeaDepth = SUB_SEA_DEPTH_BASE + smoothR * SUB_SEA_DEPTH_SCALE;
       h = h * (1 - edgeFalloff) + seaLevel * edgeFalloff - edgeFalloff * subSeaDepth;
 
       elevation.set(gx, gz, h);
@@ -164,6 +312,7 @@ export function generateTerrain(params, geology, rng) {
   }
 
   // Power-curve: lift peaks, compress valleys for more dramatic relief
+  const powerExp = POWER_CURVE_BASE + intensity * POWER_CURVE_SCALE;
   let minH = Infinity, maxH = -Infinity;
   for (let i = 0; i < width * height; i++) {
     const v = elevation.data[i];
@@ -173,11 +322,10 @@ export function generateTerrain(params, geology, rng) {
   const rangeH = maxH - minH || 1;
   for (let i = 0; i < width * height; i++) {
     const normalized = (elevation.data[i] - minH) / rangeH;
-    elevation.data[i] = minH + Math.pow(normalized, 1.4) * rangeH;
+    elevation.data[i] = minH + Math.pow(normalized, powerExp) * rangeH;
   }
 
-  // Escarpments: smoothed resistance already creates gradual transitions.
-  // Only apply light escarpments at strong boundaries for extra definition.
+  // Escarpments at rock type boundaries
   applyEscarpments(elevation, rockType, erosionResistance, width, height);
 
   // Compute slope
@@ -194,12 +342,112 @@ export function generateTerrain(params, geology, rng) {
 }
 
 /**
+ * Build a coast field grid: positive = land, negative = ocean.
+ * The zero-crossing defines the coastline with organic bays and headlands.
+ *
+ * For adjacent coast edges (e.g. south + west), the corner is rounded
+ * using Euclidean distance instead of min(), creating a natural peninsula.
+ * Large-scale noise creates bays and headlands.
+ * Geology modulates: hard rock pushes coast outward (headlands),
+ * soft rock retreats (bays).
+ */
+function _buildCoastField(width, height, coastEdges, shelfWidth, smoothResistance, coastNoise) {
+  const field = new Grid2D(width, height);
+
+  if (coastEdges.length === 0) {
+    // No coast — everything is fully inland
+    for (let i = 0; i < width * height; i++) field.data[i] = 1;
+    return field;
+  }
+
+  // Classify edges by axis for corner detection
+  const xEdges = []; // east/west
+  const zEdges = []; // north/south
+  for (const edge of coastEdges) {
+    if (edge === 'west' || edge === 'east') xEdges.push(edge);
+    else zEdges.push(edge);
+  }
+  const hasAdjacentCorner = xEdges.length > 0 && zEdges.length > 0;
+
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      const nx = gx / width;
+      const nz = gz / height;
+
+      // Compute distance from each coast edge (0 at edge, 1 at opposite edge)
+      const dists = [];
+      for (const edge of coastEdges) {
+        if (edge === 'west') dists.push({ d: nx, axis: 'x' });
+        else if (edge === 'east') dists.push({ d: 1 - nx, axis: 'x' });
+        else if (edge === 'north') dists.push({ d: nz, axis: 'z' });
+        else if (edge === 'south') dists.push({ d: 1 - nz, axis: 'z' });
+      }
+
+      // Base distance: rounded corners for adjacent edges
+      let baseDist;
+      if (dists.length === 1) {
+        baseDist = dists[0].d;
+      } else if (hasAdjacentCorner) {
+        // For adjacent edges: Euclidean distance rounds the corner into a peninsula.
+        // For any opposite edges in the mix, use min separately then combine.
+        let xDist = 1, zDist = 1;
+        for (const { d, axis } of dists) {
+          if (axis === 'x') xDist = Math.min(xDist, d);
+          else zDist = Math.min(zDist, d);
+        }
+        // Blend: Euclidean near the corner, min far away
+        const euclidean = Math.sqrt(xDist * xDist + zDist * zDist);
+        const minDist = Math.min(xDist, zDist);
+        // Near corner (both dists small): use Euclidean; far from corner: use min
+        const cornerProximity = smoothstep(0.4, 0.0, minDist);
+        baseDist = minDist * (1 - cornerProximity) + euclidean * cornerProximity;
+      } else {
+        // Opposite edges (channel): just min
+        baseDist = Math.min(...dists.map(e => e.d));
+      }
+
+      // Domain-warped noise for organic bay/headland shapes
+      const warpX = coastNoise.fbm(nx * COAST_BAY_WARP_FREQ + 100, nz * COAST_BAY_WARP_FREQ + 100, {
+        octaves: COAST_BAY_WARP_OCTAVES, amplitude: COAST_BAY_WARP_AMP,
+      });
+      const warpZ = coastNoise.fbm(nx * COAST_BAY_WARP_FREQ + 200, nz * COAST_BAY_WARP_FREQ + 200, {
+        octaves: COAST_BAY_WARP_OCTAVES, amplitude: COAST_BAY_WARP_AMP,
+      });
+      const wnx = nx + warpX;
+      const wnz = nz + warpZ;
+
+      // Large bays and headlands
+      const bayNoise = coastNoise.fbm(wnx * COAST_BAY_FREQ, wnz * COAST_BAY_FREQ, {
+        octaves: COAST_BAY_OCTAVES,
+        persistence: COAST_BAY_PERSISTENCE,
+        amplitude: COAST_BAY_AMP,
+      });
+
+      // Smaller coastal detail
+      const coastDetail = coastNoise.noise2D(wnx * COAST_DETAIL_FREQ, wnz * COAST_DETAIL_FREQ) * COAST_DETAIL_AMP;
+
+      // Geology modulation: hard rock resists erosion (headlands),
+      // soft rock retreats (bays)
+      const smoothR = smoothResistance.get(gx, gz);
+      const geoMod = (smoothR - 0.5) * COAST_GEO_STRENGTH;
+
+      // Coast field: subtract shelf width so zero-crossing sits at the coast.
+      // Noise pushes the coastline in/out to create bays and headlands.
+      // Only apply noise near the coast (fade out inland to prevent artifacts).
+      const noiseInfluence = smoothstep(0.5, 0.0, baseDist);
+      const coastNoiseTerm = (bayNoise + coastDetail + geoMod) * noiseInfluence;
+
+      field.set(gx, gz, baseDist - shelfWidth + coastNoiseTerm);
+    }
+  }
+
+  return field;
+}
+
+/**
  * Apply escarpments at rock type boundaries.
- * Where a hard rock cell meets a softer rock neighbor, lower the soft side
- * to create a cliff/scarp effect. The magnitude depends on cliffTendency.
  */
 function applyEscarpments(elevation, rockType, erosionResistance, width, height) {
-  // Collect adjustments first, then apply (avoid order-dependency)
   const adjustments = new Float32Array(width * height);
 
   for (let gz = 1; gz < height - 1; gz++) {
@@ -209,33 +457,28 @@ function applyEscarpments(elevation, rockType, erosionResistance, width, height)
       const myRock = getRockInfo(myType);
       const cliffTendency = myRock.cliffTendency || 0;
 
-      // Check 4-connected neighbors for rock type changes
       for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
         const nx = gx + dx;
         const nz = gz + dz;
         const neighborType = rockType.get(nx, nz);
-
         if (neighborType === myType) continue;
 
         const neighborResistance = erosionResistance.get(nx, nz);
         const resistanceDiff = myResistance - neighborResistance;
 
-        // If this cell is softer than its neighbor, lower it (scarp foot)
-        if (resistanceDiff < -0.15) {
+        if (resistanceDiff < -ESCARP_RESISTANCE_THRESHOLD) {
           const neighborRock = getRockInfo(neighborType);
           const neighborCliff = neighborRock.cliffTendency || 0;
           const scarpStrength = Math.abs(resistanceDiff) * Math.max(cliffTendency, neighborCliff);
-          // Subtle additional scarp at strong geological boundaries
           adjustments[gz * width + gx] = Math.min(
             adjustments[gz * width + gx],
-            -scarpStrength * 8,
+            -scarpStrength * ESCARP_STRENGTH_MULT,
           );
         }
       }
     }
   }
 
-  // Apply adjustments
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
       const adj = adjustments[gz * width + gx];
@@ -255,7 +498,6 @@ function smoothElevation(grid, iterations) {
   const tmp = new Float32Array(w * h);
 
   for (let iter = 0; iter < iterations; iter++) {
-    // Copy to tmp with smoothing
     for (let gz = 1; gz < h - 1; gz++) {
       for (let gx = 1; gx < w - 1; gx++) {
         let sum = 0;
@@ -270,7 +512,6 @@ function smoothElevation(grid, iterations) {
       }
     }
 
-    // Copy back
     for (let gz = 1; gz < h - 1; gz++) {
       for (let gx = 1; gx < w - 1; gx++) {
         grid.set(gx, gz, tmp[gz * w + gx]);

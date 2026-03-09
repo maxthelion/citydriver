@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PlanarGraph } from '../../src/core/PlanarGraph.js';
+import { resolveShallowAngles, resolveCrossingEdges } from '../../src/city/skeleton.js';
 
 describe('PlanarGraph', () => {
   it('adds nodes and retrieves them', () => {
@@ -308,6 +309,89 @@ describe('PlanarGraph', () => {
     expect(g.edges.size).toBe(2);
   });
 
+  it('detectSliverFaces finds thin triangles', () => {
+    const g = new PlanarGraph();
+
+    const n0 = g.addNode(0, 0);
+    const n1 = g.addNode(200, 0);
+    const n2 = g.addNode(100, 5);
+    g.addEdge(n0, n1);
+    g.addEdge(n1, n2);
+    g.addEdge(n2, n0);
+
+    const slivers = g.detectSliverFaces({ maxArea: 5000, maxCompactness: 0.2 });
+    // Both inner and outer face are 3-node slivers in this trivial graph
+    expect(slivers.length).toBe(2);
+    expect(slivers[0].area).toBe(500);
+    expect(slivers[0].compactness).toBeLessThan(0.05);
+  });
+
+  it('detectSliverFaces finds thin quadrilaterals', () => {
+    const g = new PlanarGraph();
+
+    // Two near-parallel roads forming a thin quad
+    //  0 --------- 1
+    //  |           |
+    //  3 --------- 2    (only 10 units apart)
+    const n0 = g.addNode(0, 0);
+    const n1 = g.addNode(300, 0);
+    const n2 = g.addNode(300, 10);
+    const n3 = g.addNode(0, 10);
+    g.addEdge(n0, n1);
+    g.addEdge(n1, n2);
+    g.addEdge(n2, n3);
+    g.addEdge(n3, n0);
+
+    const slivers = g.detectSliverFaces({ maxArea: 5000, maxCompactness: 0.2 });
+    expect(slivers.length).toBeGreaterThanOrEqual(1);
+    expect(slivers[0].edges).toBe(4);
+    expect(slivers[0].area).toBe(3000);
+  });
+
+  it('detectSliverFaces ignores compact faces', () => {
+    const g = new PlanarGraph();
+
+    const n0 = g.addNode(0, 0);
+    const n1 = g.addNode(200, 0);
+    const n2 = g.addNode(100, 173);
+    g.addEdge(n0, n1);
+    g.addEdge(n1, n2);
+    g.addEdge(n2, n0);
+
+    const slivers = g.detectSliverFaces({ maxArea: 50000, maxCompactness: 0.12 });
+    expect(slivers.length).toBe(0);
+  });
+
+  it('detectCrossingEdges finds intersecting edges', () => {
+    const g = new PlanarGraph();
+
+    // Two crossing edges: (0,0)-(100,100) and (100,0)-(0,100)
+    const n0 = g.addNode(0, 0);
+    const n1 = g.addNode(100, 100);
+    const n2 = g.addNode(100, 0);
+    const n3 = g.addNode(0, 100);
+    g.addEdge(n0, n1);
+    g.addEdge(n2, n3);
+
+    const crossings = g.detectCrossingEdges();
+    expect(crossings.length).toBe(1);
+    expect(crossings[0].x).toBeCloseTo(50);
+    expect(crossings[0].z).toBeCloseTo(50);
+  });
+
+  it('detectCrossingEdges ignores edges sharing a node', () => {
+    const g = new PlanarGraph();
+
+    const n0 = g.addNode(0, 0);
+    const n1 = g.addNode(100, 0);
+    const n2 = g.addNode(50, 50);
+    g.addEdge(n0, n1);
+    g.addEdge(n0, n2);
+
+    const crossings = g.detectCrossingEdges();
+    expect(crossings.length).toBe(0);
+  });
+
   it('faces uses polyline direction for angle computation', () => {
     const g = new PlanarGraph();
 
@@ -341,5 +425,187 @@ describe('PlanarGraph', () => {
     const simpleFaces = faces.filter(f => f.length === new Set(f).size);
     expect(simpleFaces.length).toBe(1);
     expect(simpleFaces[0].length).toBe(4); // the quad
+  });
+
+  describe('resolveCrossingEdges', () => {
+    function makeMap(graph, cellSize = 10) {
+      return { graph, cellSize };
+    }
+
+    it('splits crossing edges into a proper junction', () => {
+      const g = new PlanarGraph();
+
+      // X pattern: two edges crossing at (50,50)
+      const n0 = g.addNode(0, 0);
+      const n1 = g.addNode(100, 100);
+      const n2 = g.addNode(100, 0);
+      const n3 = g.addNode(0, 100);
+
+      g.addEdge(n0, n1);
+      g.addEdge(n2, n3);
+
+      expect(g.detectCrossingEdges().length).toBe(1);
+
+      resolveCrossingEdges(makeMap(g, 10));
+
+      // No more crossings
+      expect(g.detectCrossingEdges().length).toBe(0);
+
+      // Should have created a junction node near (50,50)
+      expect(g.nodes.size).toBe(5);
+      expect(g.edges.size).toBe(4);
+    });
+
+    it('handles multiple crossings', () => {
+      const g = new PlanarGraph();
+
+      // Star pattern: 3 edges crossing
+      const n0 = g.addNode(0, 50);
+      const n1 = g.addNode(100, 50);
+      const n2 = g.addNode(50, 0);
+      const n3 = g.addNode(50, 100);
+      const n4 = g.addNode(0, 0);
+      const n5 = g.addNode(100, 100);
+
+      g.addEdge(n0, n1); // horizontal
+      g.addEdge(n2, n3); // vertical
+      g.addEdge(n4, n5); // diagonal
+
+      resolveCrossingEdges(makeMap(g, 10));
+
+      expect(g.detectCrossingEdges().length).toBe(0);
+    });
+
+    it('does nothing when no crossings exist', () => {
+      const g = new PlanarGraph();
+
+      const n0 = g.addNode(0, 0);
+      const n1 = g.addNode(100, 0);
+      const n2 = g.addNode(0, 100);
+
+      g.addEdge(n0, n1);
+      g.addEdge(n0, n2);
+
+      const edgesBefore = g.edges.size;
+      resolveCrossingEdges(makeMap(g, 10));
+      expect(g.edges.size).toBe(edgesBefore);
+    });
+  });
+
+  describe('resolveShallowAngles', () => {
+    /** Minimal map stub for resolveShallowAngles. */
+    function makeMap(graph, cellSize = 10) {
+      return { graph, cellSize };
+    }
+
+    it('merges near-parallel edges by sliding branch point', () => {
+      const g = new PlanarGraph();
+
+      // Node 0 at origin, two edges leaving at nearly the same angle.
+      // Edge 0→1 goes straight right (dominant — longer).
+      // Edge 0→2 starts right then curves up, with an intermediate point
+      // to give it a shallow initial angle.
+      //
+      //  0 ---------> 1  (x=0 to x=300, z=0 to z=5)
+      //  0 ---> . --> 2  (x=0 to x=100,z=5 then x=200,z=120)
+      const n0 = g.addNode(0, 0);
+      const n1 = g.addNode(300, 5);
+      const n2 = g.addNode(200, 120);
+
+      g.addEdge(n0, n1, { hierarchy: 'arterial' });
+      g.addEdge(n0, n2, { hierarchy: 'local', points: [{ x: 100, z: 5 }] });
+
+      // Before: shallow angle at node 0
+      const before = g.detectShallowAngles(10);
+      expect(before.length).toBe(1);
+      expect(before[0].nodeId).toBe(n0);
+
+      resolveShallowAngles(makeMap(g, 10));
+
+      // After: no shallow angles remain
+      const after = g.detectShallowAngles(10);
+      expect(after.length).toBe(0);
+
+      // Node 2 should still be reachable (connectivity preserved)
+      expect(g.nodes.has(n2)).toBe(true);
+      const n2Adj = g._adjacency.get(n2);
+      expect(n2Adj.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('preserves connectivity when resolving', () => {
+      const g = new PlanarGraph();
+
+      // Y-junction: node 0 connects to both 1 and 2 at a shallow angle
+      const n0 = g.addNode(0, 0);
+      const n1 = g.addNode(400, 10);
+      const n2 = g.addNode(400, -10);
+
+      g.addEdge(n0, n1, { hierarchy: 'collector' });
+      g.addEdge(n0, n2, { hierarchy: 'collector' });
+
+      resolveShallowAngles(makeMap(g, 10));
+
+      // Both endpoints should still be reachable from each other
+      const pathLen = g.shortestPathLength(n1, n2);
+      expect(pathLen).toBeLessThan(Infinity);
+    });
+
+    it('resolves short stubs via projection merge', () => {
+      const g = new PlanarGraph();
+
+      // Two very short edges — projection-based merge handles these
+      const n0 = g.addNode(0, 0);
+      const n1 = g.addNode(15, 1);
+      const n2 = g.addNode(15, -1);
+
+      g.addEdge(n0, n1);
+      g.addEdge(n0, n2);
+
+      // Should not crash
+      resolveShallowAngles(makeMap(g, 10));
+
+      // Shallow angle should be resolved
+      const after = g.detectShallowAngles(10);
+      expect(after.length).toBe(0);
+    });
+
+    it('resolves collinear overlapping edges via projection', () => {
+      const g = new PlanarGraph();
+
+      // Two edges from same node going in exact same direction
+      // (one shorter, one longer — collinear, never diverge)
+      const n0 = g.addNode(0, 0);
+      const n1 = g.addNode(300, 0);  // long
+      const n2 = g.addNode(200, 0);  // short, collinear with n0→n1
+
+      g.addEdge(n0, n1, { hierarchy: 'collector' });
+      g.addEdge(n0, n2, { hierarchy: 'arterial' });
+
+      // Before: shallow angle at n0
+      expect(g.detectShallowAngles(10).length).toBe(1);
+
+      resolveShallowAngles(makeMap(g, 10));
+
+      // After: no shallow angles
+      expect(g.detectShallowAngles(10).length).toBe(0);
+
+      // n2 should still be reachable
+      expect(g.shortestPathLength(n1, n2)).toBeLessThan(Infinity);
+    });
+
+    it('does nothing when no shallow angles exist', () => {
+      const g = new PlanarGraph();
+
+      const n0 = g.addNode(0, 0);
+      const n1 = g.addNode(100, 0);
+      const n2 = g.addNode(0, 100);
+
+      g.addEdge(n0, n1);
+      g.addEdge(n0, n2);
+
+      const edgesBefore = g.edges.size;
+      resolveShallowAngles(makeMap(g, 10));
+      expect(g.edges.size).toBe(edgesBefore);
+    });
   });
 });

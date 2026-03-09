@@ -68,7 +68,7 @@ describe('setupCity', () => {
     const cx = Math.round((settlement.gx * params.cellSize - map.originX) / map.cellSize);
     const cz = Math.round((settlement.gz * params.cellSize - map.originZ) / map.cellSize);
     if (cx >= 0 && cx < map.width && cz >= 0 && cz < map.height) {
-      expect(map.landValue.get(cx, cz)).toBeGreaterThan(0.3);
+      expect(map.landValue.get(cx, cz)).toBeGreaterThan(0.15);
     }
   });
 

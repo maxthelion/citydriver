@@ -22,6 +22,10 @@ export const ROCK_TYPES = {
 const ROCK_LIST = Object.values(ROCK_TYPES);
 const NUM_ROCKS = ROCK_LIST.length;
 
+// Rocks sorted by erosion resistance for biased selection
+const HARD_ROCKS = [ROCK_TYPES.GRANITE, ROCK_TYPES.LIMESTONE];
+const SOFT_ROCKS = [ROCK_TYPES.CLAY, ROCK_TYPES.CHALK, ROCK_TYPES.SHALE, ROCK_TYPES.SANDSTONE];
+
 /**
  * Generate geology layers.
  *
@@ -59,10 +63,18 @@ export function generateGeology(params, rng) {
   const bandDz = Math.sin(bandDirection);
 
   // Assign rock types along bands: project each cell onto the band axis
-  // and assign based on position along that axis
+  // and assign based on position along that axis.
+  // rockBias (from tectonic context) shifts selection toward hard or soft rocks.
+  const { rockBias } = params;
+  const hardBias = rockBias?.hardBias ?? 0.5;
+
   const bandRockOrder = [];
   for (let i = 0; i < bandCount + 2; i++) {
-    bandRockOrder.push(ROCK_LIST[geoRng.int(0, NUM_ROCKS - 1)]);
+    if (geoRng.range(0, 1) < hardBias) {
+      bandRockOrder.push(HARD_ROCKS[geoRng.int(0, HARD_ROCKS.length - 1)]);
+    } else {
+      bandRockOrder.push(SOFT_ROCKS[geoRng.int(0, SOFT_ROCKS.length - 1)]);
+    }
   }
 
   // Igneous intrusions (circles of granite)

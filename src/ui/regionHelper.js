@@ -7,15 +7,12 @@ import { SeededRandom } from '../core/rng.js';
  */
 export function generateRegionFromSeed(seed, gx, gz) {
   const rng = new SeededRandom(seed);
-  const edges = ['north', 'south', 'east', 'west'];
-  const coastEdges = [edges[rng.int(0, 3)]];
 
   const layers = generateRegion({
     width: 128,
     height: 128,
-    cellSize: 50,
+    cellSize: 200,
     seaLevel: 0,
-    coastEdges,
   }, rng);
 
   let settlement = null;

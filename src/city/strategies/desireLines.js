@@ -26,7 +26,9 @@ export class DesireLines {
       return true;
     }
     if (this._tick === 2) {
-      return this._accumulateAndTrace(OD_PAIRS_PRIMARY, PRIMARY_THRESHOLD, 'collector');
+      this._accumulateAndTrace(OD_PAIRS_PRIMARY, PRIMARY_THRESHOLD, 'collector');
+      // Always continue — secondary pass may find roads even if primary didn't
+      return true;
     }
     if (this._tick === 3) {
       this._accumulateAndTrace(OD_PAIRS_SECONDARY, SECONDARY_THRESHOLD, 'local');

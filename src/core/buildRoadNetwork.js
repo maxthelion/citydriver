@@ -38,6 +38,8 @@ export function buildRoadNetwork(options) {
     existingPaths = [],
     smooth = {},
     originX = 0, originZ = 0,
+    tagGrids = {},
+    popularityGrid = null,
   } = options;
 
   const { simplifyEpsilon = 1.0 } = smooth;
@@ -65,6 +67,20 @@ export function buildRoadNetwork(options) {
     // Stamp onto roadGrid so later pathfinds get the reuse discount
     for (const p of result.path) {
       roadGrid.set(p.gx, p.gz, 1);
+    }
+
+    // Stamp debug tag grid if connection has a tag
+    if (conn.tag && tagGrids[conn.tag]) {
+      for (const p of result.path) {
+        tagGrids[conn.tag].set(p.gx, p.gz, 1);
+      }
+    }
+
+    // Increment popularity for each cell used by this path
+    if (popularityGrid) {
+      for (const p of result.path) {
+        popularityGrid.set(p.gx, p.gz, popularityGrid.get(p.gx, p.gz) + 1);
+      }
     }
 
     rawPaths.push({
@@ -126,12 +142,12 @@ export function buildRoadNetwork(options) {
 }
 
 /**
- * Snap cells in later paths onto cells from earlier paths when within 1 cell.
- * This collapses near-parallel paths (the 1-cell-offset diamond problem) into
- * shared cells that mergeRoadPaths can then deduplicate.
+ * Snap cells in later paths onto cells from earlier paths when within radius.
+ * This collapses near-parallel paths into shared cells that mergeRoadPaths
+ * can then deduplicate.
  */
 function _snapPaths(rawPaths, width, height) {
-  // Build a grid of which cells are used by paths, tracking the earliest path index
+  const SNAP_RADIUS = 2; // cells — snap to earlier paths within this distance
   const used = new Int16Array(width * height).fill(-1);
 
   for (let pi = 0; pi < rawPaths.length; pi++) {
@@ -148,24 +164,26 @@ function _snapPaths(rawPaths, width, height) {
         continue;
       }
 
-      // Check 8-connected neighbors for cells from earlier paths
+      // Search within SNAP_RADIUS for the closest cell from an earlier path
       let bestNeighbor = null;
-      for (let dz = -1; dz <= 1; dz++) {
-        for (let dx = -1; dx <= 1; dx++) {
+      let bestDistSq = Infinity;
+      for (let dz = -SNAP_RADIUS; dz <= SNAP_RADIUS; dz++) {
+        for (let dx = -SNAP_RADIUS; dx <= SNAP_RADIUS; dx++) {
           if (dx === 0 && dz === 0) continue;
           const nx = gx + dx, nz = gz + dz;
           if (nx < 0 || nx >= width || nz < 0 || nz >= height) continue;
           const nIdx = nz * width + nx;
           if (used[nIdx] >= 0 && used[nIdx] < pi) {
-            bestNeighbor = { gx: nx, gz: nz };
-            break;
+            const d2 = dx * dx + dz * dz;
+            if (d2 < bestDistSq) {
+              bestDistSq = d2;
+              bestNeighbor = { gx: nx, gz: nz };
+            }
           }
         }
-        if (bestNeighbor) break;
       }
 
       if (bestNeighbor) {
-        // Snap to the neighboring cell from an earlier path
         snapped.push(bestNeighbor);
       } else {
         snapped.push(cell);

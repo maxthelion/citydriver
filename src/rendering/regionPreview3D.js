@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getRiverMaterial } from './materials.js';
+import { CITY_CELL_SIZE, CITY_RADIUS } from '../city/constants.js';
 
 /**
  * Build a 3D terrain mesh from a LayerStack for region preview.
@@ -47,7 +48,7 @@ export function buildRegionTerrain(layers) {
             r = 0.55; g = 0.65; b = 0.2;
             break;
           case 2: // Forest
-            r = 0.15; g = 0.4; b = 0.1;
+            r = 0.08; g = 0.32; b = 0.05;
             break;
           case 3: // Moorland
             r = 0.45; g = 0.4; b = 0.3;
@@ -110,35 +111,61 @@ export function buildWaterPlane(layers) {
 }
 
 /**
- * Build settlement markers as small colored spheres.
+ * Build settlement markers as flat circles on the ground.
+ * Each marker has a filled disc and a hidden selection ring.
+ * Returns { group, markers: [{mesh, ring, settlement}] } for interaction.
  */
 export function buildSettlementMarkers(layers) {
   const settlements = layers.getData('settlements');
   const elevation = layers.getGrid('elevation');
-  if (!settlements || !elevation) return new THREE.Group();
+  if (!settlements || !elevation) return { group: new THREE.Group(), markers: [] };
 
   const group = new THREE.Group();
+  const markers = [];
   const cs = elevation.cellSize;
+  const halfW = (elevation.width - 1) * cs / 2;
+  const halfH = (elevation.height - 1) * cs / 2;
 
   for (const s of settlements) {
     const h = elevation.get(s.gx, s.gz);
     const color = s.tier === 1 ? 0xff0000 : s.tier === 2 ? 0xff8800 : 0xffff00;
-    const size = s.tier === 1 ? 80 : s.tier === 2 ? 50 : 30;
+    const radius = s.tier === 1 ? 80 : s.tier === 2 ? 50 : 30;
 
-    const geom = new THREE.SphereGeometry(size, 8, 6);
-    const mat = new THREE.MeshLambertMaterial({ color });
-    const marker = new THREE.Mesh(geom, mat);
+    const x = s.gx * cs - halfW;
+    const z = s.gz * cs - halfH;
+    const y = h + 2;
 
-    marker.position.set(
-      s.gx * cs - (elevation.width - 1) * cs / 2,
-      h + size,
-      s.gz * cs - (elevation.height - 1) * cs / 2,
-    );
-    marker.userData = { settlement: s };
-    group.add(marker);
+    // Invisible hit area (3x radius for easier clicking from orbit)
+    const hitRadius = radius * 3;
+    const hitGeom = new THREE.CircleGeometry(hitRadius, 16);
+    const hitMat = new THREE.MeshBasicMaterial({ visible: false });
+    const hitArea = new THREE.Mesh(hitGeom, hitMat);
+    hitArea.rotation.x = -Math.PI / 2;
+    hitArea.position.set(x, y - 0.5, z);
+    hitArea.userData = { settlement: s };
+    group.add(hitArea);
+
+    // Filled disc on ground
+    const discGeom = new THREE.CircleGeometry(radius, 24);
+    const discMat = new THREE.MeshBasicMaterial({ color, depthTest: true, transparent: true, opacity: 0.7 });
+    const disc = new THREE.Mesh(discGeom, discMat);
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.set(x, y, z);
+    disc.userData = { settlement: s };
+    group.add(disc);
+
+    // Selection/hover ring (hidden by default)
+    const ringGeom = new THREE.RingGeometry(radius * 1.1, radius * 1.5, 32);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: true, transparent: true, opacity: 0 });
+    const ring = new THREE.Mesh(ringGeom, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(x, y + 0.5, z);
+    group.add(ring);
+
+    markers.push({ mesh: hitArea, ring, settlement: s });
   }
 
-  return group;
+  return { group, markers };
 }
 
 /**
@@ -300,4 +327,93 @@ export function buildRegionRiverMeshes(layers) {
   const group = new THREE.Group();
   group.add(new THREE.Mesh(geom, getRiverMaterial()));
   return group;
+}
+
+/**
+ * Build a city boundary rectangle that can be shown/hidden on the terrain.
+ * Returns { line, update(settlement) } where update repositions the rect.
+ * The line follows terrain elevation with many sample points per edge.
+ */
+export function buildCityBoundary(layers) {
+  const elevation = layers.getGrid('elevation');
+  const params = layers.getData('params');
+  const cs = params.cellSize;
+  const w = elevation.width;
+  const h = elevation.height;
+  const halfW = (w - 1) * cs / 2;
+  const halfH = (h - 1) * cs / 2;
+
+  const cityRadius = CITY_RADIUS;
+  const cityCellSize = CITY_CELL_SIZE;
+  const scaleRatio = cs / cityCellSize;
+  const fullSize = Math.round(cityRadius * 2 * scaleRatio) * cityCellSize;
+
+  const SAMPLES_PER_EDGE = 20;
+  const TOTAL_POINTS = SAMPLES_PER_EDGE * 4;
+  const Y_OFFSET = 3; // slightly above terrain
+
+  const geometry = new THREE.BufferGeometry();
+  const positions = new Float32Array(TOTAL_POINTS * 3);
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+
+  const material = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+  const line = new THREE.LineLoop(geometry, material);
+  line.visible = false;
+
+  function update(settlement) {
+    if (!settlement) {
+      line.visible = false;
+      return;
+    }
+
+    const centerX = settlement.gx * cs;
+    const centerZ = settlement.gz * cs;
+    const regionW = (w - 1) * cs;
+    const regionH = (h - 1) * cs;
+
+    let ox = centerX - fullSize / 2;
+    let oz = centerZ - fullSize / 2;
+    let ex = ox + fullSize;
+    let ez = oz + fullSize;
+
+    // Clamp to region bounds
+    if (ox < 0) ox = 0;
+    if (oz < 0) oz = 0;
+    if (ex > regionW) ex = regionW;
+    if (ez > regionH) ez = regionH;
+
+    // 4 corners in world coords (before centering)
+    const corners = [
+      [ox, oz], [ex, oz], [ex, ez], [ox, ez],
+    ];
+
+    const pos = line.geometry.attributes.position.array;
+    let idx = 0;
+
+    for (let edge = 0; edge < 4; edge++) {
+      const [ax, az] = corners[edge];
+      const [bx, bz] = corners[(edge + 1) % 4];
+
+      for (let i = 0; i < SAMPLES_PER_EDGE; i++) {
+        const t = i / SAMPLES_PER_EDGE;
+        const wx = ax + (bx - ax) * t;
+        const wz = az + (bz - az) * t;
+
+        // Sample elevation in grid coords
+        const gx = wx / cs;
+        const gz = wz / cs;
+        const y = elevation.sample(gx, gz) + Y_OFFSET;
+
+        // Convert to mesh-local coords (PlaneGeometry centered at origin)
+        pos[idx++] = wx - halfW;
+        pos[idx++] = y;
+        pos[idx++] = wz - halfH;
+      }
+    }
+
+    line.geometry.attributes.position.needsUpdate = true;
+    line.visible = true;
+  }
+
+  return { line, update };
 }
