@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import { generateBuilding } from '../../src/buildings/generate.js';
-import { getClimateStyle, buildRecipe } from '../../src/buildings/styles.js';
+import { getClimateStyle, buildRecipe, CLIMATES } from '../../src/buildings/styles.js';
 
 /**
  * Helper: extract the named child mesh from a group.
@@ -266,5 +266,26 @@ describe('generateBuilding', () => {
     // Mansard should have at least 2 distinct height levels above the walls:
     // the break line height and the upper peak/ridge height
     expect(yAbove.size).toBeGreaterThanOrEqual(2);
+  });
+
+  it('all 9 combinations × 6 climates generate without errors', () => {
+    for (const climate of CLIMATES) {
+      const style = getClimateStyle(climate);
+      for (const plotSize of ['small', 'medium', 'large']) {
+        for (const richness of [0, 0.5, 1]) {
+          const recipe = buildRecipe(style, plotSize, richness, 42);
+          const group = generateBuilding(style, recipe);
+          expect(group.children.length).toBeGreaterThan(0);
+
+          for (const child of group.children) {
+            if (!child.geometry) continue;
+            const pos = child.geometry.attributes.position.array;
+            for (let i = 0; i < pos.length; i++) {
+              expect(pos[i]).not.toBeNaN();
+            }
+          }
+        }
+      }
+    }
   });
 });
