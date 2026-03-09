@@ -27,6 +27,7 @@ export class RegionScreen {
       this.onEnter = callbacks.onEnter;
       this.onDebug = callbacks.onDebug || null;
       this.onCompare = callbacks.onCompare || null;
+      this.onBuildings = callbacks.onBuildings || null;
     }
     this._layers = null;
     this._seed = initialSeed ?? Math.floor(Math.random() * 999999);
@@ -122,6 +123,15 @@ export class RegionScreen {
       btnRow.appendChild(this._compareBtn);
     }
 
+    if (this.onBuildings) {
+      this._buildingsBtn = this._makeBtn('Building Styles', () => {
+        if (this.onBuildings) {
+          this.onBuildings();
+        }
+      });
+      this._buildingsBtn.style.background = '#534';
+      btnRow.appendChild(this._buildingsBtn);
+    }
 
     rightPanel.appendChild(btnRow);
 

@@ -2,6 +2,7 @@ import { RegionScreen } from './ui/RegionScreen.js';
 import { CityScreen } from './ui/CityScreen.js';
 import { DebugScreen } from './ui/DebugScreen.js';
 import { CompareScreen } from './ui/CompareScreen.js';
+import { BuildingStyleScreen } from './ui/BuildingStyleScreen.js';
 import { generateRegionFromSeed } from './ui/regionHelper.js';
 import { SeededRandom } from './core/rng.js';
 
@@ -10,12 +11,14 @@ let regionScreen = null;
 let cityScreen = null;
 let debugScreen = null;
 let compareScreen = null;
+let buildingScreen = null;
 
 function disposeAll() {
   if (regionScreen) { regionScreen.dispose(); regionScreen = null; }
   if (cityScreen) { cityScreen.dispose(); cityScreen = null; }
   if (debugScreen) { debugScreen.dispose(); debugScreen = null; }
   if (compareScreen) { compareScreen.dispose(); compareScreen = null; }
+  if (buildingScreen) { buildingScreen.dispose(); buildingScreen = null; }
   container.innerHTML = '';
 }
 
@@ -33,6 +36,8 @@ function enterSubScreen(mode, layers, settlement, seed) {
     cityScreen = new CityScreen(container, layers, settlement, rng.fork('city'), seed, goBack);
   } else if (mode === 'compare') {
     compareScreen = new CompareScreen(container, layers, settlement, seed, goBack);
+  } else if (mode === 'buildings') {
+    buildingScreen = new BuildingStyleScreen(container, goBack);
   } else {
     debugScreen = new DebugScreen(container, layers, settlement, seed, goBack);
   }
@@ -43,6 +48,11 @@ function showRegion(initialSeed) {
     onEnter(layers, settlement, seed) { enterSubScreen('city', layers, settlement, seed); },
     onDebug(layers, settlement, seed) { enterSubScreen('debug', layers, settlement, seed); },
     onCompare(layers, settlement, seed) { enterSubScreen('compare', layers, settlement, seed); },
+    onBuildings() {
+      disposeAll();
+      history.pushState(null, '', '?mode=buildings');
+      buildingScreen = new BuildingStyleScreen(container, goBack);
+    },
   }, initialSeed);
 }
 
@@ -52,6 +62,11 @@ window.addEventListener('popstate', () => {
   const params = new URLSearchParams(location.search);
   const mode = params.get('mode');
   const seed = params.has('seed') ? parseInt(params.get('seed')) : undefined;
+
+  if (mode === 'buildings') {
+    buildingScreen = new BuildingStyleScreen(container, goBack);
+    return;
+  }
 
   if (mode && seed != null) {
     const gx = parseInt(params.get('gx'));
@@ -77,7 +92,9 @@ const urlParams = new URLSearchParams(location.search);
 const urlMode = urlParams.get('mode');
 const urlSeed = urlParams.has('seed') ? parseInt(urlParams.get('seed')) : undefined;
 
-if ((urlMode === 'debug' || urlMode === 'city' || urlMode === 'compare') && urlSeed != null) {
+if (urlMode === 'buildings') {
+  buildingScreen = new BuildingStyleScreen(container, goBack);
+} else if ((urlMode === 'debug' || urlMode === 'city' || urlMode === 'compare') && urlSeed != null) {
   const gx = parseInt(urlParams.get('gx'));
   const gz = parseInt(urlParams.get('gz'));
 
