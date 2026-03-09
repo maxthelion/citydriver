@@ -178,9 +178,9 @@ function nudgeColor(hex, amount, rng) {
  * Plot size dimension ranges and wing limits.
  */
 const PLOT_SPECS = {
-  small: { width: [6, 8], depth: [8, 10], maxWings: 0, floorBias: 0 },
-  medium: { width: [10, 14], depth: [10, 14], maxWings: 1, floorBias: 0.5 },
-  large: { width: [16, 22], depth: [14, 20], maxWings: 2, floorBias: 1 },
+  small:  { width: [4, 5],  depth: [4, 5],  maxWings: 0, floorBias: 0 },
+  medium: { width: [5, 7],  depth: [4, 6],  maxWings: 1, floorBias: 0.5 },
+  large:  { width: [8, 10], depth: [5, 7],  maxWings: 1, floorBias: 1 },
 };
 
 /**
