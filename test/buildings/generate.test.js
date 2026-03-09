@@ -213,6 +213,35 @@ describe('generateBuilding', () => {
     expect(largeCount).toBeGreaterThan(smallCount);
   });
 
+  it('ornate building has more child meshes than plain', () => {
+    const style = getClimateStyle('continental');
+    const plain = buildRecipe(style, 'medium', 0, 42);
+    const ornate = buildRecipe(style, 'medium', 1, 42);
+    const plainGroup = generateBuilding(style, plain);
+    const ornateGroup = generateBuilding(style, ornate);
+    expect(ornateGroup.children.length).toBeGreaterThan(plainGroup.children.length);
+  });
+
+  it('tropical building with richness 1 has porch geometry', () => {
+    const style = getClimateStyle('tropical');
+    const recipe = buildRecipe(style, 'medium', 1, 42);
+    recipe.hasPorch = true;
+    recipe.porchDepth = style.porchDepth;
+    const group = generateBuilding(style, recipe);
+    const porch = group.getObjectByName('porch');
+    expect(porch).toBeDefined();
+  });
+
+  it('mediterranean building with richness 1 has balconies', () => {
+    const style = getClimateStyle('mediterranean');
+    const recipe = buildRecipe(style, 'medium', 1, 42);
+    recipe.hasBalcony = true;
+    recipe.balconyFloors = [2];
+    const group = generateBuilding(style, recipe);
+    const balconies = group.getObjectByName('balconies');
+    expect(balconies).toBeDefined();
+  });
+
   it('mansard roof has vertices at two distinct heights above walls', () => {
     const style = getClimateStyle('mediterranean'); // mediterranean uses mansard
     expect(style.roofType).toBe('mansard');

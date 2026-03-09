@@ -668,6 +668,528 @@ function buildGeometry(data) {
 }
 
 /**
+ * Generate sill geometry for a single volume's exterior walls.
+ * Sills are thin horizontal strips below each window.
+ */
+function generateSills(vol, wallHeight, allVolumes, style) {
+  const faces = getExteriorWallFaces(vol, wallHeight, allVolumes, style);
+
+  const positions = [];
+  const normals = [];
+  const indices = [];
+
+  function addQuad(v0, v1, v2, v3, nx, ny, nz) {
+    const base = positions.length / 3;
+    positions.push(...v0, ...v1, ...v2, ...v3);
+    normals.push(nx, ny, nz, nx, ny, nz, nx, ny, nz, nx, ny, nz);
+    indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+  }
+
+  const spacing = style.windowSpacing;
+  const winW = style.windowWidth;
+  const floorH = style.floorHeight;
+  const OFFSET = 0.015;
+  const sillH = 0.05;
+  const sillW = winW + 0.1;
+
+  for (const face of faces) {
+    const wallLen = face.wallLength;
+    const count = Math.max(1, Math.floor((wallLen - spacing * 0.5) / spacing));
+    const totalSpan = (count - 1) * spacing;
+
+    for (let floor = 0; floor < vol.floors; floor++) {
+      const winBottom = floor * floorH + floorH * 0.3;
+      const winHeight = style.windowHeight * (1 - style.windowHeightDecay * floor);
+      const winTop = winBottom + winHeight;
+      const ceiling = (floor + 1) * floorH;
+      if (winTop > ceiling - 0.1) continue;
+
+      const sillBottom = winBottom - sillH;
+      const sillTop = winBottom;
+
+      for (let wi = 0; wi < count; wi++) {
+        const t = (wallLen - totalSpan) / 2 + wi * spacing;
+        const halfW = sillW / 2;
+        const tLeft = t - halfW;
+        const tRight = t + halfW;
+
+        let p0, p1, p2, p3;
+        if (face.axis === 'x') {
+          const xMin = Math.min(face.v2[0], face.v3[0]);
+          const z = face.v0[2] + face.nz * OFFSET;
+          p0 = [xMin + tLeft, sillTop, z];
+          p1 = [xMin + tRight, sillTop, z];
+          p2 = [xMin + tLeft, sillBottom, z];
+          p3 = [xMin + tRight, sillBottom, z];
+        } else {
+          const zMin = Math.min(face.v2[2], face.v3[2]);
+          const x = face.v0[0] + face.nx * OFFSET;
+          p0 = [x, sillTop, zMin + tLeft];
+          p1 = [x, sillTop, zMin + tRight];
+          p2 = [x, sillBottom, zMin + tLeft];
+          p3 = [x, sillBottom, zMin + tRight];
+        }
+
+        addQuad(p0, p1, p2, p3, face.nx, face.ny, face.nz);
+      }
+    }
+  }
+
+  return { positions, normals, indices };
+}
+
+/**
+ * Generate cornice geometry for a single volume's exterior walls.
+ * Cornice is a horizontal band at the top of each wall.
+ */
+function generateCornice(vol, wallHeight, allVolumes, style) {
+  const faces = getExteriorWallFaces(vol, wallHeight, allVolumes, style);
+
+  const positions = [];
+  const normals = [];
+  const indices = [];
+
+  function addQuad(v0, v1, v2, v3, nx, ny, nz) {
+    const base = positions.length / 3;
+    positions.push(...v0, ...v1, ...v2, ...v3);
+    normals.push(nx, ny, nz, nx, ny, nz, nx, ny, nz, nx, ny, nz);
+    indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+  }
+
+  const OFFSET = 0.02;
+  const corniceH = 0.15;
+  const corniceTop = wallHeight;
+  const corniceBottom = wallHeight - corniceH;
+
+  for (const face of faces) {
+    // Full-length cornice strip on this wall face
+    if (face.axis === 'x') {
+      const xMin = Math.min(face.v2[0], face.v3[0]);
+      const xMax = Math.max(face.v2[0], face.v3[0]);
+      const z = face.v0[2] + face.nz * OFFSET;
+      const p0 = [xMin, corniceTop, z];
+      const p1 = [xMax, corniceTop, z];
+      const p2 = [xMin, corniceBottom, z];
+      const p3 = [xMax, corniceBottom, z];
+      addQuad(p0, p1, p2, p3, face.nx, face.ny, face.nz);
+    } else {
+      const zMin = Math.min(face.v2[2], face.v3[2]);
+      const zMax = Math.max(face.v2[2], face.v3[2]);
+      const x = face.v0[0] + face.nx * OFFSET;
+      const p0 = [x, corniceTop, zMin];
+      const p1 = [x, corniceTop, zMax];
+      const p2 = [x, corniceBottom, zMin];
+      const p3 = [x, corniceBottom, zMax];
+      addQuad(p0, p1, p2, p3, face.nx, face.ny, face.nz);
+    }
+  }
+
+  return { positions, normals, indices };
+}
+
+/**
+ * Generate quoin geometry for a single volume's exterior corners.
+ * Alternating blocks placed up the full wall height at each corner.
+ */
+function generateQuoins(vol, wallHeight, allVolumes, style) {
+  const positions = [];
+  const normals = [];
+  const indices = [];
+
+  function addQuad(v0, v1, v2, v3, nx, ny, nz) {
+    const base = positions.length / 3;
+    positions.push(...v0, ...v1, ...v2, ...v3);
+    normals.push(nx, ny, nz, nx, ny, nz, nx, ny, nz, nx, ny, nz);
+    indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+  }
+
+  const OFFSET = 0.015;
+  const blockW = 0.3;
+  const blockH = 0.4;
+
+  const x0 = vol.x;
+  const x1 = vol.x + vol.width;
+  const z0 = vol.z;
+  const z1 = vol.z + vol.depth;
+
+  // Four corners, each has two wall faces
+  const corners = [
+    { cx: x0, cz: z0, normals: [[-1, 0, 0], [0, 0, -1]], axes: ['z', 'x'] },
+    { cx: x1, cz: z0, normals: [[1, 0, 0], [0, 0, -1]], axes: ['z', 'x'] },
+    { cx: x0, cz: z1, normals: [[-1, 0, 0], [0, 0, 1]], axes: ['z', 'x'] },
+    { cx: x1, cz: z1, normals: [[1, 0, 0], [0, 0, 1]], axes: ['z', 'x'] },
+  ];
+
+  // Check which corners are exterior (both adjacent faces must be exterior)
+  const exteriorFaces = getExteriorWallFaces(vol, wallHeight, allVolumes, style);
+
+  for (const corner of corners) {
+    const blockCount = Math.floor(wallHeight / blockH);
+
+    for (let i = 0; i < blockCount; i++) {
+      const yBot = i * blockH;
+      const yTop = yBot + blockH;
+
+      // Place a quoin quad on each of the two wall faces at this corner
+      for (let fi = 0; fi < 2; fi++) {
+        const n = corner.normals[fi];
+        const nx = n[0], ny = n[1], nz = n[2];
+
+        let p0, p1, p2, p3;
+        if (fi === 0) {
+          // Face along Z axis (left or right wall)
+          const x = corner.cx + nx * OFFSET;
+          const zDir = corner.cz === z0 ? 1 : -1;
+          const zStart = corner.cz;
+          p0 = [x, yTop, zStart];
+          p1 = [x, yTop, zStart + zDir * blockW];
+          p2 = [x, yBot, zStart];
+          p3 = [x, yBot, zStart + zDir * blockW];
+        } else {
+          // Face along X axis (front or back wall)
+          const z = corner.cz + nz * OFFSET;
+          const xDir = corner.cx === x0 ? 1 : -1;
+          const xStart = corner.cx;
+          p0 = [xStart, yTop, z];
+          p1 = [xStart + xDir * blockW, yTop, z];
+          p2 = [xStart, yBot, z];
+          p3 = [xStart + xDir * blockW, yBot, z];
+        }
+
+        addQuad(p0, p1, p2, p3, nx, ny, nz);
+      }
+    }
+  }
+
+  return { positions, normals, indices };
+}
+
+/**
+ * Generate porch geometry: posts and a roof slab extending from the front wall.
+ */
+function generatePorch(recipe, style) {
+  const positions = [];
+  const normals = [];
+  const indices = [];
+
+  function addQuad(v0, v1, v2, v3, nx, ny, nz) {
+    const base = positions.length / 3;
+    positions.push(...v0, ...v1, ...v2, ...v3);
+    normals.push(nx, ny, nz, nx, ny, nz, nx, ny, nz, nx, ny, nz);
+    indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+  }
+
+  const depth = recipe.porchDepth;
+  const width = recipe.mainWidth;
+  const floorH = style.floorHeight;
+  const postSize = 0.15;
+
+  // Front wall is at z=0, porch extends in -Z direction
+  const z0 = 0;
+  const z1 = -depth;
+
+  // Roof slab (thin horizontal quad) at floorHeight above ground
+  const roofY = floorH;
+  addQuad(
+    [0, roofY, z0], [width, roofY, z0],
+    [0, roofY, z1], [width, roofY, z1],
+    0, 1, 0,
+  );
+
+  // Posts at corners and every 2m along front edge
+  const postPositions = [0, width - postSize];
+  const step = 2.0;
+  for (let x = step; x < width - postSize; x += step) {
+    postPositions.push(x);
+  }
+
+  for (const px of postPositions) {
+    // Each post is a thin box: 4 vertical faces
+    const pxR = px + postSize;
+    const pzF = z1;
+    const pzB = z1 + postSize;
+
+    // Front face (-Z)
+    addQuad(
+      [px, floorH, pzF], [pxR, floorH, pzF],
+      [px, 0, pzF], [pxR, 0, pzF],
+      0, 0, -1,
+    );
+    // Back face (+Z)
+    addQuad(
+      [pxR, floorH, pzB], [px, floorH, pzB],
+      [pxR, 0, pzB], [px, 0, pzB],
+      0, 0, 1,
+    );
+    // Left face (-X)
+    addQuad(
+      [px, floorH, pzB], [px, floorH, pzF],
+      [px, 0, pzB], [px, 0, pzF],
+      -1, 0, 0,
+    );
+    // Right face (+X)
+    addQuad(
+      [pxR, floorH, pzF], [pxR, floorH, pzB],
+      [pxR, 0, pzF], [pxR, 0, pzB],
+      1, 0, 0,
+    );
+  }
+
+  return { positions, normals, indices };
+}
+
+/**
+ * Generate balcony geometry on the front wall of the main volume.
+ */
+function generateBalconies(recipe, style) {
+  const positions = [];
+  const normals = [];
+  const indices = [];
+
+  function addQuad(v0, v1, v2, v3, nx, ny, nz) {
+    const base = positions.length / 3;
+    positions.push(...v0, ...v1, ...v2, ...v3);
+    normals.push(nx, ny, nz, nx, ny, nz, nx, ny, nz, nx, ny, nz);
+    indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+  }
+
+  const floorH = style.floorHeight;
+  const platDepth = 1.2;
+  const platThick = 0.1;
+  const platWidth = recipe.mainWidth - 1.0;
+  const railH = 1.0;
+  const railThick = 0.03;
+  const xOffset = 0.5; // centered on main volume
+
+  for (const floorIndex of recipe.balconyFloors) {
+    const platY = floorIndex * floorH;
+    const platBot = platY - platThick;
+    const z0 = 0; // front wall
+    const z1 = -platDepth;
+
+    // Platform top face
+    addQuad(
+      [xOffset, platY, z0], [xOffset + platWidth, platY, z0],
+      [xOffset, platY, z1], [xOffset + platWidth, platY, z1],
+      0, 1, 0,
+    );
+    // Platform bottom face
+    addQuad(
+      [xOffset + platWidth, platBot, z0], [xOffset, platBot, z0],
+      [xOffset + platWidth, platBot, z1], [xOffset, platBot, z1],
+      0, -1, 0,
+    );
+    // Platform front edge
+    addQuad(
+      [xOffset, platY, z1], [xOffset + platWidth, platY, z1],
+      [xOffset, platBot, z1], [xOffset + platWidth, platBot, z1],
+      0, 0, -1,
+    );
+
+    // Railing at outer edge
+    const railTop = platY + railH;
+    addQuad(
+      [xOffset, railTop, z1], [xOffset + platWidth, railTop, z1],
+      [xOffset, platY, z1], [xOffset + platWidth, platY, z1],
+      0, 0, -1,
+    );
+    // Railing back face (facing building)
+    addQuad(
+      [xOffset + platWidth, railTop, z1 + railThick], [xOffset, railTop, z1 + railThick],
+      [xOffset + platWidth, platY, z1 + railThick], [xOffset, platY, z1 + railThick],
+      0, 0, 1,
+    );
+  }
+
+  return { positions, normals, indices };
+}
+
+/**
+ * Generate dormer geometry on the front roof slope.
+ * Simplified: positioned at wall-top height as small gabled boxes.
+ */
+function generateDormers(recipe, style) {
+  const positions = [];
+  const normals = [];
+  const indices = [];
+
+  function addQuad(v0, v1, v2, v3, nx, ny, nz) {
+    const base = positions.length / 3;
+    positions.push(...v0, ...v1, ...v2, ...v3);
+    normals.push(nx, ny, nz, nx, ny, nz, nx, ny, nz, nx, ny, nz);
+    indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+  }
+
+  const wallHeight = recipe.floors * style.floorHeight;
+  const dormerW = style.windowWidth + 0.4;
+  const dormerH = style.windowHeight * 0.7;
+  const dormerD = 0.6;
+  const spacing = style.windowSpacing;
+  const width = recipe.mainWidth;
+
+  // How many dormers fit
+  let count = Math.max(1, Math.floor((width - spacing * 0.5) / spacing));
+  if (recipe.dormerCount < 99) {
+    count = Math.min(count, recipe.dormerCount);
+  }
+
+  const totalSpan = (count - 1) * spacing;
+  const z0 = -0.1; // slightly in front of front wall
+
+  for (let i = 0; i < count; i++) {
+    const cx = (width - totalSpan) / 2 + i * spacing;
+    const cy = wallHeight + dormerH / 2;
+    const halfW = dormerW / 2;
+    const halfH = dormerH / 2;
+
+    const xL = cx - halfW;
+    const xR = cx + halfW;
+    const yBot = cy - halfH;
+    const yTop = cy + halfH;
+    const zFront = z0;
+    const zBack = z0 + dormerD;
+
+    // Front face (wallColor)
+    addQuad(
+      [xL, yTop, zFront], [xR, yTop, zFront],
+      [xL, yBot, zFront], [xR, yBot, zFront],
+      0, 0, -1,
+    );
+    // Left side
+    addQuad(
+      [xL, yTop, zBack], [xL, yTop, zFront],
+      [xL, yBot, zBack], [xL, yBot, zFront],
+      -1, 0, 0,
+    );
+    // Right side
+    addQuad(
+      [xR, yTop, zFront], [xR, yTop, zBack],
+      [xR, yBot, zFront], [xR, yBot, zBack],
+      1, 0, 0,
+    );
+    // Top face (acts as tiny roof)
+    addQuad(
+      [xL, yTop, zFront], [xR, yTop, zFront],
+      [xL, yTop, zBack], [xR, yTop, zBack],
+      0, 1, 0,
+    );
+  }
+
+  return { positions, normals, indices };
+}
+
+/**
+ * Generate chimney geometry sitting on the roof ridge.
+ */
+function generateChimneys(recipe, style) {
+  const positions = [];
+  const normals = [];
+  const indices = [];
+
+  function addQuad(v0, v1, v2, v3, nx, ny, nz) {
+    const base = positions.length / 3;
+    positions.push(...v0, ...v1, ...v2, ...v3);
+    normals.push(nx, ny, nz, nx, ny, nz, nx, ny, nz, nx, ny, nz);
+    indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+  }
+
+  const wallHeight = recipe.floors * style.floorHeight;
+  const pitchRad = (style.roofPitch * Math.PI) / 180;
+  const w = recipe.mainWidth;
+  const d = recipe.mainDepth;
+  const shorter = Math.min(w, d);
+
+  // Compute ridge Y based on roof type
+  let ridgeY;
+  switch (style.roofType) {
+    case 'flat':
+      ridgeY = wallHeight + 0.15;
+      break;
+    case 'mansard': {
+      const inset = shorter * 0.15;
+      const breakHeight = wallHeight + inset * Math.tan((70 * Math.PI) / 180);
+      const innerShorter = shorter - 2 * inset;
+      const innerInset = innerShorter / 2;
+      ridgeY = breakHeight + innerInset * Math.tan(pitchRad);
+      break;
+    }
+    default: // gable, hip
+      ridgeY = wallHeight + (shorter / 2) * Math.tan(pitchRad);
+      break;
+  }
+
+  // Ridge runs along the longer axis
+  const ridgeLen = Math.max(w, d);
+
+  const chimW = 0.4;
+  const chimD = 0.6;
+  const chimH = 1.5;
+
+  // Placement along ridge
+  const placements = [];
+  if (recipe.chimneyCount === 1) {
+    placements.push(0.3);
+  } else if (recipe.chimneyCount >= 2) {
+    placements.push(0.25, 0.75);
+  }
+
+  for (const t of placements) {
+    // Position along the ridge
+    let cx, cz;
+    if (w >= d) {
+      // Ridge along X
+      cx = t * w;
+      cz = d / 2;
+    } else {
+      // Ridge along Z
+      cx = w / 2;
+      cz = t * d;
+    }
+
+    const x0 = cx - chimW / 2;
+    const x1 = cx + chimW / 2;
+    const z0 = cz - chimD / 2;
+    const z1 = cz + chimD / 2;
+    const yBot = ridgeY;
+    const yTop = ridgeY + chimH;
+
+    // Four vertical faces
+    // Front (-Z)
+    addQuad(
+      [x0, yTop, z0], [x1, yTop, z0],
+      [x0, yBot, z0], [x1, yBot, z0],
+      0, 0, -1,
+    );
+    // Back (+Z)
+    addQuad(
+      [x1, yTop, z1], [x0, yTop, z1],
+      [x1, yBot, z1], [x0, yBot, z1],
+      0, 0, 1,
+    );
+    // Left (-X)
+    addQuad(
+      [x0, yTop, z1], [x0, yTop, z0],
+      [x0, yBot, z1], [x0, yBot, z0],
+      -1, 0, 0,
+    );
+    // Right (+X)
+    addQuad(
+      [x1, yTop, z0], [x1, yTop, z1],
+      [x1, yBot, z0], [x1, yBot, z1],
+      1, 0, 0,
+    );
+    // Top
+    addQuad(
+      [x0, yTop, z0], [x1, yTop, z0],
+      [x0, yTop, z1], [x1, yTop, z1],
+      0, 1, 0,
+    );
+  }
+
+  return { positions, normals, indices };
+}
+
+/**
  * Generate a complete building as a THREE.Group.
  *
  * @param {object} style - Style object from getClimateStyle()
@@ -736,6 +1258,108 @@ export function generateBuilding(style, recipe) {
   const roofMesh = new THREE.Mesh(roofGeometry, roofMaterial);
   roofMesh.name = 'roof';
   group.add(roofMesh);
+
+  // --- Trim material (shared by sills, cornice, quoins, porch, balconies) ---
+  const trimMaterial = new THREE.MeshLambertMaterial({
+    color: recipe.trimColor,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+
+  // --- Sills ---
+  if (recipe.hasSills) {
+    const sillParts = [];
+    for (const vol of volumes) {
+      const wallHeight = vol.floors * style.floorHeight;
+      sillParts.push(generateSills(vol, wallHeight, volumes, style));
+    }
+    const sillData = mergeGeometryData(sillParts);
+    if (sillData.positions.length > 0) {
+      const sillGeometry = buildGeometry(sillData);
+      const sillMesh = new THREE.Mesh(sillGeometry, trimMaterial);
+      sillMesh.name = 'sills';
+      group.add(sillMesh);
+    }
+  }
+
+  // --- Cornice ---
+  if (recipe.hasCornice) {
+    const corniceParts = [];
+    for (const vol of volumes) {
+      const wallHeight = vol.floors * style.floorHeight;
+      corniceParts.push(generateCornice(vol, wallHeight, volumes, style));
+    }
+    const corniceData = mergeGeometryData(corniceParts);
+    if (corniceData.positions.length > 0) {
+      const corniceGeometry = buildGeometry(corniceData);
+      const corniceMesh = new THREE.Mesh(corniceGeometry, trimMaterial);
+      corniceMesh.name = 'cornice';
+      group.add(corniceMesh);
+    }
+  }
+
+  // --- Quoins ---
+  if (recipe.hasQuoins) {
+    const quoinParts = [];
+    for (const vol of volumes) {
+      const wallHeight = vol.floors * style.floorHeight;
+      quoinParts.push(generateQuoins(vol, wallHeight, volumes, style));
+    }
+    const quoinData = mergeGeometryData(quoinParts);
+    if (quoinData.positions.length > 0) {
+      const quoinGeometry = buildGeometry(quoinData);
+      const quoinMesh = new THREE.Mesh(quoinGeometry, trimMaterial);
+      quoinMesh.name = 'quoins';
+      group.add(quoinMesh);
+    }
+  }
+
+  // --- Porch ---
+  if (recipe.hasPorch && recipe.porchDepth > 0) {
+    const porchData = generatePorch(recipe, style);
+    if (porchData.positions.length > 0) {
+      const porchGeometry = buildGeometry(porchData);
+      const porchMesh = new THREE.Mesh(porchGeometry, trimMaterial);
+      porchMesh.name = 'porch';
+      group.add(porchMesh);
+    }
+  }
+
+  // --- Balconies ---
+  if (recipe.hasBalcony && recipe.balconyFloors.length > 0) {
+    const balconyData = generateBalconies(recipe, style);
+    if (balconyData.positions.length > 0) {
+      const balconyGeometry = buildGeometry(balconyData);
+      const balconyMesh = new THREE.Mesh(balconyGeometry, trimMaterial);
+      balconyMesh.name = 'balconies';
+      group.add(balconyMesh);
+    }
+  }
+
+  // --- Dormers ---
+  if (recipe.hasDormers && recipe.dormerCount > 0) {
+    const dormerData = generateDormers(recipe, style);
+    if (dormerData.positions.length > 0) {
+      const dormerGeometry = buildGeometry(dormerData);
+      const dormerMaterial = new THREE.MeshLambertMaterial({ color: recipe.wallColor });
+      const dormerMesh = new THREE.Mesh(dormerGeometry, dormerMaterial);
+      dormerMesh.name = 'dormers';
+      group.add(dormerMesh);
+    }
+  }
+
+  // --- Chimneys ---
+  if (recipe.chimneyCount > 0) {
+    const chimneyData = generateChimneys(recipe, style);
+    if (chimneyData.positions.length > 0) {
+      const chimneyGeometry = buildGeometry(chimneyData);
+      const chimneyMaterial = new THREE.MeshLambertMaterial({ color: 0x8b4513 });
+      const chimneyMesh = new THREE.Mesh(chimneyGeometry, chimneyMaterial);
+      chimneyMesh.name = 'chimneys';
+      group.add(chimneyMesh);
+    }
+  }
 
   return group;
 }
