@@ -21,21 +21,6 @@ function vPath(x, z0, z1, rank = 1) {
   return { cells, rank };
 }
 
-/** Helper: create a diagonal path from (x0,z0) to (x1,z1) */
-function diagPath(x0, z0, x1, z1, rank = 1) {
-  const cells = [];
-  const dx = x1 > x0 ? 1 : -1;
-  const dz = z1 > z0 ? 1 : -1;
-  let x = x0, z = z0;
-  while (true) {
-    cells.push({ gx: x, gz: z });
-    if (x === x1 && z === z1) break;
-    x += dx;
-    z += dz;
-  }
-  return { cells, rank };
-}
-
 /** Utility: cell key */
 function cKey(c) { return `${c.gx},${c.gz}`; }
 

@@ -14,12 +14,12 @@ export function mergeRoadPaths(paths) {
   if (paths.length === 0) return [];
 
   // --- Step 1: Build the cell graph ---
-  // Each node: { neighbors: Set<key>, pathSet: Set<pathIndex>, isEndpoint: bool }
+  // Each node: { neighbors: Set<key>, isEndpoint: bool }
   const nodes = new Map();
 
   function getOrCreateNode(key) {
     if (!nodes.has(key)) {
-      nodes.set(key, { neighbors: new Set(), pathSet: new Set(), isEndpoint: false });
+      nodes.set(key, { neighbors: new Set(), isEndpoint: false });
     }
     return nodes.get(key);
   }
@@ -30,7 +30,6 @@ export function mergeRoadPaths(paths) {
       const c = cells[ci];
       const key = `${c.gx},${c.gz}`;
       const node = getOrCreateNode(key);
-      node.pathSet.add(pi);
 
       // Mark first and last cells of each path as endpoints
       if (ci === 0 || ci === cells.length - 1) {
