@@ -41,6 +41,7 @@ export function prepareCityScene(map) {
 /**
  * Convert road polylines from world to local coords.
  * Compute centerline elevation for neutral camber.
+ * Apply Chaikin corner-cutting to round sharp corners.
  */
 function prepareRoads(map, ox, oz, cs) {
   return map.roads.map(road => {
@@ -48,12 +49,17 @@ function prepareRoads(map, ox, oz, cs) {
     if (!pts || pts.length < 2) return null;
 
     const halfW = (road.width || 6) / 2;
-    const localPts = pts.map(p => {
+    let localPts = pts.map(p => {
       const x = p.x - ox;
       const z = p.z - oz;
       const centerY = map.elevation.sample(x / cs, z / cs) + ROAD_Y_OFFSET;
       return { x, z, y: centerY };
     });
+
+    // Chaikin corner-cutting: 2 iterations to round sharp corners
+    for (let iter = 0; iter < 2; iter++) {
+      localPts = _chaikinSmooth(localPts);
+    }
 
     return {
       localPts,
@@ -62,6 +68,30 @@ function prepareRoads(map, ox, oz, cs) {
       hierarchy: road.hierarchy || 'local',
     };
   }).filter(Boolean);
+}
+
+/**
+ * One iteration of Chaikin corner-cutting smoothing.
+ * Preserves first and last points. Doubles point count per iteration.
+ */
+function _chaikinSmooth(pts) {
+  if (pts.length < 3) return pts;
+  const result = [pts[0]];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    result.push({
+      x: a.x * 0.75 + b.x * 0.25,
+      z: a.z * 0.75 + b.z * 0.25,
+      y: a.y * 0.75 + b.y * 0.25,
+    });
+    result.push({
+      x: a.x * 0.25 + b.x * 0.75,
+      z: a.z * 0.25 + b.z * 0.75,
+      y: a.y * 0.25 + b.y * 0.75,
+    });
+  }
+  result.push(pts[pts.length - 1]);
+  return result;
 }
 
 /**

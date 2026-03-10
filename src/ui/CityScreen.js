@@ -370,7 +370,8 @@ export class CityScreen {
   }
 
   /**
-   * Road ribbon meshes from pre-processed scene data (neutral camber, local coords).
+   * Road ribbon meshes from pre-processed scene data.
+   * Uses bisector miter joins at corners and neutral camber (flat across width).
    */
   _buildRoads() {
     const group = new THREE.Group();
@@ -386,14 +387,31 @@ export class CityScreen {
 
       for (let i = 0; i < pts.length; i++) {
         const p = pts[i];
-        let dx, dz;
-        if (i < pts.length - 1) {
-          dx = pts[i + 1].x - p.x; dz = pts[i + 1].z - p.z;
+
+        // Bisector miter: average incoming and outgoing perpendiculars
+        let perpX, perpZ;
+        if (i === 0) {
+          const dx = pts[1].x - p.x, dz = pts[1].z - p.z;
+          const len = Math.sqrt(dx * dx + dz * dz) || 1;
+          perpX = -dz / len; perpZ = dx / len;
+        } else if (i === pts.length - 1) {
+          const dx = p.x - pts[i - 1].x, dz = p.z - pts[i - 1].z;
+          const len = Math.sqrt(dx * dx + dz * dz) || 1;
+          perpX = -dz / len; perpZ = dx / len;
         } else {
-          dx = p.x - pts[i - 1].x; dz = p.z - pts[i - 1].z;
+          // Incoming perpendicular
+          const dx0 = p.x - pts[i - 1].x, dz0 = p.z - pts[i - 1].z;
+          const len0 = Math.sqrt(dx0 * dx0 + dz0 * dz0) || 1;
+          const px0 = -dz0 / len0, pz0 = dx0 / len0;
+          // Outgoing perpendicular
+          const dx1 = pts[i + 1].x - p.x, dz1 = pts[i + 1].z - p.z;
+          const len1 = Math.sqrt(dx1 * dx1 + dz1 * dz1) || 1;
+          const px1 = -dz1 / len1, pz1 = dx1 / len1;
+          // Average and normalize
+          const ax = px0 + px1, az = pz0 + pz1;
+          const alen = Math.sqrt(ax * ax + az * az) || 1;
+          perpX = ax / alen; perpZ = az / alen;
         }
-        const len = Math.sqrt(dx * dx + dz * dz) || 1;
-        const perpX = -dz / len, perpZ = dx / len;
 
         const lx = p.x + perpX * halfW, lz = p.z + perpZ * halfW;
         const rx = p.x - perpX * halfW, rz = p.z - perpZ * halfW;
