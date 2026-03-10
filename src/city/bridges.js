@@ -83,7 +83,11 @@ export function placeBridges(map) {
       continue;
     }
 
-    // Splice the bridge into the triggering road's polyline
+    // Splice the bridge into the triggering road's polyline.
+    // For roads crossing multiple rivers, later splices operate on the
+    // already-mutated polyline — the entry/exit world coords from
+    // findRoadWaterCrossings are still valid because _closestPointIndex
+    // re-searches the current polyline.
     _spliceBridge(crossing.road, crossing.entryX, crossing.entryZ,
                   crossing.exitX, crossing.exitZ, banks.bankA, banks.bankB);
 
@@ -298,7 +302,7 @@ function _findBank(map, startX, startZ, dirX, dirZ, cellSize) {
  * @param {number} wz - World Z
  * @returns {number} index into polyline
  */
-export function _closestPointIndex(polyline, wx, wz) {
+function _closestPointIndex(polyline, wx, wz) {
   let bestDist = Infinity;
   let bestIdx = 0;
 
@@ -329,7 +333,7 @@ export function _closestPointIndex(polyline, wx, wz) {
  * @param {{ x: number, z: number }} bankA - One bank position
  * @param {{ x: number, z: number }} bankB - Other bank position
  */
-export function _spliceBridge(road, entryX, entryZ, exitX, exitZ, bankA, bankB) {
+function _spliceBridge(road, entryX, entryZ, exitX, exitZ, bankA, bankB) {
   const polyline = road.polyline;
 
   // Find polyline point indices closest to water entry and exit
@@ -341,6 +345,12 @@ export function _spliceBridge(road, entryX, entryZ, exitX, exitZ, bankA, bankB) 
     [entryIdx, exitIdx] = [exitIdx, entryIdx];
     // Also swap entry/exit coords to match
     [entryX, entryZ, exitX, exitZ] = [exitX, exitZ, entryX, entryZ];
+  }
+
+  // Guard: very narrow crossing where entry and exit resolve to same index
+  if (entryIdx === exitIdx) {
+    exitIdx = Math.min(entryIdx + 1, polyline.length - 1);
+    if (entryIdx === exitIdx) return; // 2-point polyline, both resolve to same point
   }
 
   // Determine which bank is closer to the entry point
