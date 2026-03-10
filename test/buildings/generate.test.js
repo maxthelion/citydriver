@@ -139,6 +139,41 @@ describe('addPitchedRoof', () => {
     const after = getBounds(house.group).maxY;
     expect(after - before).toBeCloseTo(3, 0);
   });
+
+  it('uses roof texture when house._roofTileStyle is set', () => {
+    const house = createHouse(6, 5, 3);
+    house._roofTileStyle = 'clay';
+    house.roofColor = 0x4a4a4a;
+    addPitchedRoof(house, 35, 'sides');
+    const roof = getChild(house.group, 'roof');
+    expect(roof.material.map).toBeDefined();
+    expect(roof.material.map).toBe(getRoofTexture('clay', 0x4a4a4a));
+  });
+
+  it('roof geometry has UV attribute when textured', () => {
+    const house = createHouse(6, 5, 3);
+    house._roofTileStyle = 'slate';
+    addPitchedRoof(house, 35, 'sides');
+    const roof = getChild(house.group, 'roof');
+    expect(roof.geometry.getAttribute('uv')).toBeDefined();
+  });
+
+  it('roof geometry has UV attribute for all directions', () => {
+    for (const dir of ['sides', 'frontback', 'all', 'mansard']) {
+      const house = createHouse(6, 5, 3);
+      house._roofTileStyle = 'slate';
+      addPitchedRoof(house, 35, dir);
+      const roof = getChild(house.group, 'roof');
+      expect(roof.geometry.getAttribute('uv')).toBeDefined();
+    }
+  });
+
+  it('defaults to no texture when _roofTileStyle not set', () => {
+    const house = createHouse(6, 5, 3);
+    addPitchedRoof(house, 35, 'sides');
+    const roof = getChild(house.group, 'roof');
+    expect(roof.material.map).toBeNull();
+  });
 });
 
 describe('addFrontDoor', () => {

@@ -309,62 +309,76 @@ export function addPitchedRoof(house, pitch = 35, direction = 'sides', overhang 
 
   const P = [];
   const I = [];
+  const useTexture = !!house._roofTileStyle;
+  const U = useTexture ? [] : null;
 
   if (direction === 'mansard') {
-    _mansardRoof(P, I, w, d, h, pitchRad);
+    _mansardRoof(P, I, w, d, h, pitchRad, U);
   } else if (direction === 'all') {
-    _hipRoof(P, I, w, d, h, pitchRad, oh);
+    _hipRoof(P, I, w, d, h, pitchRad, oh, U);
   } else if (direction === 'sides') {
-    _gableRoofSides(P, I, w, d, h, pitchRad, oh);
+    _gableRoofSides(P, I, w, d, h, pitchRad, oh, U);
   } else {
-    _gableRoofFrontBack(P, I, w, d, h, pitchRad, oh);
+    _gableRoofFrontBack(P, I, w, d, h, pitchRad, oh, U);
   }
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
   geo.setIndex(I);
+  if (U) geo.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
   geo.computeVertexNormals();
 
-  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
-    color: house.roofColor,
-    side: THREE.DoubleSide,
-  }));
+  let mat;
+  if (useTexture) {
+    mat = new THREE.MeshLambertMaterial({
+      color: 0xffffff,
+      map: getRoofTexture(house._roofTileStyle, house.roofColor),
+      side: THREE.DoubleSide,
+    });
+  } else {
+    mat = new THREE.MeshLambertMaterial({
+      color: house.roofColor,
+      side: THREE.DoubleSide,
+    });
+  }
+
+  const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'roof';
   house.group.add(mesh);
   return house;
 }
 
-function _gableRoofSides(P, I, w, d, h, pitchRad, oh = 0) {
+function _gableRoofSides(P, I, w, d, h, pitchRad, oh = 0, U) {
   const rise = (w / 2) * Math.tan(pitchRad);
   const ry = h + rise;
   const mx = w / 2;
 
-  // Left slope (with overhang)
-  _quad(P, I, [-oh,h,d+oh], [-oh,h,-oh], [mx,ry,-oh], [mx,ry,d+oh]);
-  // Right slope
-  _quad(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [mx,ry,d+oh], [mx,ry,-oh]);
-  // Front gable
-  _tri(P, I, [w+oh,h,-oh], [-oh,h,-oh], [mx,ry,-oh]);
-  // Back gable
-  _tri(P, I, [-oh,h,d+oh], [w+oh,h,d+oh], [mx,ry,d+oh]);
+  _quad(P, I, [-oh,h,d+oh], [-oh,h,-oh], [mx,ry,-oh], [mx,ry,d+oh],
+    U, _roofUV(-oh,h,d+oh), _roofUV(-oh,h,-oh), _roofUV(mx,ry,-oh), _roofUV(mx,ry,d+oh));
+  _quad(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [mx,ry,d+oh], [mx,ry,-oh],
+    U, _roofUV(w+oh,h,-oh), _roofUV(w+oh,h,d+oh), _roofUV(mx,ry,d+oh), _roofUV(mx,ry,-oh));
+  _tri(P, I, [w+oh,h,-oh], [-oh,h,-oh], [mx,ry,-oh],
+    U, _roofUV(w+oh,h,-oh), _roofUV(-oh,h,-oh), _roofUV(mx,ry,-oh));
+  _tri(P, I, [-oh,h,d+oh], [w+oh,h,d+oh], [mx,ry,d+oh],
+    U, _roofUV(-oh,h,d+oh), _roofUV(w+oh,h,d+oh), _roofUV(mx,ry,d+oh));
 }
 
-function _gableRoofFrontBack(P, I, w, d, h, pitchRad, oh = 0) {
+function _gableRoofFrontBack(P, I, w, d, h, pitchRad, oh = 0, U) {
   const rise = (d / 2) * Math.tan(pitchRad);
   const ry = h + rise;
   const mz = d / 2;
 
-  // Front slope (with overhang)
-  _quad(P, I, [w+oh,h,-oh], [-oh,h,-oh], [-oh,ry,mz], [w+oh,ry,mz]);
-  // Back slope
-  _quad(P, I, [-oh,h,d+oh], [w+oh,h,d+oh], [w+oh,ry,mz], [-oh,ry,mz]);
-  // Left gable
-  _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [-oh,ry,mz]);
-  // Right gable
-  _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [w+oh,ry,mz]);
+  _quad(P, I, [w+oh,h,-oh], [-oh,h,-oh], [-oh,ry,mz], [w+oh,ry,mz],
+    U, _roofUV(w+oh,h,-oh), _roofUV(-oh,h,-oh), _roofUV(-oh,ry,mz), _roofUV(w+oh,ry,mz));
+  _quad(P, I, [-oh,h,d+oh], [w+oh,h,d+oh], [w+oh,ry,mz], [-oh,ry,mz],
+    U, _roofUV(-oh,h,d+oh), _roofUV(w+oh,h,d+oh), _roofUV(w+oh,ry,mz), _roofUV(-oh,ry,mz));
+  _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [-oh,ry,mz],
+    U, _roofUV(-oh,h,d+oh), _roofUV(-oh,h,-oh), _roofUV(-oh,ry,mz));
+  _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [w+oh,ry,mz],
+    U, _roofUV(w+oh,h,-oh), _roofUV(w+oh,h,d+oh), _roofUV(w+oh,ry,mz));
 }
 
-function _hipRoof(P, I, w, d, h, pitchRad, oh = 0) {
+function _hipRoof(P, I, w, d, h, pitchRad, oh = 0, U) {
   const span = Math.min(w, d);
   const rise = (span / 2) * Math.tan(pitchRad);
   const ry = h + rise;
@@ -374,39 +388,50 @@ function _hipRoof(P, I, w, d, h, pitchRad, oh = 0) {
     const rx0 = inset, rx1 = w - inset, mz = d / 2;
     if (rx0 >= rx1) {
       const cx = w / 2;
-      _tri(P, I, [-oh,h,-oh], [w+oh,h,-oh], [cx,ry,mz]);
-      _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [cx,ry,mz]);
-      _tri(P, I, [w+oh,h,d+oh], [-oh,h,d+oh], [cx,ry,mz]);
-      _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [cx,ry,mz]);
+      _tri(P, I, [-oh,h,-oh], [w+oh,h,-oh], [cx,ry,mz],
+        U, _roofUV(-oh,h,-oh), _roofUV(w+oh,h,-oh), _roofUV(cx,ry,mz));
+      _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [cx,ry,mz],
+        U, _roofUV(w+oh,h,-oh), _roofUV(w+oh,h,d+oh), _roofUV(cx,ry,mz));
+      _tri(P, I, [w+oh,h,d+oh], [-oh,h,d+oh], [cx,ry,mz],
+        U, _roofUV(w+oh,h,d+oh), _roofUV(-oh,h,d+oh), _roofUV(cx,ry,mz));
+      _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [cx,ry,mz],
+        U, _roofUV(-oh,h,d+oh), _roofUV(-oh,h,-oh), _roofUV(cx,ry,mz));
     } else {
-      _quad(P, I, [-oh,h,-oh], [w+oh,h,-oh], [rx1,ry,mz], [rx0,ry,mz]);
-      _quad(P, I, [w+oh,h,d+oh], [-oh,h,d+oh], [rx0,ry,mz], [rx1,ry,mz]);
-      _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [rx0,ry,mz]);
-      _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [rx1,ry,mz]);
+      _quad(P, I, [-oh,h,-oh], [w+oh,h,-oh], [rx1,ry,mz], [rx0,ry,mz],
+        U, _roofUV(-oh,h,-oh), _roofUV(w+oh,h,-oh), _roofUV(rx1,ry,mz), _roofUV(rx0,ry,mz));
+      _quad(P, I, [w+oh,h,d+oh], [-oh,h,d+oh], [rx0,ry,mz], [rx1,ry,mz],
+        U, _roofUV(w+oh,h,d+oh), _roofUV(-oh,h,d+oh), _roofUV(rx0,ry,mz), _roofUV(rx1,ry,mz));
+      _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [rx0,ry,mz],
+        U, _roofUV(-oh,h,d+oh), _roofUV(-oh,h,-oh), _roofUV(rx0,ry,mz));
+      _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [rx1,ry,mz],
+        U, _roofUV(w+oh,h,-oh), _roofUV(w+oh,h,d+oh), _roofUV(rx1,ry,mz));
     }
   } else {
     const rz0 = inset, rz1 = d - inset, mx = w / 2;
     if (rz0 >= rz1) {
       const cz = d / 2;
-      _tri(P, I, [-oh,h,-oh], [w+oh,h,-oh], [mx,ry,cz]);
-      _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [mx,ry,cz]);
-      _tri(P, I, [w+oh,h,d+oh], [-oh,h,d+oh], [mx,ry,cz]);
-      _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [mx,ry,cz]);
+      _tri(P, I, [-oh,h,-oh], [w+oh,h,-oh], [mx,ry,cz],
+        U, _roofUV(-oh,h,-oh), _roofUV(w+oh,h,-oh), _roofUV(mx,ry,cz));
+      _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [mx,ry,cz],
+        U, _roofUV(w+oh,h,-oh), _roofUV(w+oh,h,d+oh), _roofUV(mx,ry,cz));
+      _tri(P, I, [w+oh,h,d+oh], [-oh,h,d+oh], [mx,ry,cz],
+        U, _roofUV(w+oh,h,d+oh), _roofUV(-oh,h,d+oh), _roofUV(mx,ry,cz));
+      _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [mx,ry,cz],
+        U, _roofUV(-oh,h,d+oh), _roofUV(-oh,h,-oh), _roofUV(mx,ry,cz));
     } else {
-      _quad(P, I, [-oh,h,d+oh], [-oh,h,-oh], [mx,ry,rz0], [mx,ry,rz1]);
-      _quad(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [mx,ry,rz1], [mx,ry,rz0]);
-      _tri(P, I, [w+oh,h,-oh], [-oh,h,-oh], [mx,ry,rz0]);
-      _tri(P, I, [-oh,h,d+oh], [w+oh,h,d+oh], [mx,ry,rz1]);
+      _quad(P, I, [-oh,h,d+oh], [-oh,h,-oh], [mx,ry,rz0], [mx,ry,rz1],
+        U, _roofUV(-oh,h,d+oh), _roofUV(-oh,h,-oh), _roofUV(mx,ry,rz0), _roofUV(mx,ry,rz1));
+      _quad(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [mx,ry,rz1], [mx,ry,rz0],
+        U, _roofUV(w+oh,h,-oh), _roofUV(w+oh,h,d+oh), _roofUV(mx,ry,rz1), _roofUV(mx,ry,rz0));
+      _tri(P, I, [w+oh,h,-oh], [-oh,h,-oh], [mx,ry,rz0],
+        U, _roofUV(w+oh,h,-oh), _roofUV(-oh,h,-oh), _roofUV(mx,ry,rz0));
+      _tri(P, I, [-oh,h,d+oh], [w+oh,h,d+oh], [mx,ry,rz1],
+        U, _roofUV(-oh,h,d+oh), _roofUV(w+oh,h,d+oh), _roofUV(mx,ry,rz1));
     }
   }
 }
 
-function _mansardRoof(P, I, w, d, h, pitchRad) {
-  // Steep lower slopes (70°) inset by a fraction of the shorter span,
-  // then a flat top. The pitch parameter controls how much of the
-  // building footprint the flat top covers (higher pitch = steeper
-  // lower slope = smaller flat top, but we keep the 70° steep angle
-  // and use pitch to set the inset fraction instead).
+function _mansardRoof(P, I, w, d, h, pitchRad, U) {
   const insetFrac = 0.2;
   const insetX = w * insetFrac;
   const insetZ = d * insetFrac;
@@ -417,28 +442,39 @@ function _mansardRoof(P, I, w, d, h, pitchRad) {
   const bx0 = insetX, bx1 = w - insetX;
   const bz0 = insetZ, bz1 = d - insetZ;
 
-  // Four steep lower slopes
-  _quad(P, I, [0,h,0], [w,h,0], [bx1,topY,bz0], [bx0,topY,bz0]);  // front
-  _quad(P, I, [w,h,0], [w,h,d], [bx1,topY,bz1], [bx1,topY,bz0]);  // right
-  _quad(P, I, [w,h,d], [0,h,d], [bx0,topY,bz1], [bx1,topY,bz1]);  // back
-  _quad(P, I, [0,h,d], [0,h,0], [bx0,topY,bz0], [bx0,topY,bz1]);  // left
+  _quad(P, I, [0,h,0], [w,h,0], [bx1,topY,bz0], [bx0,topY,bz0],
+    U, _roofUV(0,h,0), _roofUV(w,h,0), _roofUV(bx1,topY,bz0), _roofUV(bx0,topY,bz0));
+  _quad(P, I, [w,h,0], [w,h,d], [bx1,topY,bz1], [bx1,topY,bz0],
+    U, _roofUV(w,h,0), _roofUV(w,h,d), _roofUV(bx1,topY,bz1), _roofUV(bx1,topY,bz0));
+  _quad(P, I, [w,h,d], [0,h,d], [bx0,topY,bz1], [bx1,topY,bz1],
+    U, _roofUV(w,h,d), _roofUV(0,h,d), _roofUV(bx0,topY,bz1), _roofUV(bx1,topY,bz1));
+  _quad(P, I, [0,h,d], [0,h,0], [bx0,topY,bz0], [bx0,topY,bz1],
+    U, _roofUV(0,h,d), _roofUV(0,h,0), _roofUV(bx0,topY,bz0), _roofUV(bx0,topY,bz1));
+  _quad(P, I, [bx0,topY,bz0], [bx1,topY,bz0], [bx1,topY,bz1], [bx0,topY,bz1],
+    U, _roofUV(bx0,topY,bz0), _roofUV(bx1,topY,bz0), _roofUV(bx1,topY,bz1), _roofUV(bx0,topY,bz1));
+}
 
-  // Flat top cap
-  _quad(P, I, [bx0,topY,bz0], [bx1,topY,bz0], [bx1,topY,bz1], [bx0,topY,bz1]);
+// Scale factor: 1 texture repeat per ROOF_TEX_SCALE metres of roof surface
+const ROOF_TEX_SCALE = 2.0;
+
+function _roofUV(x, y, z) {
+  return [x / ROOF_TEX_SCALE, (y + z) / ROOF_TEX_SCALE];
 }
 
 // Append a quad (4 verts, 2 triangles) to position/index arrays
-function _quad(P, I, a, b, c, d) {
+function _quad(P, I, a, b, c, d, U, uvA, uvB, uvC, uvD) {
   const i = P.length / 3;
   P.push(...a, ...b, ...c, ...d);
   I.push(i, i+1, i+2, i, i+2, i+3);
+  if (U && uvA) U.push(...uvA, ...uvB, ...uvC, ...uvD);
 }
 
 // Append a triangle (3 verts, 1 triangle) to position/index arrays
-function _tri(P, I, a, b, c) {
+function _tri(P, I, a, b, c, U, uvA, uvB, uvC) {
   const i = P.length / 3;
   P.push(...a, ...b, ...c);
   I.push(i, i+1, i+2);
+  if (U && uvA) U.push(...uvA, ...uvB, ...uvC);
 }
 
 export function addFrontDoor(house, placement = 'center') {
