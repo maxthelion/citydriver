@@ -41,7 +41,7 @@ export function prepareCityScene(map) {
 /**
  * Convert road polylines from world to local coords.
  * Compute centerline elevation for neutral camber.
- * Apply Chaikin corner-cutting to round sharp corners.
+ * Polylines are already Chaikin-smoothed by the pipeline.
  */
 function prepareRoads(map, ox, oz, cs) {
   return map.roads.map(road => {
@@ -56,13 +56,15 @@ function prepareRoads(map, ox, oz, cs) {
       return { x, z, y: centerY };
     });
 
-    // Chaikin corner-cutting: 2 iterations to round sharp corners
-    for (let iter = 0; iter < 2; iter++) {
-      localPts = _chaikinSmooth(localPts);
-    }
-
     // Densify: insert points every ~1 cell so elevation tracks terrain on slopes
     localPts = _densifyAndResample(localPts, cs, map.elevation, ox, oz);
+
+    // Trim segments below sea level (roads shouldn't render in the sea)
+    if (map.seaLevel != null) {
+      const seaY = map.seaLevel + ROAD_Y_OFFSET;
+      localPts = _trimBelowSea(localPts, seaY);
+      if (localPts.length < 2) return null;
+    }
 
     return {
       localPts,
@@ -71,30 +73,6 @@ function prepareRoads(map, ox, oz, cs) {
       hierarchy: road.hierarchy || 'local',
     };
   }).filter(Boolean);
-}
-
-/**
- * One iteration of Chaikin corner-cutting smoothing.
- * Preserves first and last points. Doubles point count per iteration.
- */
-function _chaikinSmooth(pts) {
-  if (pts.length < 3) return pts;
-  const result = [pts[0]];
-  for (let i = 0; i < pts.length - 1; i++) {
-    const a = pts[i], b = pts[i + 1];
-    result.push({
-      x: a.x * 0.75 + b.x * 0.25,
-      z: a.z * 0.75 + b.z * 0.25,
-      y: a.y * 0.75 + b.y * 0.25,
-    });
-    result.push({
-      x: a.x * 0.25 + b.x * 0.75,
-      z: a.z * 0.25 + b.z * 0.75,
-      y: a.y * 0.25 + b.y * 0.75,
-    });
-  }
-  result.push(pts[pts.length - 1]);
-  return result;
 }
 
 /**
@@ -117,7 +95,7 @@ function _densifyAndResample(pts, cs, elevation, ox, oz) {
         const x = a.x + dx * t;
         const z = a.z + dz * t;
         // Resample elevation from the terrain grid at this position
-        const y = elevation.sample((x + ox) / cs, (z + oz) / cs) + ROAD_Y_OFFSET;
+        const y = elevation.sample(x / cs, z / cs) + ROAD_Y_OFFSET;
         result.push({ x, z, y });
       }
     }
@@ -127,12 +105,34 @@ function _densifyAndResample(pts, cs, elevation, ox, oz) {
 }
 
 /**
+ * Keep only the longest run of above-sea-level points.
+ * Roads that dip into the sea get trimmed at the coastline.
+ */
+function _trimBelowSea(pts, seaY) {
+  let bestStart = 0, bestLen = 0;
+  let runStart = -1;
+  for (let i = 0; i <= pts.length; i++) {
+    if (i < pts.length && pts[i].y >= seaY) {
+      if (runStart < 0) runStart = i;
+    } else {
+      if (runStart >= 0) {
+        const runLen = i - runStart;
+        if (runLen > bestLen) { bestStart = runStart; bestLen = runLen; }
+        runStart = -1;
+      }
+    }
+  }
+  return bestLen > 0 ? pts.slice(bestStart, bestStart + bestLen) : [];
+}
+
+/**
  * Convert river polylines from world to local coords.
  * Elevation is read from the map (already carved by carveChannels in the pipeline).
  * A lightweight monotonic clamp handles any remaining interpolation artifacts
  * from bilinear sampling between carved grid cells.
  */
 function prepareRivers(map, ox, oz, cs) {
+  const w = map.width, h = map.height;
   return map.rivers.map(river => {
     const pts = river.polyline;
     if (!pts || pts.length < 2) return null;
@@ -141,25 +141,70 @@ function prepareRivers(map, ox, oz, cs) {
       const x = p.x - ox;
       const z = p.z - oz;
       const y = map.elevation.sample(x / cs, z / cs) + RIVER_Y_OFFSET;
-      return { x, z, y, width: p.width || 10, accumulation: p.accumulation || 0 };
+      return { x, z, y, width: p.width || 10 };
     });
 
-    // Determine downstream direction from accumulation
-    if (localPts.length >= 2) {
-      if (localPts[0].accumulation > localPts[localPts.length - 1].accumulation) {
-        localPts.reverse();
-      }
+    // Order downstream using elevation (high → low).
+    // Elevation is the reliable signal; accumulation can be wrong after clipping.
+    if (localPts.length >= 2 && localPts[0].y < localPts[localPts.length - 1].y) {
+      localPts.reverse();
     }
 
-    // Clamp any remaining uphill bumps from grid interpolation
+    // Clamp any remaining uphill bumps from bilinear grid interpolation
     for (let i = 1; i < localPts.length; i++) {
       if (localPts[i].y > localPts[i - 1].y) {
         localPts[i].y = localPts[i - 1].y;
       }
     }
 
+    // Extend endpoints to terrain boundary so clipped rivers don't stop short.
+    // Skip extension for endpoints at/below sea level (river mouth at coast).
+    const maxX = (w - 1) * cs, maxZ = (h - 1) * cs;
+    const seaY = (map.seaLevel || 0) + RIVER_Y_OFFSET;
+    _extendToEdge(localPts, 0, 1, maxX, maxZ, cs, seaY);
+    _extendToEdge(localPts, localPts.length - 1, localPts.length - 2, maxX, maxZ, cs, seaY);
+
     return { localPts };
   }).filter(Boolean);
+}
+
+/**
+ * If a river endpoint is within a few cells of the terrain boundary,
+ * extend it along its final direction to reach the edge. This prevents
+ * clipped rivers from stopping visibly short of the terrain.
+ */
+function _extendToEdge(pts, endIdx, neighborIdx, maxX, maxZ, cs, seaY) {
+  const ep = pts[endIdx];
+  // Don't extend if endpoint is at/below sea level (river mouth at coast)
+  if (ep.y <= seaY) return;
+  const threshold = cs * 3;
+  const nearEdge = ep.x < threshold || ep.z < threshold ||
+                   ep.x > maxX - threshold || ep.z > maxZ - threshold;
+  if (!nearEdge) return;
+
+  const nb = pts[neighborIdx];
+  const dx = ep.x - nb.x, dz = ep.z - nb.z;
+  const len = Math.sqrt(dx * dx + dz * dz);
+  if (len < 0.01) return;
+  const ux = dx / len, uz = dz / len;
+
+  // Extend just enough to reach the boundary (capped to avoid crossing sea)
+  const maxExt = cs * 4;
+  let tMin = Infinity;
+  if (ux > 0.001) tMin = Math.min(tMin, (maxX - ep.x) / ux);
+  else if (ux < -0.001) tMin = Math.min(tMin, -ep.x / ux);
+  if (uz > 0.001) tMin = Math.min(tMin, (maxZ - ep.z) / uz);
+  else if (uz < -0.001) tMin = Math.min(tMin, -ep.z / uz);
+
+  if (tMin <= 0 || tMin === Infinity) return;
+  tMin = Math.min(tMin, maxExt);
+
+  const ext = {
+    x: ep.x + ux * tMin, z: ep.z + uz * tMin,
+    y: ep.y, width: ep.width,
+  };
+  if (endIdx === 0) pts.unshift(ext);
+  else pts.push(ext);
 }
 
 /**

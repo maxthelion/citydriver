@@ -147,6 +147,9 @@ export function setupCity(layers, settlement, rng) {
   // Set terrain (computes initial buildability, which needs waterMask first)
   map.setTerrain(elevation, slope);
 
+  // Store sea level early (needed by carveChannels to avoid carving below sea)
+  map.seaLevel = seaLevel;
+
   // Classify water
   map.classifyWater(seaLevel);
 
@@ -155,9 +158,6 @@ export function setupCity(layers, settlement, rng) {
 
   // Water depth (BFS from land into water — for narrow-river path costs)
   map.computeWaterDepth();
-
-  // Store metadata (needed by computeLandValue for town center)
-  map.seaLevel = seaLevel;
   map.settlement = settlement;
   map.regionalLayers = layers;
   map.rng = rng;

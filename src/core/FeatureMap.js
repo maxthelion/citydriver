@@ -640,25 +640,23 @@ export class FeatureMap {
     if (!this.elevation) return;
 
     // Phase 1: Enforce monotonic downhill flow on each river polyline.
-    // Walk each river in downstream direction (increasing accumulation)
-    // and clamp the centerline elevation so it never increases.
+    // Walk each river in downstream direction and clamp the centerline
+    // elevation so it never increases.
     for (const river of this.rivers) {
       const polyline = river.polyline;
       if (!polyline || polyline.length < 2) continue;
 
-      // Determine downstream direction from accumulation
-      const firstAcc = polyline[0].accumulation || 0;
-      const lastAcc = polyline[polyline.length - 1].accumulation || 0;
-      const downstream = firstAcc <= lastAcc
-        ? polyline
-        : [...polyline].reverse();
-
       // Sample centerline elevations
-      const elevations = downstream.map(p => {
+      const elevations = polyline.map(p => {
         const gx = (p.x - this.originX) / this.cellSize;
         const gz = (p.z - this.originZ) / this.cellSize;
         return this.elevation.sample(gx, gz);
       });
+
+      // Determine downstream direction from elevation (more reliable than
+      // accumulation, which may be interpolated inaccurately at clip boundaries)
+      const flowsForward = elevations[0] >= elevations[elevations.length - 1];
+      if (!flowsForward) elevations.reverse();
 
       // Clamp to monotonic decreasing
       for (let i = 1; i < elevations.length; i++) {
@@ -667,16 +665,20 @@ export class FeatureMap {
         }
       }
 
+      // Reverse back to match polyline order
+      if (!flowsForward) elevations.reverse();
+
       // Store corrected elevations back as target centerline heights
       // (used by the carving pass below to set absolute channel depth)
-      for (let i = 0; i < downstream.length; i++) {
-        downstream[i]._targetY = elevations[i];
+      for (let i = 0; i < polyline.length; i++) {
+        polyline[i]._targetY = elevations[i];
       }
     }
 
     // Phase 2: Carve channels using channel profile.
     // Where _targetY is set, use it as the absolute river bed elevation
     // instead of carving relative to current terrain.
+    const seaFloor = this.seaLevel != null ? this.seaLevel - 0.5 : -Infinity;
     for (const river of this.rivers) {
       const polyline = river.polyline;
       if (!polyline || polyline.length < 2) continue;
@@ -733,6 +735,8 @@ export class FeatureMap {
                 // Fallback: relative carving
                 newElev = current - profile * maxDepth;
               }
+              // Never carve below sea level (prevents chasms at river mouths)
+              newElev = Math.max(newElev, seaFloor);
               if (newElev < current) {
                 this.elevation.set(gx, gz, newElev);
               }

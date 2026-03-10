@@ -137,3 +137,25 @@ export function remap(value, inMin, inMax, outMin, outMax) {
   const t = (value - inMin) / (inMax - inMin);
   return outMin + t * (outMax - outMin);
 }
+
+/**
+ * Chaikin corner-cutting smoothing (one iteration).
+ * Preserves first and last points. Doubles point count per iteration.
+ * Interpolates all numeric own-properties on each point object.
+ */
+export function chaikinSmooth(pts) {
+  if (pts.length < 3) return pts;
+  const result = [pts[0]];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const q = { x: a.x * 0.75 + b.x * 0.25, z: a.z * 0.75 + b.z * 0.25 };
+    const r = { x: a.x * 0.25 + b.x * 0.75, z: a.z * 0.25 + b.z * 0.75 };
+    if (a.y !== undefined && b.y !== undefined) {
+      q.y = a.y * 0.75 + b.y * 0.25;
+      r.y = a.y * 0.25 + b.y * 0.75;
+    }
+    result.push(q, r);
+  }
+  result.push(pts[pts.length - 1]);
+  return result;
+}

@@ -13,6 +13,7 @@ import { FlyCamera } from './FlyCamera.js';
 import { renderMap, drawRivers, drawRoads, drawSettlements } from '../rendering/mapRenderer.js';
 import { CITY_RADIUS } from '../city/constants.js';
 import { placeBuildings } from '../city/placeBuildings.js';
+import { chaikinSmooth } from '../core/math.js';
 
 // Land cover colors (same as regionPreview3D.js)
 const COVER_COLORS = {
@@ -41,6 +42,15 @@ export class CityScreen {
     // Run city pipeline
     const map = setupCity(layers, settlement, rng);
     buildSkeletonRoads(map);
+
+    // Smooth road polylines in-place (2 Chaikin iterations).
+    // Done once here so all consumers (rendering, building placement) see the same curves.
+    // roadGrid is already stamped from the cell-based paths, so grid data is unaffected.
+    for (const road of map.roads) {
+      if (!road.polyline || road.polyline.length < 3) continue;
+      for (let i = 0; i < 2; i++) road.polyline = chaikinSmooth(road.polyline);
+    }
+
     this._map = map;
 
     this._buildScene();
@@ -272,18 +282,38 @@ export class CityScreen {
         if (map.roadGrid.get(gx, gz) > 0) {
           rgb = PAVED_COLOR;
         } else {
+          // Bilinear blend of regional land cover colors for smooth boundaries
           const wx = map.originX + gx * cs;
           const wz = map.originZ + gz * cs;
-          let cover = regionalLandCover.get(
-            Math.min(Math.round(wx / rcs), regionalLandCover.width - 1),
-            Math.min(Math.round(wz / rcs), regionalLandCover.height - 1),
-          );
-          // Skip settlement clearing and water — use natural ground color at city scale.
-          if (cover === 5 || cover === 0) cover = -1;
-          rgb = COVER_COLORS[cover] || DEFAULT_COLOR;
+          const fgx = wx / rcs, fgz = wz / rcs;
+          const rx0 = Math.max(0, Math.min(Math.floor(fgx), regionalLandCover.width - 1));
+          const rz0 = Math.max(0, Math.min(Math.floor(fgz), regionalLandCover.height - 1));
+          const rx1 = Math.min(rx0 + 1, regionalLandCover.width - 1);
+          const rz1 = Math.min(rz0 + 1, regionalLandCover.height - 1);
+          const fx = fgx - rx0, fz = fgz - rz0;
+
+          const covers = [
+            regionalLandCover.get(rx0, rz0),
+            regionalLandCover.get(rx1, rz0),
+            regionalLandCover.get(rx0, rz1),
+            regionalLandCover.get(rx1, rz1),
+          ];
+          const weights = [(1 - fx) * (1 - fz), fx * (1 - fz), (1 - fx) * fz, fx * fz];
+
+          rgb = [0, 0, 0];
+          let isForest = false;
+          for (let ci = 0; ci < 4; ci++) {
+            let c = covers[ci];
+            if (c === 5 || c === 0) c = -1;
+            if (c === 2 || c === 6) isForest = true;
+            const cc = COVER_COLORS[c] || DEFAULT_COLOR;
+            rgb[0] += cc[0] * weights[ci];
+            rgb[1] += cc[1] * weights[ci];
+            rgb[2] += cc[2] * weights[ci];
+          }
 
           // Procedural noise on forest/woodland for dappled canopy look
-          if (cover === 2 || cover === 6) {
+          if (isForest) {
             const hash = ((gx * 2654435761 + gz * 2246822519) >>> 0) & 0xffff;
             const noise = (hash / 0xffff) * 0.15 - 0.075;
             rgb = [
