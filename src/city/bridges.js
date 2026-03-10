@@ -2,23 +2,21 @@
  * Bridge placement system.
  *
  * Finds where skeleton roads cross rivers, scores and filters crossings,
- * then places perpendicular bridge features with landing spur connections.
+ * then splices perpendicular bridge segments into the triggering road's polyline.
  *
  * Spec: specs/v5/observations.md "Bridge Placement System"
  */
 
-import { findPath } from '../core/pathfinding.js';
-import { addRoadToGraph } from './skeleton.js';
-
 const MIN_BRIDGE_SPACING = 25; // cells (~250m)
 const MAX_BRIDGE_LENGTH = 10; // cells — reject bridges longer than this
 const MAX_BANK_SEARCH = 50;   // cells
-const LANDING_THRESHOLD = 3;  // cells — connect spur if bank > this from road
-const LANDING_SEARCH_RADIUS = 15; // cells
 
 /**
  * Place bridges where skeleton roads cross rivers.
  * Call after skeleton roads and extra edges are built.
+ *
+ * Instead of creating separate bridge features, this splices the perpendicular
+ * bridge banks directly into the triggering road's polyline.
  *
  * @param {import('../core/FeatureMap.js').FeatureMap} map
  * @returns {{ placed: number, skipped: number }}
@@ -85,25 +83,9 @@ export function placeBridges(map) {
       continue;
     }
 
-    // Add bridge feature
-    const importance = crossing.importance;
-    const hierarchy = crossing.hierarchy;
-    const width = 6 + importance * 10;
-
-    map.addFeature('road', {
-      polyline: [banks.bankA, banks.bankB],
-      width,
-      hierarchy,
-      importance,
-      source: 'bridge',
-      bridge: true,
-    });
-
-    addRoadToGraph(map, [banks.bankA, banks.bankB], width, hierarchy);
-
-    // Connect landing points to road network if needed
-    connectLandingToRoads(map, banks.bankA, hierarchy);
-    connectLandingToRoads(map, banks.bankB, hierarchy);
+    // Splice the bridge into the triggering road's polyline
+    _spliceBridge(crossing.road, crossing.entryX, crossing.entryZ,
+                  crossing.exitX, crossing.exitZ, banks.bankA, banks.bankB);
 
     acceptedMidpoints.push({ x: crossing.midX, z: crossing.midZ });
     placed++;
@@ -116,7 +98,7 @@ export function placeBridges(map) {
  * Walk skeleton road polylines and find land→water→land transitions.
  *
  * @param {import('../core/FeatureMap.js').FeatureMap} map
- * @returns {Array<{entryX: number, entryZ: number, exitX: number, exitZ: number,
+ * @returns {Array<{road: object, entryX: number, entryZ: number, exitX: number, exitZ: number,
  *   midX: number, midZ: number, widthCells: number, importance: number, hierarchy: string}>}
  */
 export function findRoadWaterCrossings(map) {
@@ -175,6 +157,7 @@ export function findRoadWaterCrossings(map) {
           const exitX = px;
           const exitZ = pz;
           crossings.push({
+            road,
             entryX, entryZ,
             exitX, exitZ,
             midX: (entryX + exitX) / 2,
@@ -303,135 +286,79 @@ function _findBank(map, startX, startZ, dirX, dirZ, cellSize) {
   return null; // Didn't find a bank within search limit
 }
 
+// ============================================================
+// Bridge splicing
+// ============================================================
+
 /**
- * If a bridge bank landing is far from existing roads, pathfind a short spur to connect it.
+ * Find the index of the polyline point closest to given world coordinates.
  *
- * @param {import('../core/FeatureMap.js').FeatureMap} map
- * @param {{ x: number, z: number }} landing - World-coord bank position
- * @param {string} hierarchy - Road hierarchy for the spur
+ * @param {Array<{x: number, z: number}>} polyline
+ * @param {number} wx - World X
+ * @param {number} wz - World Z
+ * @returns {number} index into polyline
  */
-export function connectLandingToRoads(map, landing, hierarchy) {
-  const cs = map.cellSize;
-  const lgx = Math.round((landing.x - map.originX) / cs);
-  const lgz = Math.round((landing.z - map.originZ) / cs);
+export function _closestPointIndex(polyline, wx, wz) {
+  let bestDist = Infinity;
+  let bestIdx = 0;
 
-  if (lgx < 0 || lgx >= map.width || lgz < 0 || lgz >= map.height) return;
-
-  // Check if already near a road cell
-  if (map.roadGrid.get(lgx, lgz) > 0) return;
-
-  let nearRoad = false;
-  for (let dz = -LANDING_THRESHOLD; dz <= LANDING_THRESHOLD; dz++) {
-    for (let dx = -LANDING_THRESHOLD; dx <= LANDING_THRESHOLD; dx++) {
-      const gx = lgx + dx, gz = lgz + dz;
-      if (gx >= 0 && gx < map.width && gz >= 0 && gz < map.height) {
-        if (map.roadGrid.get(gx, gz) > 0) { nearRoad = true; break; }
-      }
-    }
-    if (nearRoad) break;
-  }
-  if (nearRoad) return;
-
-  // Find nearest road cell within search radius
-  let bestDist = Infinity, bestGx = -1, bestGz = -1;
-  for (let dz = -LANDING_SEARCH_RADIUS; dz <= LANDING_SEARCH_RADIUS; dz++) {
-    for (let dx = -LANDING_SEARCH_RADIUS; dx <= LANDING_SEARCH_RADIUS; dx++) {
-      const gx = lgx + dx, gz = lgz + dz;
-      if (gx < 0 || gx >= map.width || gz < 0 || gz >= map.height) continue;
-      if (map.roadGrid.get(gx, gz) === 0) continue;
-      const d = Math.sqrt(dx * dx + dz * dz);
-      if (d < bestDist) { bestDist = d; bestGx = gx; bestGz = gz; }
+  for (let i = 0; i < polyline.length; i++) {
+    const dx = polyline[i].x - wx;
+    const dz = polyline[i].z - wz;
+    const dist = dx * dx + dz * dz;
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIdx = i;
     }
   }
 
-  if (bestGx < 0) return;
-
-  const costFn = map.createPathCost('bridge');
-  const result = findPath(lgx, lgz, bestGx, bestGz, map.width, map.height, costFn);
-  if (!result || result.path.length < 2) return;
-
-  // Stamp road grid
-  for (const p of result.path) {
-    map.roadGrid.set(p.gx, p.gz, 1);
-  }
-
-  // Simplify grid path → clean world-coord polyline
-  const polyline = _gridPathToPolyline(result.path, cs, map.originX, map.originZ);
-  if (polyline.length < 2) return;
-
-  const importance = hierarchy === 'arterial' ? 0.9 :
-                     hierarchy === 'collector' ? 0.6 : 0.45;
-  const width = 6 + importance * 10;
-
-  map.addFeature('road', {
-    polyline,
-    width,
-    hierarchy,
-    importance,
-    source: 'bridge',
-  });
-
-  addRoadToGraph(map, polyline, width, hierarchy);
+  return bestIdx;
 }
-
-// ============================================================
-// Polyline simplification
-// ============================================================
 
 /**
- * Convert A* grid path to a simplified world-coord polyline.
- * Quantizes to half-cell, deduplicates, then RDP-simplifies.
+ * Splice a bridge into a road's polyline in place.
+ *
+ * Replaces the water-crossing portion of the road with a two-point bridge
+ * segment (nearBank → farBank) that is perpendicular to the river.
+ *
+ * @param {object} road - Road feature object (polyline modified in place)
+ * @param {number} entryX - World X where road enters water
+ * @param {number} entryZ - World Z where road enters water
+ * @param {number} exitX - World X where road exits water
+ * @param {number} exitZ - World Z where road exits water
+ * @param {{ x: number, z: number }} bankA - One bank position
+ * @param {{ x: number, z: number }} bankB - Other bank position
  */
-function _gridPathToPolyline(path, cellSize, originX, originZ) {
-  if (path.length < 2) return [];
+export function _spliceBridge(road, entryX, entryZ, exitX, exitZ, bankA, bankB) {
+  const polyline = road.polyline;
 
-  const half = cellSize * 0.5;
+  // Find polyline point indices closest to water entry and exit
+  let entryIdx = _closestPointIndex(polyline, entryX, entryZ);
+  let exitIdx = _closestPointIndex(polyline, exitX, exitZ);
 
-  // Quantize to half-cell grid and deduplicate
-  const deduped = [];
-  let prevQx = NaN, prevQz = NaN;
-  for (const p of path) {
-    const wx = originX + p.gx * cellSize;
-    const wz = originZ + p.gz * cellSize;
-    const qx = Math.round(wx / half) * half;
-    const qz = Math.round(wz / half) * half;
-    if (qx === prevQx && qz === prevQz) continue;
-    deduped.push({ x: qx, z: qz });
-    prevQx = qx;
-    prevQz = qz;
+  // Ensure entry index < exit index in the polyline
+  if (entryIdx > exitIdx) {
+    [entryIdx, exitIdx] = [exitIdx, entryIdx];
+    // Also swap entry/exit coords to match
+    [entryX, entryZ, exitX, exitZ] = [exitX, exitZ, entryX, entryZ];
   }
 
-  if (deduped.length < 2) return deduped;
+  // Determine which bank is closer to the entry point
+  const distAtoEntry = (bankA.x - entryX) ** 2 + (bankA.z - entryZ) ** 2;
+  const distBtoEntry = (bankB.x - entryX) ** 2 + (bankB.z - entryZ) ** 2;
 
-  // RDP simplification (epsilon = 1 cell)
-  return _simplifyRDP(deduped, cellSize);
-}
-
-/** Ramer-Douglas-Peucker on world-coord polyline. */
-function _simplifyRDP(pts, epsilon) {
-  if (pts.length <= 2) return pts;
-
-  const first = pts[0], last = pts[pts.length - 1];
-  let maxDist = 0, maxIdx = 0;
-
-  for (let i = 1; i < pts.length - 1; i++) {
-    const d = _ptSegDistSq(pts[i].x, pts[i].z, first.x, first.z, last.x, last.z);
-    if (d > maxDist) { maxDist = d; maxIdx = i; }
+  let nearBank, farBank;
+  if (distAtoEntry <= distBtoEntry) {
+    nearBank = bankA;
+    farBank = bankB;
+  } else {
+    nearBank = bankB;
+    farBank = bankA;
   }
 
-  if (Math.sqrt(maxDist) > epsilon) {
-    const left = _simplifyRDP(pts.slice(0, maxIdx + 1), epsilon);
-    const right = _simplifyRDP(pts.slice(maxIdx), epsilon);
-    return left.slice(0, -1).concat(right);
-  }
-  return [first, last];
-}
+  // Build new polyline: [...before_entry, nearBank, farBank, ...after_exit]
+  const before = polyline.slice(0, entryIdx + 1);
+  const after = polyline.slice(exitIdx);
 
-function _ptSegDistSq(px, pz, ax, az, bx, bz) {
-  const dx = bx - ax, dz = bz - az;
-  const lenSq = dx * dx + dz * dz;
-  if (lenSq === 0) return (px - ax) ** 2 + (pz - az) ** 2;
-  let t = ((px - ax) * dx + (pz - az) * dz) / lenSq;
-  t = Math.max(0, Math.min(1, t));
-  return (px - ax - t * dx) ** 2 + (pz - az - t * dz) ** 2;
+  road.polyline = [...before, nearBank, farBank, ...after];
 }
