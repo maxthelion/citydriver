@@ -311,16 +311,22 @@ export function addPitchedRoof(house, pitch = 35, direction = 'sides', overhang 
   const I = [];
   const useTexture = !!house._roofTileStyle;
   const U = useTexture ? [] : null;
+  // Gable wall triangles go into separate arrays (wall colour, not tiled)
+  const GP = [];
+  const GI = [];
 
   if (direction === 'mansard') {
     _mansardRoof(P, I, w, d, h, pitchRad, U);
   } else if (direction === 'all') {
     _hipRoof(P, I, w, d, h, pitchRad, oh, U);
   } else if (direction === 'sides') {
-    _gableRoofSides(P, I, w, d, h, pitchRad, oh, U);
+    _gableRoofSides(P, I, w, d, h, pitchRad, oh, U, GP, GI);
   } else {
-    _gableRoofFrontBack(P, I, w, d, h, pitchRad, oh, U);
+    _gableRoofFrontBack(P, I, w, d, h, pitchRad, oh, U, GP, GI);
   }
+
+  const roofGroup = new THREE.Group();
+  roofGroup.name = 'roof';
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
@@ -342,40 +348,54 @@ export function addPitchedRoof(house, pitch = 35, direction = 'sides', overhang 
     });
   }
 
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.name = 'roof';
-  house.group.add(mesh);
+  roofGroup.add(new THREE.Mesh(geo, mat));
+
+  // Gable wall triangles — wall colour, no texture
+  if (GP.length > 0) {
+    const gGeo = new THREE.BufferGeometry();
+    gGeo.setAttribute('position', new THREE.Float32BufferAttribute(GP, 3));
+    gGeo.setIndex(GI);
+    gGeo.computeVertexNormals();
+    roofGroup.add(new THREE.Mesh(gGeo, new THREE.MeshLambertMaterial({
+      color: house.wallColor,
+      side: THREE.DoubleSide,
+    })));
+  }
+
+  house.group.add(roofGroup);
   return house;
 }
 
-function _gableRoofSides(P, I, w, d, h, pitchRad, oh = 0, U) {
+function _gableRoofSides(P, I, w, d, h, pitchRad, oh = 0, U, GP, GI) {
   const rise = (w / 2) * Math.tan(pitchRad);
   const ry = h + rise;
   const mx = w / 2;
 
+  // Left/right slopes: ridge along Z
   _quad(P, I, [-oh,h,d+oh], [-oh,h,-oh], [mx,ry,-oh], [mx,ry,d+oh],
-    U, _roofUV(-oh,h,d+oh), _roofUV(-oh,h,-oh), _roofUV(mx,ry,-oh), _roofUV(mx,ry,d+oh));
+    U, _uvZ(-oh,h,d+oh), _uvZ(-oh,h,-oh), _uvZ(mx,ry,-oh), _uvZ(mx,ry,d+oh));
   _quad(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [mx,ry,d+oh], [mx,ry,-oh],
-    U, _roofUV(w+oh,h,-oh), _roofUV(w+oh,h,d+oh), _roofUV(mx,ry,d+oh), _roofUV(mx,ry,-oh));
-  _tri(P, I, [w+oh,h,-oh], [-oh,h,-oh], [mx,ry,-oh],
-    U, _roofUV(w+oh,h,-oh), _roofUV(-oh,h,-oh), _roofUV(mx,ry,-oh));
-  _tri(P, I, [-oh,h,d+oh], [w+oh,h,d+oh], [mx,ry,d+oh],
-    U, _roofUV(-oh,h,d+oh), _roofUV(w+oh,h,d+oh), _roofUV(mx,ry,d+oh));
+    U, _uvZ(w+oh,h,-oh), _uvZ(w+oh,h,d+oh), _uvZ(mx,ry,d+oh), _uvZ(mx,ry,-oh));
+  // Front/back gable triangles → separate arrays (wall material)
+  const gP = GP || P, gI = GI || I;
+  _tri(gP, gI, [w+oh,h,-oh], [-oh,h,-oh], [mx,ry,-oh]);
+  _tri(gP, gI, [-oh,h,d+oh], [w+oh,h,d+oh], [mx,ry,d+oh]);
 }
 
-function _gableRoofFrontBack(P, I, w, d, h, pitchRad, oh = 0, U) {
+function _gableRoofFrontBack(P, I, w, d, h, pitchRad, oh = 0, U, GP, GI) {
   const rise = (d / 2) * Math.tan(pitchRad);
   const ry = h + rise;
   const mz = d / 2;
 
+  // Front/back slopes: ridge along X
   _quad(P, I, [w+oh,h,-oh], [-oh,h,-oh], [-oh,ry,mz], [w+oh,ry,mz],
-    U, _roofUV(w+oh,h,-oh), _roofUV(-oh,h,-oh), _roofUV(-oh,ry,mz), _roofUV(w+oh,ry,mz));
+    U, _uvX(w+oh,h,-oh), _uvX(-oh,h,-oh), _uvX(-oh,ry,mz), _uvX(w+oh,ry,mz));
   _quad(P, I, [-oh,h,d+oh], [w+oh,h,d+oh], [w+oh,ry,mz], [-oh,ry,mz],
-    U, _roofUV(-oh,h,d+oh), _roofUV(w+oh,h,d+oh), _roofUV(w+oh,ry,mz), _roofUV(-oh,ry,mz));
-  _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [-oh,ry,mz],
-    U, _roofUV(-oh,h,d+oh), _roofUV(-oh,h,-oh), _roofUV(-oh,ry,mz));
-  _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [w+oh,ry,mz],
-    U, _roofUV(w+oh,h,-oh), _roofUV(w+oh,h,d+oh), _roofUV(w+oh,ry,mz));
+    U, _uvX(-oh,h,d+oh), _uvX(w+oh,h,d+oh), _uvX(w+oh,ry,mz), _uvX(-oh,ry,mz));
+  // Left/right gable triangles → separate arrays (wall material)
+  const gP = GP || P, gI = GI || I;
+  _tri(gP, gI, [-oh,h,d+oh], [-oh,h,-oh], [-oh,ry,mz]);
+  _tri(gP, gI, [w+oh,h,-oh], [w+oh,h,d+oh], [w+oh,ry,mz]);
 }
 
 function _hipRoof(P, I, w, d, h, pitchRad, oh = 0, U) {
@@ -385,48 +405,50 @@ function _hipRoof(P, I, w, d, h, pitchRad, oh = 0, U) {
   const inset = span / 2;
 
   if (w >= d) {
+    // Ridge along X — front/back slopes use _uvX, left/right ends use _uvZ
     const rx0 = inset, rx1 = w - inset, mz = d / 2;
     if (rx0 >= rx1) {
       const cx = w / 2;
       _tri(P, I, [-oh,h,-oh], [w+oh,h,-oh], [cx,ry,mz],
-        U, _roofUV(-oh,h,-oh), _roofUV(w+oh,h,-oh), _roofUV(cx,ry,mz));
+        U, _uvX(-oh,h,-oh), _uvX(w+oh,h,-oh), _uvX(cx,ry,mz));
       _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [cx,ry,mz],
-        U, _roofUV(w+oh,h,-oh), _roofUV(w+oh,h,d+oh), _roofUV(cx,ry,mz));
+        U, _uvZ(w+oh,h,-oh), _uvZ(w+oh,h,d+oh), _uvZ(cx,ry,mz));
       _tri(P, I, [w+oh,h,d+oh], [-oh,h,d+oh], [cx,ry,mz],
-        U, _roofUV(w+oh,h,d+oh), _roofUV(-oh,h,d+oh), _roofUV(cx,ry,mz));
+        U, _uvX(w+oh,h,d+oh), _uvX(-oh,h,d+oh), _uvX(cx,ry,mz));
       _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [cx,ry,mz],
-        U, _roofUV(-oh,h,d+oh), _roofUV(-oh,h,-oh), _roofUV(cx,ry,mz));
+        U, _uvZ(-oh,h,d+oh), _uvZ(-oh,h,-oh), _uvZ(cx,ry,mz));
     } else {
       _quad(P, I, [-oh,h,-oh], [w+oh,h,-oh], [rx1,ry,mz], [rx0,ry,mz],
-        U, _roofUV(-oh,h,-oh), _roofUV(w+oh,h,-oh), _roofUV(rx1,ry,mz), _roofUV(rx0,ry,mz));
+        U, _uvX(-oh,h,-oh), _uvX(w+oh,h,-oh), _uvX(rx1,ry,mz), _uvX(rx0,ry,mz));
       _quad(P, I, [w+oh,h,d+oh], [-oh,h,d+oh], [rx0,ry,mz], [rx1,ry,mz],
-        U, _roofUV(w+oh,h,d+oh), _roofUV(-oh,h,d+oh), _roofUV(rx0,ry,mz), _roofUV(rx1,ry,mz));
+        U, _uvX(w+oh,h,d+oh), _uvX(-oh,h,d+oh), _uvX(rx0,ry,mz), _uvX(rx1,ry,mz));
       _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [rx0,ry,mz],
-        U, _roofUV(-oh,h,d+oh), _roofUV(-oh,h,-oh), _roofUV(rx0,ry,mz));
+        U, _uvZ(-oh,h,d+oh), _uvZ(-oh,h,-oh), _uvZ(rx0,ry,mz));
       _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [rx1,ry,mz],
-        U, _roofUV(w+oh,h,-oh), _roofUV(w+oh,h,d+oh), _roofUV(rx1,ry,mz));
+        U, _uvZ(w+oh,h,-oh), _uvZ(w+oh,h,d+oh), _uvZ(rx1,ry,mz));
     }
   } else {
+    // Ridge along Z — left/right slopes use _uvZ, front/back ends use _uvX
     const rz0 = inset, rz1 = d - inset, mx = w / 2;
     if (rz0 >= rz1) {
       const cz = d / 2;
       _tri(P, I, [-oh,h,-oh], [w+oh,h,-oh], [mx,ry,cz],
-        U, _roofUV(-oh,h,-oh), _roofUV(w+oh,h,-oh), _roofUV(mx,ry,cz));
+        U, _uvX(-oh,h,-oh), _uvX(w+oh,h,-oh), _uvX(mx,ry,cz));
       _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [mx,ry,cz],
-        U, _roofUV(w+oh,h,-oh), _roofUV(w+oh,h,d+oh), _roofUV(mx,ry,cz));
+        U, _uvZ(w+oh,h,-oh), _uvZ(w+oh,h,d+oh), _uvZ(mx,ry,cz));
       _tri(P, I, [w+oh,h,d+oh], [-oh,h,d+oh], [mx,ry,cz],
-        U, _roofUV(w+oh,h,d+oh), _roofUV(-oh,h,d+oh), _roofUV(mx,ry,cz));
+        U, _uvX(w+oh,h,d+oh), _uvX(-oh,h,d+oh), _uvX(mx,ry,cz));
       _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [mx,ry,cz],
-        U, _roofUV(-oh,h,d+oh), _roofUV(-oh,h,-oh), _roofUV(mx,ry,cz));
+        U, _uvZ(-oh,h,d+oh), _uvZ(-oh,h,-oh), _uvZ(mx,ry,cz));
     } else {
       _quad(P, I, [-oh,h,d+oh], [-oh,h,-oh], [mx,ry,rz0], [mx,ry,rz1],
-        U, _roofUV(-oh,h,d+oh), _roofUV(-oh,h,-oh), _roofUV(mx,ry,rz0), _roofUV(mx,ry,rz1));
+        U, _uvZ(-oh,h,d+oh), _uvZ(-oh,h,-oh), _uvZ(mx,ry,rz0), _uvZ(mx,ry,rz1));
       _quad(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [mx,ry,rz1], [mx,ry,rz0],
-        U, _roofUV(w+oh,h,-oh), _roofUV(w+oh,h,d+oh), _roofUV(mx,ry,rz1), _roofUV(mx,ry,rz0));
+        U, _uvZ(w+oh,h,-oh), _uvZ(w+oh,h,d+oh), _uvZ(mx,ry,rz1), _uvZ(mx,ry,rz0));
       _tri(P, I, [w+oh,h,-oh], [-oh,h,-oh], [mx,ry,rz0],
-        U, _roofUV(w+oh,h,-oh), _roofUV(-oh,h,-oh), _roofUV(mx,ry,rz0));
+        U, _uvX(w+oh,h,-oh), _uvX(-oh,h,-oh), _uvX(mx,ry,rz0));
       _tri(P, I, [-oh,h,d+oh], [w+oh,h,d+oh], [mx,ry,rz1],
-        U, _roofUV(-oh,h,d+oh), _roofUV(w+oh,h,d+oh), _roofUV(mx,ry,rz1));
+        U, _uvX(-oh,h,d+oh), _uvX(w+oh,h,d+oh), _uvX(mx,ry,rz1));
     }
   }
 }
@@ -442,23 +464,31 @@ function _mansardRoof(P, I, w, d, h, pitchRad, U) {
   const bx0 = insetX, bx1 = w - insetX;
   const bz0 = insetZ, bz1 = d - insetZ;
 
+  // Front/back slopes: U along X
   _quad(P, I, [0,h,0], [w,h,0], [bx1,topY,bz0], [bx0,topY,bz0],
-    U, _roofUV(0,h,0), _roofUV(w,h,0), _roofUV(bx1,topY,bz0), _roofUV(bx0,topY,bz0));
-  _quad(P, I, [w,h,0], [w,h,d], [bx1,topY,bz1], [bx1,topY,bz0],
-    U, _roofUV(w,h,0), _roofUV(w,h,d), _roofUV(bx1,topY,bz1), _roofUV(bx1,topY,bz0));
+    U, _uvX(0,h,0), _uvX(w,h,0), _uvX(bx1,topY,bz0), _uvX(bx0,topY,bz0));
   _quad(P, I, [w,h,d], [0,h,d], [bx0,topY,bz1], [bx1,topY,bz1],
-    U, _roofUV(w,h,d), _roofUV(0,h,d), _roofUV(bx0,topY,bz1), _roofUV(bx1,topY,bz1));
+    U, _uvX(w,h,d), _uvX(0,h,d), _uvX(bx0,topY,bz1), _uvX(bx1,topY,bz1));
+  // Left/right slopes: U along Z
+  _quad(P, I, [w,h,0], [w,h,d], [bx1,topY,bz1], [bx1,topY,bz0],
+    U, _uvZ(w,h,0), _uvZ(w,h,d), _uvZ(bx1,topY,bz1), _uvZ(bx1,topY,bz0));
   _quad(P, I, [0,h,d], [0,h,0], [bx0,topY,bz0], [bx0,topY,bz1],
-    U, _roofUV(0,h,d), _roofUV(0,h,0), _roofUV(bx0,topY,bz0), _roofUV(bx0,topY,bz1));
+    U, _uvZ(0,h,d), _uvZ(0,h,0), _uvZ(bx0,topY,bz0), _uvZ(bx0,topY,bz1));
+  // Flat top cap
   _quad(P, I, [bx0,topY,bz0], [bx1,topY,bz0], [bx1,topY,bz1], [bx0,topY,bz1],
-    U, _roofUV(bx0,topY,bz0), _roofUV(bx1,topY,bz0), _roofUV(bx1,topY,bz1), _roofUV(bx0,topY,bz1));
+    U, _uvX(bx0,topY,bz0), _uvX(bx1,topY,bz0), _uvX(bx1,topY,bz1), _uvX(bx0,topY,bz1));
 }
 
 // Scale factor: 1 texture repeat per ROOF_TEX_SCALE metres of roof surface
 const ROOF_TEX_SCALE = 2.0;
 
-function _roofUV(x, y, z) {
-  return [x / ROOF_TEX_SCALE, (y + z) / ROOF_TEX_SCALE];
+// UV for faces where the ridge runs along Z (left/right slopes, gable 'sides')
+function _uvZ(x, y, z) {
+  return [z / ROOF_TEX_SCALE, y / ROOF_TEX_SCALE];
+}
+// UV for faces where the ridge runs along X (front/back slopes, gable 'frontback')
+function _uvX(x, y, z) {
+  return [x / ROOF_TEX_SCALE, y / ROOF_TEX_SCALE];
 }
 
 // Append a quad (4 verts, 2 triangles) to position/index arrays

@@ -292,7 +292,8 @@ describe('generateRow', () => {
     let roof = null;
     house.traverse(c => { if (c.name === 'roof') roof = c; });
     expect(roof).toBeDefined();
-    expect(roof.material.map).toBeDefined();
-    expect(roof.material.map).toBe(getRoofTexture('slate', victorianTerrace.shared.roofColor));
+    const slopeMesh = roof.children[0];
+    expect(slopeMesh.material.map).toBeDefined();
+    expect(slopeMesh.material.map).toBe(getRoofTexture('slate', victorianTerrace.shared.roofColor));
   });
 });

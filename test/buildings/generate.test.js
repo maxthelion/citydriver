@@ -146,8 +146,9 @@ describe('addPitchedRoof', () => {
     house.roofColor = 0x4a4a4a;
     addPitchedRoof(house, 35, 'sides');
     const roof = getChild(house.group, 'roof');
-    expect(roof.material.map).toBeDefined();
-    expect(roof.material.map).toBe(getRoofTexture('clay', 0x4a4a4a));
+    const slopeMesh = roof.children[0];
+    expect(slopeMesh.material.map).toBeDefined();
+    expect(slopeMesh.material.map).toBe(getRoofTexture('clay', 0x4a4a4a));
   });
 
   it('roof geometry has UV attribute when textured', () => {
@@ -155,7 +156,8 @@ describe('addPitchedRoof', () => {
     house._roofTileStyle = 'slate';
     addPitchedRoof(house, 35, 'sides');
     const roof = getChild(house.group, 'roof');
-    expect(roof.geometry.getAttribute('uv')).toBeDefined();
+    const slopeMesh = roof.children[0];
+    expect(slopeMesh.geometry.getAttribute('uv')).toBeDefined();
   });
 
   it('roof geometry has UV attribute for all directions', () => {
@@ -164,7 +166,8 @@ describe('addPitchedRoof', () => {
       house._roofTileStyle = 'slate';
       addPitchedRoof(house, 35, dir);
       const roof = getChild(house.group, 'roof');
-      expect(roof.geometry.getAttribute('uv')).toBeDefined();
+      const slopeMesh = roof.children[0];
+      expect(slopeMesh.geometry.getAttribute('uv')).toBeDefined();
     }
   });
 
@@ -172,7 +175,20 @@ describe('addPitchedRoof', () => {
     const house = createHouse(6, 5, 3);
     addPitchedRoof(house, 35, 'sides');
     const roof = getChild(house.group, 'roof');
-    expect(roof.material.map).toBeNull();
+    const slopeMesh = roof.children[0];
+    expect(slopeMesh.material.map).toBeNull();
+  });
+
+  it('gable triangles use wall colour not roof texture', () => {
+    const house = createHouse(6, 5, 3);
+    house._roofTileStyle = 'slate';
+    house.wallColor = 0xd4c4a8;
+    addPitchedRoof(house, 35, 'sides');
+    const roof = getChild(house.group, 'roof');
+    expect(roof.children.length).toBe(2); // slopes + gable walls
+    const gableMesh = roof.children[1];
+    expect(gableMesh.material.map).toBeNull();
+    expect(gableMesh.material.color.getHex()).toBe(0xd4c4a8);
   });
 });
 
