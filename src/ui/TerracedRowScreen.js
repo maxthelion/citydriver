@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import { generateRow, victorianTerrace, ROAD_HALF_WIDTH, SIDEWALK_WIDTH, HOUSE_Z } from '../buildings/archetypes.js';
+import {
+  generateRow, victorianTerrace, parisianHaussmann, germanTownhouse,
+  suburbanDetached, lowRiseApartments, ROAD_HALF_WIDTH, SIDEWALK_WIDTH, HOUSE_Z,
+} from '../buildings/archetypes.js';
 
 const PRESETS = [
   { label: 'Flat',           streetSlope: 0,    crossSlope: 0 },
@@ -12,6 +15,14 @@ const PRESETS = [
 
 const ROW_SPACING = 35; // Z distance between preset rows
 
+const ARCHETYPES = [
+  { label: 'Victorian Terrace', value: victorianTerrace },
+  { label: 'Parisian Haussmann', value: parisianHaussmann },
+  { label: 'German Townhouse', value: germanTownhouse },
+  { label: 'Suburban Detached', value: suburbanDetached },
+  { label: 'Low-rise Apartments', value: lowRiseApartments },
+];
+
 export class TerracedRowScreen {
   constructor(container, onBack) {
     this.container = container;
@@ -19,6 +30,7 @@ export class TerracedRowScreen {
     this._running = true;
     this._count = 6;
     this._seed = 42;
+    this._archetype = victorianTerrace;
 
     this._buildUI();
     this._initRenderer();
@@ -40,6 +52,28 @@ export class TerracedRowScreen {
     title.textContent = 'Sloping Streets';
     title.style.cssText = 'color:#ffaa88;font-family:monospace;font-size:16px;font-weight:bold;margin-bottom:8px';
     sidebar.appendChild(title);
+
+    // Archetype selector
+    const archRow = document.createElement('div');
+    archRow.style.cssText = 'display:flex;flex-direction:column;gap:1px;margin-bottom:8px';
+    const archLbl = document.createElement('span');
+    archLbl.textContent = 'Archetype';
+    archLbl.style.cssText = 'color:#aaa;font-family:monospace;font-size:11px';
+    const archSelect = document.createElement('select');
+    archSelect.style.cssText = 'width:100%;padding:4px;background:#333;color:#eee;border:1px solid #666;font-family:monospace;font-size:13px;border-radius:4px';
+    ARCHETYPES.forEach((a, idx) => {
+      const opt = document.createElement('option');
+      opt.value = idx;
+      opt.textContent = a.label;
+      archSelect.appendChild(opt);
+    });
+    archSelect.addEventListener('change', () => {
+      this._archetype = ARCHETYPES[parseInt(archSelect.value)].value;
+      this._rebuild();
+    });
+    archRow.appendChild(archLbl);
+    archRow.appendChild(archSelect);
+    sidebar.appendChild(archRow);
 
     // Count slider
     const countRow = document.createElement('div');
@@ -279,7 +313,7 @@ export class TerracedRowScreen {
     this._sceneGroup = new THREE.Group();
 
     // Estimate row length for street geometry
-    const avgPlotWidth = (victorianTerrace.perHouse.plotWidth[0] + victorianTerrace.perHouse.plotWidth[1]) / 2;
+    const avgPlotWidth = (this._archetype.perHouse.plotWidth[0] + this._archetype.perHouse.plotWidth[1]) / 2;
     const rowLength = avgPlotWidth * this._count;
 
     for (let p = 0; p < PRESETS.length; p++) {
@@ -289,7 +323,7 @@ export class TerracedRowScreen {
       const heightFn = (x, z) => x * preset.streetSlope + z * preset.crossSlope;
 
       // Generate houses
-      const row = generateRow(victorianTerrace, this._count, this._seed, heightFn);
+      const row = generateRow(this._archetype, this._count, this._seed, heightFn);
       row.position.z += zOffset;
       this._sceneGroup.add(row);
 
