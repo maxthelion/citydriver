@@ -15,6 +15,7 @@ import { distance2D } from '../core/math.js';
 import { PlanarGraph } from '../core/PlanarGraph.js';
 import { Grid2D } from '../core/Grid2D.js';
 import { placeBridges } from './bridges.js';
+import { clipPolylineToBounds } from '../core/clipPolyline.js';
 
 // Importance weight for hierarchy computation
 function importanceTierWeight(tier) {
@@ -134,7 +135,11 @@ export function buildSkeleton(map) {
 
 /**
  * Get connections from regional roads that cross the city.
- * Returns grid-coord connection pairs for buildRoadNetwork.
+ * Uses clipPolylineToBounds to find exact boundary crossing points,
+ * preserving intermediate waypoints so the pathfinder follows the
+ * regional road's angle through the city.
+ *
+ * Returns chained grid-coord connection pairs for buildRoadNetwork.
  */
 function getAnchorConnections(map, layers) {
   const roads = layers.getData('roads');
@@ -143,25 +148,49 @@ function getAnchorConnections(map, layers) {
   const params = layers.getData('params');
   const regionalCellSize = params.cellSize;
 
-  const cityMinX = map.originX;
-  const cityMinZ = map.originZ;
-  const cityMaxX = map.originX + map.width * map.cellSize;
-  const cityMaxZ = map.originZ + map.height * map.cellSize;
+  const bounds = {
+    minX: map.originX,
+    minZ: map.originZ,
+    maxX: map.originX + map.width * map.cellSize,
+    maxZ: map.originZ + map.height * map.cellSize,
+  };
 
   const hierRank = { arterial: 1, collector: 2, local: 3, track: 4 };
+
+  // Collect candidate roads that have any waypoint inside the city
   const relevantRoads = [];
-
   for (const road of roads) {
-    const path = road.rawPath || road.path;
-    if (!path) continue;
+    const path = road.path || road.rawPath;
+    if (!path || path.length < 2) continue;
 
+    // Quick check: does any waypoint fall inside the city bounds?
     let inside = false;
     for (const p of path) {
       const wx = p.gx * regionalCellSize;
       const wz = p.gz * regionalCellSize;
-      if (wx >= cityMinX && wx <= cityMaxX && wz >= cityMinZ && wz <= cityMaxZ) {
+      if (wx >= bounds.minX && wx <= bounds.maxX &&
+          wz >= bounds.minZ && wz <= bounds.maxZ) {
         inside = true;
         break;
+      }
+    }
+    // Even if no waypoint is inside, the segment might pass through
+    // (handled by clipPolylineToBounds), so also check nearby roads
+    if (!inside) {
+      // Check if any segment crosses the city bounds by testing if
+      // the road's bounding box overlaps the city bounds
+      let rMinX = Infinity, rMinZ = Infinity, rMaxX = -Infinity, rMaxZ = -Infinity;
+      for (const p of path) {
+        const wx = p.gx * regionalCellSize;
+        const wz = p.gz * regionalCellSize;
+        if (wx < rMinX) rMinX = wx;
+        if (wz < rMinZ) rMinZ = wz;
+        if (wx > rMaxX) rMaxX = wx;
+        if (wz > rMaxZ) rMaxZ = wz;
+      }
+      if (rMaxX >= bounds.minX && rMinX <= bounds.maxX &&
+          rMaxZ >= bounds.minZ && rMinZ <= bounds.maxZ) {
+        inside = true;
       }
     }
     if (inside) relevantRoads.push(road);
@@ -171,32 +200,56 @@ function getAnchorConnections(map, layers) {
   relevantRoads.sort((a, b) => (hierRank[a.hierarchy] || 3) - (hierRank[b.hierarchy] || 3));
 
   const connections = [];
-  for (const road of relevantRoads) {
-    const path = road.rawPath || road.path;
 
-    // Find entry and exit points within city bounds
-    const cityPoints = [];
-    for (const p of path) {
-      const wx = p.gx * regionalCellSize;
-      const wz = p.gz * regionalCellSize;
-      const cgx = Math.round((wx - map.originX) / map.cellSize);
-      const cgz = Math.round((wz - map.originZ) / map.cellSize);
-      if (cgx >= 1 && cgx < map.width - 1 && cgz >= 1 && cgz < map.height - 1) {
-        cityPoints.push({ gx: cgx, gz: cgz });
+  for (const road of relevantRoads) {
+    // Prefer smoothed path for better boundary angles
+    const path = road.path || road.rawPath;
+
+    // Convert regional grid coords to world coords
+    const worldPoly = path.map(p => ({
+      x: p.gx * regionalCellSize,
+      z: p.gz * regionalCellSize,
+    }));
+
+    // Clip to city bounds — first/last points will be boundary intersections
+    const clipResult = clipPolylineToBounds(worldPoly, bounds);
+    if (!clipResult || clipResult.clipped.length < 2) continue;
+
+    // Convert clipped world-coord points to city grid coords
+    const gridPoints = [];
+    for (const p of clipResult.clipped) {
+      const gx = Math.round((p.x - map.originX) / map.cellSize);
+      const gz = Math.round((p.z - map.originZ) / map.cellSize);
+      // Clamp to valid grid positions
+      if (gx >= 0 && gx < map.width && gz >= 0 && gz < map.height) {
+        gridPoints.push({ gx, gz });
       }
     }
 
-    if (cityPoints.length < 2) continue;
+    if (gridPoints.length < 2) continue;
 
-    const startPt = cityPoints[0];
-    const endPt = cityPoints[cityPoints.length - 1];
-    if (distance2D(startPt.gx, startPt.gz, endPt.gx, endPt.gz) < 5) continue;
+    // Deduplicate consecutive identical grid points
+    const deduped = [gridPoints[0]];
+    for (let i = 1; i < gridPoints.length; i++) {
+      if (gridPoints[i].gx !== deduped[deduped.length - 1].gx ||
+          gridPoints[i].gz !== deduped[deduped.length - 1].gz) {
+        deduped.push(gridPoints[i]);
+      }
+    }
 
-    connections.push({
-      from: startPt,
-      to: endPt,
-      hierarchy: road.hierarchy || 'local',
-    });
+    if (deduped.length < 2) continue;
+
+    // Break into chained connections through consecutive waypoints
+    const hierarchy = road.hierarchy || 'local';
+    for (let i = 0; i < deduped.length - 1; i++) {
+      const from = deduped[i];
+      const to = deduped[i + 1];
+
+      // Skip very short segments (< 3 cells)
+      if (distance2D(from.gx, from.gz, to.gx, to.gz) < 3) continue;
+
+      connections.push({ from, to, hierarchy });
+    }
   }
 
   return connections;
