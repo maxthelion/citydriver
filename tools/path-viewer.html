@@ -264,6 +264,7 @@
   <h1>A* Path Viewer</h1>
   <div id="controls">
     <div class="btn-row">
+      <button id="btn-refresh" title="Reload from localStorage (R)">Refresh</button>
       <button id="btn-paste">Paste JSON</button>
       <button id="btn-load">Load File</button>
       <input type="file" id="file-input" accept=".json" style="display:none">
@@ -645,6 +646,9 @@
     updateStatus();
   });
 
+  // Refresh from localStorage
+  document.getElementById('btn-refresh').addEventListener('click', loadFromLocalStorage);
+
   // Paste dialog
   document.getElementById('btn-paste').addEventListener('click', () => {
     document.getElementById('paste-overlay').classList.remove('hidden');
@@ -682,7 +686,25 @@
     if (e.key === 'f') { zoomToFit(); }
     if (e.key === '=' || e.key === '+') { document.getElementById('btn-zoom-in').click(); }
     if (e.key === '-') { document.getElementById('btn-zoom-out').click(); }
+    if (e.key === 'r') { loadFromLocalStorage(); }
   });
+
+  // Auto-load from localStorage (written by buildSkeletonRoads)
+  function loadFromLocalStorage() {
+    try {
+      const raw = localStorage.getItem('debugPaths');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const age = parsed.timestamp ? Math.round((Date.now() - parsed.timestamp) / 1000) : null;
+        loadData(parsed);
+        if (age !== null) {
+          status.textContent += ` (from localStorage, ${age}s ago)`;
+        }
+      }
+    } catch (_) {}
+  }
+
+  loadFromLocalStorage();
 })();
 </script>
 </body>

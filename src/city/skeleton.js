@@ -84,6 +84,18 @@ export function buildSkeletonRoads(map) {
   map.debugPathsGridWidth = networkResult.gridWidth;
   map.debugPathsGridHeight = networkResult.gridHeight;
 
+  // Auto-dump to localStorage for tools/path-viewer.html
+  try {
+    if (typeof localStorage !== 'undefined' && networkResult.debugPaths) {
+      localStorage.setItem('debugPaths', JSON.stringify({
+        gridWidth: networkResult.gridWidth,
+        gridHeight: networkResult.gridHeight,
+        paths: networkResult.debugPaths,
+        timestamp: Date.now(),
+      }));
+    }
+  } catch (_) { /* ignore in headless/test environments */ }
+
   // 4. Add merged roads as features
   for (const road of builtRoads) {
     if (!road.polyline || road.polyline.length < 2) continue;
