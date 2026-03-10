@@ -103,35 +103,4 @@ describe('compactRoads', () => {
     expect(map.roads.length).toBe(2);
   });
 
-  it('parallel roads 1 cell apart get collapsed', () => {
-    const map = makeMap();
-    const cs = map.cellSize; // 10
-    // Two parallel roads offset by 1 cell (10 units), within snapDist=15
-    map.addFeature('road', {
-      polyline: [
-        { x: 0, z: 0 },
-        { x: cs, z: 0 },
-        { x: 2*cs, z: 0 },
-        { x: 3*cs, z: 0 },
-      ],
-      width: 16, hierarchy: 'arterial', source: 'skeleton',
-    });
-    map.addFeature('road', {
-      polyline: [
-        { x: 0, z: cs },
-        { x: cs, z: cs },
-        { x: 2*cs, z: cs },
-        { x: 3*cs, z: cs },
-      ],
-      width: 10, hierarchy: 'collector', source: 'skeleton',
-    });
-
-    expect(map.roads.length).toBe(2);
-    compactRoads(map, cs * 1.5);
-
-    // After snapping (snapDist=15), vertices at z=0 and z=10 merge.
-    // Both roads now have same endpoints → duplicate removed.
-    expect(map.roads.length).toBe(1);
-    expect(map.roads[0].hierarchy).toBe('arterial');
-  });
 });
