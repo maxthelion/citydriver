@@ -105,4 +105,46 @@ describe('generateRow', () => {
       expect(group.children[i].position.x).toBeGreaterThan(group.children[i - 1].position.x);
     }
   });
+
+  it('houses on flat terrain are raised by groundHeight', () => {
+    const group = generateRow(victorianTerrace, 1, 42);
+    // Ground height range is [0.3, 0.5], so Y should be in that range
+    expect(group.children[0].position.y).toBeGreaterThanOrEqual(0.3);
+    expect(group.children[0].position.y).toBeLessThanOrEqual(0.5);
+  });
+
+  it('accepts a heightFn and positions houses at terrain height', () => {
+    const heightFn = (x, _z) => x * 0.1; // 10% uphill slope
+    const group = generateRow(victorianTerrace, 3, 42, heightFn);
+    // Each house should have Y > 0 (except possibly first at x=0)
+    const lastHouse = group.children[2];
+    expect(lastHouse.position.y).toBeGreaterThan(0);
+  });
+
+  it('houses on a slope have increasing Y positions', () => {
+    const heightFn = (x, _z) => x * 0.05;
+    const group = generateRow(victorianTerrace, 4, 42, heightFn);
+    for (let i = 1; i < group.children.length; i++) {
+      expect(group.children[i].position.y).toBeGreaterThan(group.children[i - 1].position.y);
+    }
+  });
+
+  it('flat heightFn produces same result as no heightFn', () => {
+    const flat = generateRow(victorianTerrace, 3, 42, () => 0);
+    const none = generateRow(victorianTerrace, 3, 42);
+    for (let i = 0; i < 3; i++) {
+      expect(flat.children[i].position.y).toBeCloseTo(none.children[i].position.y, 3);
+    }
+  });
+
+  it('adds rear foundation wall when terrain drops behind house', () => {
+    // Cross-slope: terrain rises with z, so back of house is higher — no rear wall needed
+    // Negative cross-slope: terrain falls with z, back is lower — rear wall needed
+    const heightFn = (_x, z) => -z * 0.1; // terrain drops toward back
+    const group = generateRow(victorianTerrace, 2, 42, heightFn);
+    const house = group.children[0];
+    let hasRearFoundation = false;
+    house.traverse(c => { if (c.name === 'rearFoundation') hasRearFoundation = true; });
+    expect(hasRearFoundation).toBe(true);
+  });
 });

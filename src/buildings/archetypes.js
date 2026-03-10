@@ -68,14 +68,21 @@ export const victorianTerrace = {
   },
 };
 
+// Layout constants
+export const ROAD_HALF_WIDTH = 3;
+export const SIDEWALK_WIDTH = 1.5;
+export const SETBACK = 2;
+export const HOUSE_Z = ROAD_HALF_WIDTH + SIDEWALK_WIDTH + SETBACK;
+
 /**
  * Generate a row of terraced houses from an archetype.
  * @param {object} archetype - Archetype with parameter ranges
  * @param {number} count - Number of houses
  * @param {number} seed - Master seed for deterministic generation
+ * @param {function} [heightFn] - Terrain height query: (x, z) => y. Defaults to flat.
  * @returns {THREE.Group} Group containing all houses positioned side by side
  */
-export function generateRow(archetype, count, seed) {
+export function generateRow(archetype, count, seed, heightFn = () => 0) {
   const group = new THREE.Group();
   const s = archetype.shared;
   const p = archetype.perHouse;
@@ -88,7 +95,7 @@ export function generateRow(archetype, count, seed) {
   const depth = sample(rowRng, s.depth);
   const winSpacing = sample(rowRng, s.windowSpacing);
   const winHeight = sample(rowRng, s.windowHeight);
-  const groundHeight = sample(rowRng, s.groundHeight);
+  const baseGroundHeight = sample(rowRng, s.groundHeight);
   const bayFloors = Math.round(sample(rowRng, s.bay.floors));
   const bayDepth = sample(rowRng, s.bay.depth);
 
@@ -101,6 +108,17 @@ export function generateRow(archetype, count, seed) {
 
     const width = sample(rng, p.plotWidth);
     const wallColor = nudgeColor(p.wallColor, p.colorVariation, rng);
+
+    // Terrain heights at house position
+    const centerX = xOffset + width / 2;
+    const frontZ = HOUSE_Z;
+    const backZ = HOUSE_Z + depth;
+    const terrainFront = heightFn(centerX, frontZ);
+    const roadY = heightFn(centerX, 0);
+    const terrainRear = heightFn(centerX, backZ);
+
+    // Ground level = how much to raise house above road
+    const groundLevel = Math.max(baseGroundHeight, terrainFront - roadY);
 
     // Party walls: ends get one side exposed
     const partyWalls = [...archetype.partyWalls];
@@ -116,7 +134,7 @@ export function generateRow(archetype, count, seed) {
     // Build house using composable API
     const house = createHouse(width, depth, floorHeight, wallColor);
     house._winSpacing = winSpacing;
-    house._groundHeight = groundHeight;
+    house._groundHeight = groundLevel;
     house.roofColor = s.roofColor;
 
     setPartyWalls(house, partyWalls);
@@ -133,12 +151,27 @@ export function generateRow(archetype, count, seed) {
     if (s.sills) {
       addWindowSills(house, { protrusion: s.sills.protrusion });
     }
-    if (groundHeight > 0) {
-      addGroundLevel(house, groundHeight);
+    if (groundLevel > 0.05) {
+      addGroundLevel(house, groundLevel);
     }
 
-    // Position in row
+    // Rear foundation wall: if terrain drops behind the house
+    const rearDrop = terrainFront - terrainRear;
+    if (rearDrop > 0.05) {
+      const rearWall = new THREE.Mesh(
+        new THREE.BoxGeometry(width + 0.1, rearDrop, 0.15),
+        new THREE.MeshLambertMaterial({ color: house.wallColor }),
+      );
+      // Position at back of house, extending downward
+      rearWall.position.set(width / 2, -rearDrop / 2, depth + 0.05);
+      rearWall.name = 'rearFoundation';
+      house.group.add(rearWall);
+    }
+
+    // Position in row: X along row, Y at terrain height, Z at setback from road
     house.group.position.x = xOffset;
+    house.group.position.y += terrainFront;
+    house.group.position.z = frontZ;
     group.add(house.group);
     xOffset += width;
   }
