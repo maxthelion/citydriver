@@ -3,6 +3,7 @@ import { CityScreen } from './ui/CityScreen.js';
 import { DebugScreen } from './ui/DebugScreen.js';
 import { CompareScreen } from './ui/CompareScreen.js';
 import { BuildingStyleScreen } from './ui/BuildingStyleScreen.js';
+import { TerracedRowScreen } from './ui/TerracedRowScreen.js';
 import { generateRegionFromSeed } from './ui/regionHelper.js';
 import { SeededRandom } from './core/rng.js';
 
@@ -12,6 +13,7 @@ let cityScreen = null;
 let debugScreen = null;
 let compareScreen = null;
 let buildingScreen = null;
+let terracedScreen = null;
 
 function disposeAll() {
   if (regionScreen) { regionScreen.dispose(); regionScreen = null; }
@@ -19,6 +21,7 @@ function disposeAll() {
   if (debugScreen) { debugScreen.dispose(); debugScreen = null; }
   if (compareScreen) { compareScreen.dispose(); compareScreen = null; }
   if (buildingScreen) { buildingScreen.dispose(); buildingScreen = null; }
+  if (terracedScreen) { terracedScreen.dispose(); terracedScreen = null; }
   container.innerHTML = '';
 }
 
@@ -38,6 +41,8 @@ function enterSubScreen(mode, layers, settlement, seed) {
     compareScreen = new CompareScreen(container, layers, settlement, seed, goBack);
   } else if (mode === 'buildings') {
     buildingScreen = new BuildingStyleScreen(container, goBack);
+  } else if (mode === 'terraced') {
+    terracedScreen = new TerracedRowScreen(container, goBack);
   } else {
     debugScreen = new DebugScreen(container, layers, settlement, seed, goBack);
   }
@@ -53,6 +58,11 @@ function showRegion(initialSeed) {
       history.pushState(null, '', '?mode=buildings');
       buildingScreen = new BuildingStyleScreen(container, goBack);
     },
+    onTerraced() {
+      disposeAll();
+      history.pushState(null, '', '?mode=terraced');
+      terracedScreen = new TerracedRowScreen(container, goBack);
+    },
   }, initialSeed);
 }
 
@@ -65,6 +75,11 @@ window.addEventListener('popstate', () => {
 
   if (mode === 'buildings') {
     buildingScreen = new BuildingStyleScreen(container, goBack);
+    return;
+  }
+
+  if (mode === 'terraced') {
+    terracedScreen = new TerracedRowScreen(container, goBack);
     return;
   }
 
@@ -94,6 +109,8 @@ const urlSeed = urlParams.has('seed') ? parseInt(urlParams.get('seed')) : undefi
 
 if (urlMode === 'buildings') {
   buildingScreen = new BuildingStyleScreen(container, goBack);
+} else if (urlMode === 'terraced') {
+  terracedScreen = new TerracedRowScreen(container, goBack);
 } else if ((urlMode === 'debug' || urlMode === 'city' || urlMode === 'compare') && urlSeed != null) {
   const gx = parseInt(urlParams.get('gx'));
   const gz = parseInt(urlParams.get('gz'));
