@@ -1,5 +1,16 @@
 import * as THREE from 'three';
-import { generateRow, victorianTerrace } from '../buildings/archetypes.js';
+import { generateRow, victorianTerrace, ROAD_HALF_WIDTH, SIDEWALK_WIDTH } from '../buildings/archetypes.js';
+
+const PRESETS = [
+  { label: 'Flat',           streetSlope: 0,    crossSlope: 0 },
+  { label: '5% uphill',      streetSlope: 0.05, crossSlope: 0 },
+  { label: '12% uphill',     streetSlope: 0.12, crossSlope: 0 },
+  { label: 'Hillside up',    streetSlope: 0,    crossSlope: 0.08 },
+  { label: 'Hillside down',  streetSlope: 0,    crossSlope: -0.08 },
+  { label: '6% + cross',     streetSlope: 0.06, crossSlope: 0.05 },
+];
+
+const ROW_SPACING = 35; // Z distance between preset rows
 
 export class TerracedRowScreen {
   constructor(container, onBack) {
@@ -26,7 +37,7 @@ export class TerracedRowScreen {
     this._root.appendChild(sidebar);
 
     const title = document.createElement('div');
-    title.textContent = 'Terraced Row';
+    title.textContent = 'Sloping Streets';
     title.style.cssText = 'color:#ffaa88;font-family:monospace;font-size:16px;font-weight:bold;margin-bottom:8px';
     sidebar.appendChild(title);
 
@@ -137,14 +148,14 @@ export class TerracedRowScreen {
     this._scene.add(sun);
 
     // Ground plane
-    const groundGeo = new THREE.PlaneGeometry(200, 200);
+    const groundGeo = new THREE.PlaneGeometry(400, 400);
     const ground = new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({ color: 0x3a6b35 }));
     ground.rotation.x = -Math.PI / 2;
     this._scene.add(ground);
 
-    this._camera = new THREE.PerspectiveCamera(40, w / h, 0.1, 500);
+    this._camera = new THREE.PerspectiveCamera(40, w / h, 0.1, 800);
 
-    this._orbit = { theta: Math.PI / 4, phi: Math.PI / 5, dist: 40 };
+    this._orbit = { theta: Math.PI / 4, phi: Math.PI / 5, dist: 100 };
     this._orbitTarget = new THREE.Vector3(0, 0, 0);
     this._setupOrbitControls();
   }
@@ -179,7 +190,7 @@ export class TerracedRowScreen {
 
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
-      this._orbit.dist = Math.max(5, Math.min(150, this._orbit.dist * (1 + e.deltaY * 0.001)));
+      this._orbit.dist = Math.max(10, Math.min(300, this._orbit.dist * (1 + e.deltaY * 0.001)));
       this._updateCamera();
     }, { passive: false });
   }
@@ -195,30 +206,115 @@ export class TerracedRowScreen {
     this._camera.lookAt(t);
   }
 
+  /**
+   * Build a road + sidewalk strip for one preset row.
+   * Returns a THREE.Group with road and sidewalk meshes.
+   */
+  _buildStreet(heightFn, rowLength, zOffset) {
+    const street = new THREE.Group();
+    const roadMat = new THREE.MeshLambertMaterial({ color: 0x555555 });
+    const swMat = new THREE.MeshLambertMaterial({ color: 0x999999 });
+
+    // Helper: build a strip as a quad with corners at terrain height
+    const buildStrip = (z0, z1, mat) => {
+      const geo = new THREE.BufferGeometry();
+      const x0 = 0, x1 = rowLength;
+      const positions = new Float32Array([
+        x0, heightFn(x0, z0), z0 + zOffset,
+        x1, heightFn(x1, z0), z0 + zOffset,
+        x1, heightFn(x1, z1), z1 + zOffset,
+        x0, heightFn(x0, z1), z1 + zOffset,
+      ]);
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geo.setIndex([0, 1, 2, 0, 2, 3]);
+      geo.computeVertexNormals();
+      street.add(new THREE.Mesh(geo, mat));
+    };
+
+    // Road (centered on z=0)
+    buildStrip(-ROAD_HALF_WIDTH, ROAD_HALF_WIDTH, roadMat);
+    // Near sidewalk (between road and houses)
+    buildStrip(ROAD_HALF_WIDTH, ROAD_HALF_WIDTH + SIDEWALK_WIDTH, swMat);
+    // Far sidewalk (other side of road)
+    buildStrip(-ROAD_HALF_WIDTH - SIDEWALK_WIDTH, -ROAD_HALF_WIDTH, swMat);
+
+    return street;
+  }
+
+  /**
+   * Create a text label sprite.
+   */
+  _makeLabel(text) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 32px monospace';
+    ctx.fillText(text, 10, 42);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(8, 1, 1);
+    return sprite;
+  }
+
   _rebuild() {
-    if (this._rowGroup) {
-      this._scene.remove(this._rowGroup);
-      this._rowGroup.traverse(c => {
+    // Remove old scene content (except ground, lights)
+    if (this._sceneGroup) {
+      this._scene.remove(this._sceneGroup);
+      this._sceneGroup.traverse(c => {
         if (c.geometry) c.geometry.dispose();
+        if (c.material) {
+          if (c.material.map) c.material.map.dispose();
+          if (Array.isArray(c.material)) c.material.forEach(m => m.dispose());
+          else c.material.dispose();
+        }
       });
     }
 
-    this._rowGroup = generateRow(victorianTerrace, this._count, this._seed);
+    this._sceneGroup = new THREE.Group();
 
-    // Center the row horizontally
-    const box = new THREE.Box3().setFromObject(this._rowGroup);
-    const centerX = (box.min.x + box.max.x) / 2;
-    const centerZ = (box.min.z + box.max.z) / 2;
-    this._rowGroup.position.x -= centerX;
-    this._rowGroup.position.z -= centerZ;
+    // Estimate row length for street geometry
+    const avgPlotWidth = (victorianTerrace.perHouse.plotWidth[0] + victorianTerrace.perHouse.plotWidth[1]) / 2;
+    const rowLength = avgPlotWidth * this._count;
 
-    this._scene.add(this._rowGroup);
+    for (let p = 0; p < PRESETS.length; p++) {
+      const preset = PRESETS[p];
+      const zOffset = p * ROW_SPACING;
 
-    // Fit camera
-    const rowWidth = box.max.x - box.min.x;
-    const height = box.max.y - box.min.y;
-    this._orbit.dist = Math.max(rowWidth, height) * 1.5;
-    this._orbitTarget.set(0, height * 0.4, 0);
+      const heightFn = (x, z) => x * preset.streetSlope + z * preset.crossSlope;
+
+      // Generate houses
+      const row = generateRow(victorianTerrace, this._count, this._seed, heightFn);
+      row.position.z += zOffset;
+      this._sceneGroup.add(row);
+
+      // Build road/sidewalk
+      const street = this._buildStreet(heightFn, rowLength, zOffset);
+      this._sceneGroup.add(street);
+
+      // Label
+      const label = this._makeLabel(preset.label);
+      label.position.set(-3, heightFn(0, 0) + 5, zOffset);
+      this._sceneGroup.add(label);
+    }
+
+    // Center the whole scene
+    const box = new THREE.Box3().setFromObject(this._sceneGroup);
+    const cx = (box.min.x + box.max.x) / 2;
+    const cz = (box.min.z + box.max.z) / 2;
+    this._sceneGroup.position.x -= cx;
+    this._sceneGroup.position.z -= cz;
+
+    this._scene.add(this._sceneGroup);
+
+    // Fit camera to see all rows
+    const sceneWidth = box.max.x - box.min.x;
+    const sceneDepth = box.max.z - box.min.z;
+    this._orbit.dist = Math.max(sceneWidth, sceneDepth) * 1.2;
+    this._orbitTarget.set(0, 5, 0);
     this._updateCamera();
   }
 
@@ -234,10 +330,11 @@ export class TerracedRowScreen {
     this._running = false;
     if (this._onKeyDown) document.removeEventListener('keydown', this._onKeyDown);
     if (this._onResize) window.removeEventListener('resize', this._onResize);
-    if (this._rowGroup) {
-      this._rowGroup.traverse(c => {
+    if (this._sceneGroup) {
+      this._sceneGroup.traverse(c => {
         if (c.geometry) c.geometry.dispose();
         if (c.material) {
+          if (c.material.map) c.material.map.dispose();
           if (Array.isArray(c.material)) c.material.forEach(m => m.dispose());
           else c.material.dispose();
         }
