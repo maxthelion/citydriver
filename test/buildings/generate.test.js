@@ -6,6 +6,7 @@ import {
   addExtension, addDormer, addBayWindow, addWindowSills, addGroundLevel,
   setPartyWalls,
   generateBuilding,
+  getWindowTexture,
 } from '../../src/buildings/generate.js';
 import { getClimateStyle, buildRecipe, CLIMATES } from '../../src/buildings/styles.js';
 
@@ -212,6 +213,25 @@ describe('addWindows', () => {
       expect(onLeft || onRight).toBe(false);
     }
   });
+
+  it('uses window texture when house._windowStyle is set', () => {
+    const house = createHouse(6, 5, 3);
+    house._windowStyle = 'georgian';
+    addWindows(house);
+    const winGroup = getChild(house.group, 'windows');
+    const firstWin = winGroup.children[0];
+    expect(firstWin.material.map).toBeDefined();
+    expect(firstWin.material.map).toBe(getWindowTexture('georgian'));
+  });
+
+  it('defaults to sash texture when no windowStyle set', () => {
+    const house = createHouse(6, 5, 3);
+    addWindows(house);
+    const winGroup = getChild(house.group, 'windows');
+    const firstWin = winGroup.children[0];
+    expect(firstWin.material.map).toBeDefined();
+    expect(firstWin.material.map).toBe(getWindowTexture('sash'));
+  });
 });
 
 describe('addPorch', () => {
@@ -410,6 +430,33 @@ describe('addGroundLevel', () => {
     const house = createHouse(6, 5, 3);
     addGroundLevel(house, 0);
     expect(getChild(house.group, 'groundLevel')).toBeNull();
+  });
+});
+
+describe('getWindowTexture', () => {
+  it('returns a THREE.CanvasTexture for each style', () => {
+    for (const style of ['sash', 'georgian', 'casement', 'single']) {
+      const tex = getWindowTexture(style);
+      expect(tex).toBeInstanceOf(THREE.CanvasTexture);
+    }
+  });
+
+  it('caches textures — same style returns same object', () => {
+    const a = getWindowTexture('sash');
+    const b = getWindowTexture('sash');
+    expect(a).toBe(b);
+  });
+
+  it('different styles return different objects', () => {
+    const a = getWindowTexture('sash');
+    const b = getWindowTexture('georgian');
+    expect(a).not.toBe(b);
+  });
+
+  it('unknown style falls back to sash', () => {
+    const tex = getWindowTexture('nonexistent');
+    const sash = getWindowTexture('sash');
+    expect(tex).toBe(sash);
   });
 });
 

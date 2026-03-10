@@ -16,6 +16,95 @@ import * as THREE from 'three';
  * house.group is the THREE.Group to add to a scene.
  */
 
+// ── Window pane textures ─────────────────────────────────────
+
+const _windowTextureCache = new Map();
+
+function _createCanvas(w, h) {
+  if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h);
+  if (typeof document !== 'undefined') {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    return c;
+  }
+  // Minimal stub for headless environments
+  const buf = { width: w, height: h };
+  buf.getContext = () => ({
+    fillStyle: '', strokeStyle: '', lineWidth: 0,
+    fillRect() {}, strokeRect() {}, beginPath() {},
+    moveTo() {}, lineTo() {}, stroke() {},
+  });
+  return buf;
+}
+
+function _drawWindowPattern(ctx, w, h, style) {
+  // Glass background
+  ctx.fillStyle = '#88aabb';
+  ctx.fillRect(0, 0, w, h);
+
+  // Mullion lines
+  ctx.strokeStyle = '#c8c8c8';
+  ctx.lineWidth = 2;
+
+  if (style === 'sash') {
+    // 2x2 grid: horizontal bar at middle, vertical bar at middle
+    ctx.beginPath();
+    ctx.moveTo(0, h / 2);
+    ctx.lineTo(w, h / 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(w / 2, 0);
+    ctx.lineTo(w / 2, h);
+    ctx.stroke();
+  } else if (style === 'georgian') {
+    // 3x2 grid: vertical bar at middle, horizontal bars at 1/3 and 2/3
+    ctx.beginPath();
+    ctx.moveTo(w / 2, 0);
+    ctx.lineTo(w / 2, h);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, h / 3);
+    ctx.lineTo(w, h / 3);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, (2 * h) / 3);
+    ctx.lineTo(w, (2 * h) / 3);
+    ctx.stroke();
+  } else if (style === 'casement') {
+    // 2x1: vertical bar only
+    ctx.beginPath();
+    ctx.moveTo(w / 2, 0);
+    ctx.lineTo(w / 2, h);
+    ctx.stroke();
+  }
+  // 'single' — no mullions, just the frame below
+
+  // Frame border
+  ctx.strokeStyle = '#c0c0c0';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(0, 0, w, h);
+}
+
+/**
+ * Get a cached CanvasTexture for a window pane style.
+ * @param {'sash'|'georgian'|'casement'|'single'} style
+ * @returns {THREE.CanvasTexture}
+ */
+export function getWindowTexture(style) {
+  const VALID = ['sash', 'georgian', 'casement', 'single'];
+  if (!VALID.includes(style)) style = 'sash';
+
+  if (_windowTextureCache.has(style)) return _windowTextureCache.get(style);
+
+  const canvas = _createCanvas(64, 96);
+  const ctx = canvas.getContext('2d');
+  _drawWindowPattern(ctx, 64, 96, style);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  _windowTextureCache.set(style, tex);
+  return tex;
+}
+
 export function createHouse(width, depth, floorHeight, color = 0xd4c4a8) {
   const house = {
     width,
@@ -376,8 +465,11 @@ export function addWindows(house, {
   const windowGroup = new THREE.Group();
   windowGroup.name = 'windows';
 
+  const style = house._windowStyle || 'sash';
+  const tex = getWindowTexture(style);
   const mat = new THREE.MeshLambertMaterial({
-    color,
+    color: 0xffffff,
+    map: tex,
     polygonOffset: true,
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -1,
