@@ -59,3 +59,75 @@ export const victorianTerrace = {
   windowHeight: [1.3, 1.6],
   sills: { protrusion: 0.08 },
 };
+
+/**
+ * Generate a row of terraced houses from an archetype.
+ * @param {object} archetype - Archetype with parameter ranges
+ * @param {number} count - Number of houses
+ * @param {number} seed - Master seed for deterministic generation
+ * @returns {THREE.Group} Group containing all houses positioned side by side
+ */
+export function generateRow(archetype, count, seed) {
+  const group = new THREE.Group();
+  let xOffset = 0;
+
+  for (let i = 0; i < count; i++) {
+    const houseSeed = hashPosition(seed, xOffset, 0);
+    const rng = new SeededRandom(houseSeed);
+
+    // Sample concrete values from archetype ranges
+    const width = sample(rng, archetype.plotWidth);
+    const depth = sample(rng, archetype.depth);
+    const floors = Math.round(sample(rng, archetype.floors));
+    const floorHeight = sample(rng, archetype.floorHeight);
+    const roofPitch = sample(rng, archetype.roofPitch);
+    const winSpacing = sample(rng, archetype.windowSpacing);
+    const winHeight = sample(rng, archetype.windowHeight);
+    const groundHeight = sample(rng, archetype.groundHeight);
+    const bayFloors = Math.round(sample(rng, archetype.bay.floors));
+    const bayDepth = sample(rng, archetype.bay.depth);
+    const wallColor = nudgeColor(archetype.wallColor, archetype.colorVariation, rng);
+
+    // Party walls: ends get one side exposed
+    const partyWalls = [...archetype.partyWalls];
+    if (i === 0) {
+      const idx = partyWalls.indexOf('left');
+      if (idx !== -1) partyWalls.splice(idx, 1);
+    }
+    if (i === count - 1) {
+      const idx = partyWalls.indexOf('right');
+      if (idx !== -1) partyWalls.splice(idx, 1);
+    }
+
+    // Build house using composable API
+    const house = createHouse(width, depth, floorHeight, wallColor);
+    house._winSpacing = winSpacing;
+    house._groundHeight = groundHeight;
+    house.roofColor = archetype.roofColor;
+
+    setPartyWalls(house, partyWalls);
+    for (let f = 1; f < floors; f++) addFloor(house);
+    addPitchedRoof(house, roofPitch, archetype.roofDirection, archetype.roofOverhang);
+    addFrontDoor(house, archetype.door);
+    addBayWindow(house, {
+      style: archetype.bay.style,
+      span: archetype.bay.span,
+      floors: Math.min(bayFloors, floors),
+      depth: bayDepth,
+    });
+    addWindows(house, { spacing: winSpacing, height: winHeight });
+    if (archetype.sills) {
+      addWindowSills(house, { protrusion: archetype.sills.protrusion });
+    }
+    if (groundHeight > 0) {
+      addGroundLevel(house, groundHeight);
+    }
+
+    // Position in row
+    house.group.position.x = xOffset;
+    group.add(house.group);
+    xOffset += width;
+  }
+
+  return group;
+}
