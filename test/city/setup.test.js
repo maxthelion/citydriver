@@ -100,3 +100,75 @@ describe('setupCity', () => {
     expect(map.rivers).toBeDefined();
   });
 });
+
+describe('placeNuclei with regional settlements', () => {
+  it('seeds nuclei at regional settlement positions', () => {
+    const { layers, rng } = makeRegion(152);
+    const settlements = layers.getData('settlements');
+    if (!settlements || settlements.length < 2) return;
+    const settlement = settlements[0];
+    const map = setupCity(layers, settlement, rng.fork('city'));
+    const otherSettlements = map.regionalSettlements.filter(s =>
+      s.gx !== settlement.gx || s.gz !== settlement.gz
+    );
+    for (const rs of otherSettlements) {
+      const match = map.nuclei.find(n =>
+        Math.abs(n.gx - rs.cityGx) < 15 && Math.abs(n.gz - rs.cityGz) < 15
+      );
+      expect(match).toBeDefined();
+    }
+  });
+
+  it('regional settlement nuclei keep their regional tier', () => {
+    const { layers, rng } = makeRegion(152);
+    const settlements = layers.getData('settlements');
+    if (!settlements || settlements.length < 2) return;
+    const settlement = settlements[0];
+    const map = setupCity(layers, settlement, rng.fork('city'));
+    const otherSettlements = map.regionalSettlements.filter(s =>
+      s.gx !== settlement.gx || s.gz !== settlement.gz
+    );
+    for (const rs of otherSettlements) {
+      const match = map.nuclei.find(n =>
+        Math.abs(n.gx - rs.cityGx) < 15 && Math.abs(n.gz - rs.cityGz) < 15
+      );
+      if (match) expect(match.tier).toBe(rs.tier);
+    }
+  });
+
+  it('land-value nuclei have lower priority than regional settlements', () => {
+    const { layers, rng } = makeRegion(152);
+    const settlements = layers.getData('settlements');
+    if (!settlements || settlements.length < 2) return;
+    const settlement = settlements[0];
+    const map = setupCity(layers, settlement, rng.fork('city'));
+    const regionalTiers = map.regionalSettlements.map(s => s.tier);
+    const maxRegionalTier = Math.max(...regionalTiers, 1);
+    const otherSettlements = map.regionalSettlements.filter(s =>
+      s.gx !== settlement.gx || s.gz !== settlement.gz
+    );
+    const regionalPositions = new Set();
+    for (const rs of otherSettlements) {
+      const match = map.nuclei.find(n =>
+        Math.abs(n.gx - rs.cityGx) < 15 && Math.abs(n.gz - rs.cityGz) < 15
+      );
+      if (match) regionalPositions.add(match.index);
+    }
+    for (const n of map.nuclei) {
+      if (n.index === 0) continue;
+      if (regionalPositions.has(n.index)) continue;
+      expect(n.tier).toBeGreaterThan(maxRegionalTier);
+    }
+  });
+
+  it('regional settlement nuclei are not placed on water', () => {
+    const { layers, rng } = makeRegion(152);
+    const settlements = layers.getData('settlements');
+    if (!settlements || settlements.length < 2) return;
+    const settlement = settlements[0];
+    const map = setupCity(layers, settlement, rng.fork('city'));
+    for (const n of map.nuclei) {
+      expect(map.waterMask.get(n.gx, n.gz)).toBe(0);
+    }
+  });
+});

@@ -283,6 +283,68 @@ function placeNuclei(map, tier, rng) {
     _addSuppression(suppression, map.width, map.height, cn.gx, cn.gz, NUCLEUS_SUPPRESSION_RADIUS);
   }
 
+  // Seed nuclei at regional settlement positions (before greedy land-value loop)
+  let maxRegionalTier = 1; // center nucleus tier
+  for (const rs of map.regionalSettlements) {
+    const t = rs.tier || 3;
+    if (t > maxRegionalTier) maxRegionalTier = t;
+  }
+  for (const rs of map.regionalSettlements) {
+    // Skip the city's own settlement (already placed as center)
+    if (rs.gx === map.settlement.gx && rs.gz === map.settlement.gz) continue;
+
+    let gx = rs.cityGx;
+    let gz = rs.cityGz;
+
+    // Skip if outside margin
+    if (gx < 10 || gx >= map.width - 10 || gz < 10 || gz >= map.height - 10) continue;
+
+    // If unbuildable, search within radius 15 for nearest buildable cell
+    if (map.buildability.get(gx, gz) < NUCLEUS_MIN_BUILDABILITY) {
+      let bestDist = Infinity;
+      let bestGx = gx, bestGz = gz;
+      const searchR = 15;
+      for (let dz = -searchR; dz <= searchR; dz++) {
+        for (let dx = -searchR; dx <= searchR; dx++) {
+          const nx = gx + dx, nz = gz + dz;
+          if (nx < 10 || nx >= map.width - 10 || nz < 10 || nz >= map.height - 10) continue;
+          if (map.buildability.get(nx, nz) < NUCLEUS_MIN_BUILDABILITY) continue;
+          const d = dx * dx + dz * dz;
+          if (d < bestDist) { bestDist = d; bestGx = nx; bestGz = nz; }
+        }
+      }
+      gx = bestGx;
+      gz = bestGz;
+    }
+
+    // Skip if no viable spot found
+    if (map.buildability.get(gx, gz) < NUCLEUS_MIN_BUILDABILITY) continue;
+
+    // Skip if too close to existing nuclei
+    let tooClose = false;
+    for (const n of nuclei) {
+      if (distance2D(gx, gz, n.gx, n.gz) < NUCLEUS_MIN_SPACING) {
+        tooClose = true;
+        break;
+      }
+    }
+    if (tooClose) continue;
+
+    const rsTier = rs.tier || 3;
+
+    if (waterDist[gz * map.width + gx] < NUCLEUS_WATERFRONT_DIST) waterfrontCount++;
+
+    nuclei.push({
+      gx,
+      gz,
+      type: classifyNucleus(map, gx, gz),
+      tier: rsTier,
+      index: nuclei.length,
+    });
+
+    _addSuppression(suppression, map.width, map.height, gx, gz, NUCLEUS_SUPPRESSION_RADIUS);
+  }
+
   // Greedy placement: score = value * buildability, with spacing enforcement
   while (nuclei.length < cap) {
     let bestScore = -1;
@@ -320,7 +382,7 @@ function placeNuclei(map, tier, rng) {
     const isWaterfront = waterDist[bestCell.gz * map.width + bestCell.gx] < NUCLEUS_WATERFRONT_DIST;
     if (isWaterfront) waterfrontCount++;
 
-    const nucleusTier = nuclei.length < 3 ? 2 : (nuclei.length < 6 ? 3 : 4);
+    const nucleusTier = maxRegionalTier + 1 + Math.floor(nuclei.length / 4);
     nuclei.push({
       gx: bestCell.gx,
       gz: bestCell.gz,
