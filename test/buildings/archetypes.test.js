@@ -265,6 +265,16 @@ describe('generateRow', () => {
     expect(balconyCount).toBeGreaterThanOrEqual(3);
   });
 
+  it('applies windowStyle texture from archetype', () => {
+    // Haussmann has windowStyle: 'georgian'
+    const group = generateRow(parisianHaussmann, 2, 42);
+    const house = group.children[0];
+    let winGroup = null;
+    house.traverse(c => { if (c.name === 'windows') winGroup = c; });
+    expect(winGroup).toBeDefined();
+    expect(winGroup.children[0].material.map).toBeDefined();
+  });
+
   it('generates apartment row with flat roof', () => {
     const group = generateRow(lowRiseApartments, 2, 42);
     const house = group.children[0];

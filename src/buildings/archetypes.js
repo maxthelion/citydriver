@@ -56,6 +56,7 @@ export const victorianTerrace = {
     bay: { style: 'box', span: 1, floors: [1, 2], depth: [0.6, 0.9] },
     windowSpacing: [2.2, 2.8],
     windowHeight: [1.3, 1.6],
+    windowStyle: 'sash',
     groundHeight: [0.3, 0.5],
     sills: { protrusion: 0.08 },
     roofColor: 0x6b4e37,
@@ -88,6 +89,7 @@ export const parisianHaussmann = {
     extension: null,
     windowSpacing: [2.4, 2.8],
     windowHeight: [2.0, 2.4],
+    windowStyle: 'georgian',
     groundHeight: [0.5, 0.8],
     sills: { protrusion: 0.08 },
     roofColor: 0x4a4a4a,
@@ -119,6 +121,7 @@ export const germanTownhouse = {
     extension: null,
     windowSpacing: [2.2, 2.6],
     windowHeight: [1.4, 1.8],
+    windowStyle: 'georgian',
     groundHeight: [0.3, 0.5],
     sills: { protrusion: 0.08 },
     roofColor: 0x8b4513,
@@ -150,6 +153,7 @@ export const suburbanDetached = {
     extension: { widthFrac: 0.5, extDepth: 3, floors: 1, side: 'left' },
     windowSpacing: [2.0, 2.4],
     windowHeight: [1.3, 1.5],
+    windowStyle: 'single',
     groundHeight: [0.2, 0.3],
     sills: null,
     roofColor: 0x6b4e37,
@@ -182,6 +186,7 @@ export const lowRiseApartments = {
     extension: null,
     windowSpacing: [2.2, 2.6],
     windowHeight: [1.5, 1.8],
+    windowStyle: 'casement',
     groundHeight: [0.3, 0.5],
     sills: null,
     roofColor: 0x888888,
@@ -299,6 +304,7 @@ export function generateRow(archetype, count, seed, heightFn = () => 0) {
       });
     }
 
+    house._windowStyle = s.windowStyle || 'sash';
     addWindows(house, { spacing: winSpacing, height: winHeight });
 
     if (s.balcony) {
