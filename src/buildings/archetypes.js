@@ -57,6 +57,7 @@ export const victorianTerrace = {
     windowSpacing: [2.2, 2.8],
     windowHeight: [1.3, 1.6],
     windowStyle: 'sash',
+    roofTileStyle: 'slate',
     groundHeight: [0.3, 0.5],
     sills: { protrusion: 0.08 },
     roofColor: 0x6b4e37,
@@ -90,6 +91,7 @@ export const parisianHaussmann = {
     windowSpacing: [2.4, 2.8],
     windowHeight: [2.0, 2.4],
     windowStyle: 'georgian',
+    roofTileStyle: 'clay',
     groundHeight: [0.5, 0.8],
     sills: { protrusion: 0.08 },
     roofColor: 0x4a4a4a,
@@ -122,6 +124,7 @@ export const germanTownhouse = {
     windowSpacing: [2.2, 2.6],
     windowHeight: [1.4, 1.8],
     windowStyle: 'georgian',
+    roofTileStyle: 'slate',
     groundHeight: [0.3, 0.5],
     sills: { protrusion: 0.08 },
     roofColor: 0x8b4513,
@@ -154,6 +157,7 @@ export const suburbanDetached = {
     windowSpacing: [2.0, 2.4],
     windowHeight: [1.3, 1.5],
     windowStyle: 'single',
+    roofTileStyle: 'shingle',
     groundHeight: [0.2, 0.3],
     sills: null,
     roofColor: 0x6b4e37,
@@ -187,6 +191,7 @@ export const lowRiseApartments = {
     windowSpacing: [2.2, 2.6],
     windowHeight: [1.5, 1.8],
     windowStyle: 'casement',
+    roofTileStyle: 'shingle',
     groundHeight: [0.3, 0.5],
     sills: null,
     roofColor: 0x888888,
@@ -275,6 +280,7 @@ export function generateRow(archetype, count, seed, heightFn = () => 0) {
 
     setPartyWalls(house, partyWalls);
     for (let f = 1; f < floors; f++) addFloor(house);
+    house._roofTileStyle = s.roofTileStyle || 'slate';
     addPitchedRoof(house, roofPitch, s.roofDirection, s.roofOverhang);
     addFrontDoor(house, s.door);
 

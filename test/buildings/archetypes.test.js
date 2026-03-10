@@ -4,6 +4,7 @@ import {
   germanTownhouse, suburbanDetached, lowRiseApartments, generateRow,
 } from '../../src/buildings/archetypes.js';
 import { SeededRandom } from '../../src/core/rng.js';
+import { getRoofTexture } from '../../src/buildings/generate.js';
 import * as THREE from 'three';
 
 describe('sample', () => {
@@ -283,5 +284,15 @@ describe('generateRow', () => {
       if (c.name === 'roof') hasRoof = true;
     });
     expect(hasRoof).toBe(true);
+  });
+
+  it('applies roofTileStyle texture from archetype', () => {
+    const group = generateRow(victorianTerrace, 2, 42);
+    const house = group.children[0];
+    let roof = null;
+    house.traverse(c => { if (c.name === 'roof') roof = c; });
+    expect(roof).toBeDefined();
+    expect(roof.material.map).toBeDefined();
+    expect(roof.material.map).toBe(getRoofTexture('slate', victorianTerrace.shared.roofColor));
   });
 });
