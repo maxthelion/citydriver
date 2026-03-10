@@ -195,4 +195,83 @@ describe('generateRow', () => {
     house.traverse(c => { if (c.name === 'rearFoundation') hasRearFoundation = true; });
     expect(hasRearFoundation).toBe(true);
   });
+
+  it('generates Haussmann row with balconies and dormers', () => {
+    const group = generateRow(parisianHaussmann, 3, 42);
+    expect(group.children.length).toBe(3);
+    const house = group.children[1];
+    let hasBalcony = false;
+    let hasDormer = false;
+    house.traverse(c => {
+      if (c.name && c.name.startsWith('balcony_')) hasBalcony = true;
+      if (c.name && c.name.startsWith('dormer')) hasDormer = true;
+    });
+    expect(hasBalcony).toBe(true);
+    expect(hasDormer).toBe(true);
+  });
+
+  it('generates German townhouse row with porch and dormers', () => {
+    const group = generateRow(germanTownhouse, 3, 42);
+    expect(group.children.length).toBe(3);
+    const house = group.children[1];
+    let hasPorch = false;
+    let hasDormer = false;
+    house.traverse(c => {
+      if (c.name === 'porch') hasPorch = true;
+      if (c.name && c.name.startsWith('dormer')) hasDormer = true;
+    });
+    expect(hasPorch).toBe(true);
+    expect(hasDormer).toBe(true);
+  });
+
+  it('generates suburban detached with gaps between houses', () => {
+    const group = generateRow(suburbanDetached, 3, 42);
+    expect(group.children.length).toBe(3);
+    const h0 = group.children[0];
+    const h1 = group.children[1];
+    // Find actual house box width by inspecting geometry
+    let houseWidth = 0;
+    h0.traverse(c => {
+      if (c.name === 'walls' && c.geometry) {
+        c.geometry.computeBoundingBox();
+        houseWidth = c.geometry.boundingBox.max.x - c.geometry.boundingBox.min.x;
+      }
+    });
+    const plotSpacing = h1.position.x - h0.position.x;
+    expect(houseWidth).toBeLessThan(plotSpacing);
+  });
+
+  it('generates suburban detached with porch and extension', () => {
+    const group = generateRow(suburbanDetached, 2, 42);
+    const house = group.children[0];
+    let hasPorch = false;
+    let hasExtension = false;
+    house.traverse(c => {
+      if (c.name === 'porch') hasPorch = true;
+      if (c.name === 'extension') hasExtension = true;
+    });
+    expect(hasPorch).toBe(true);
+    expect(hasExtension).toBe(true);
+  });
+
+  it('generates apartment row with balconies on every floor', () => {
+    const group = generateRow(lowRiseApartments, 3, 42);
+    const house = group.children[1];
+    let balconyCount = 0;
+    house.traverse(c => {
+      if (c.name && c.name.startsWith('balcony_')) balconyCount++;
+    });
+    // Apartments have 4-5 floors, balconies on floors 1 through floors-1
+    expect(balconyCount).toBeGreaterThanOrEqual(3);
+  });
+
+  it('generates apartment row with flat roof', () => {
+    const group = generateRow(lowRiseApartments, 2, 42);
+    const house = group.children[0];
+    let hasRoof = false;
+    house.traverse(c => {
+      if (c.name === 'roof') hasRoof = true;
+    });
+    expect(hasRoof).toBe(true);
+  });
 });

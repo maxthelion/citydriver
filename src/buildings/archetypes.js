@@ -4,6 +4,7 @@ import {
   createHouse, setPartyWalls, addFloor,
   addPitchedRoof, addFrontDoor, addBayWindow,
   addWindows, addWindowSills, addGroundLevel,
+  addPorch, addBalcony, addDormer, addExtension,
 } from './generate.js';
 
 /**
@@ -221,8 +222,11 @@ export function generateRow(archetype, count, seed, heightFn = () => 0) {
   const winSpacing = sample(rowRng, s.windowSpacing);
   const winHeight = sample(rowRng, s.windowHeight);
   const baseGroundHeight = sample(rowRng, s.groundHeight);
-  const bayFloors = Math.round(sample(rowRng, s.bay.floors));
-  const bayDepth = sample(rowRng, s.bay.depth);
+
+  // Optional shared features — sample only if defined
+  const bayFloors = s.bay ? Math.round(sample(rowRng, s.bay.floors)) : 0;
+  const bayDepth = s.bay ? sample(rowRng, s.bay.depth) : 0;
+  const dormerCount = s.dormers ? Math.round(sample(rowRng, s.dormers.count)) : 0;
 
   let xOffset = 0;
 
@@ -231,11 +235,13 @@ export function generateRow(archetype, count, seed, heightFn = () => 0) {
     const houseSeed = hashPosition(seed, xOffset, 0);
     const rng = new SeededRandom(houseSeed);
 
-    const width = sample(rng, p.plotWidth);
+    const plotWidth = sample(rng, p.plotWidth);
+    const sideGap = p.sideGap ? sample(rng, p.sideGap) : 0;
+    const houseWidth = plotWidth - sideGap * 2;
     const wallColor = nudgeColor(p.wallColor, p.colorVariation, rng);
 
     // Terrain heights at house position
-    const centerX = xOffset + width / 2;
+    const centerX = xOffset + plotWidth / 2;
     const frontZ = HOUSE_Z;
     const backZ = HOUSE_Z + depth;
     const terrainFront = heightFn(centerX, frontZ);
@@ -257,7 +263,7 @@ export function generateRow(archetype, count, seed, heightFn = () => 0) {
     }
 
     // Build house using composable API
-    const house = createHouse(width, depth, floorHeight, wallColor);
+    const house = createHouse(houseWidth, depth, floorHeight, wallColor);
     house._winSpacing = winSpacing;
     house._groundHeight = groundLevel;
     house.roofColor = s.roofColor;
@@ -266,16 +272,54 @@ export function generateRow(archetype, count, seed, heightFn = () => 0) {
     for (let f = 1; f < floors; f++) addFloor(house);
     addPitchedRoof(house, roofPitch, s.roofDirection, s.roofOverhang);
     addFrontDoor(house, s.door);
-    addBayWindow(house, {
-      style: s.bay.style,
-      span: s.bay.span,
-      floors: Math.min(bayFloors, floors),
-      depth: bayDepth,
-    });
+
+    if (s.bay) {
+      addBayWindow(house, {
+        style: s.bay.style,
+        span: s.bay.span,
+        floors: Math.min(bayFloors, floors),
+        depth: bayDepth,
+      });
+    }
+
+    if (s.porch) {
+      addPorch(house, {
+        face: s.porch.face || 'front',
+        porchDepth: s.porch.porchDepth || 1.8,
+        roofStyle: s.porch.roofStyle || 'slope',
+      });
+    }
+
+    if (s.extension) {
+      addExtension(house, {
+        widthFrac: s.extension.widthFrac || 0.5,
+        extDepth: s.extension.extDepth || s.extension.depth || 3,
+        floors: s.extension.floors || 1,
+        side: s.extension.side || 'left',
+      });
+    }
+
     addWindows(house, { spacing: winSpacing, height: winHeight });
+
+    if (s.balcony) {
+      const balcStart = Array.isArray(s.balcony.floors) ? s.balcony.floors[0] : 1;
+      const balcEnd = Array.isArray(s.balcony.floors) ? s.balcony.floors[1] : floors;
+      for (let bf = balcStart; bf <= Math.min(balcEnd, floors - 1); bf++) {
+        addBalcony(house, bf, s.balcony.style);
+      }
+    }
+
     if (s.sills) {
       addWindowSills(house, { protrusion: s.sills.protrusion });
     }
+
+    if (s.dormers) {
+      for (let d = 0; d < dormerCount; d++) {
+        const pos = (d + 0.5) / dormerCount;
+        addDormer(house, { position: pos, style: s.dormers.style });
+      }
+    }
+
     if (groundLevel > 0.05) {
       addGroundLevel(house, groundLevel);
     }
@@ -284,21 +328,20 @@ export function generateRow(archetype, count, seed, heightFn = () => 0) {
     const rearDrop = terrainFront - terrainRear;
     if (rearDrop > 0.05) {
       const rearWall = new THREE.Mesh(
-        new THREE.BoxGeometry(width + 0.1, rearDrop, 0.15),
+        new THREE.BoxGeometry(houseWidth + 0.1, rearDrop, 0.15),
         new THREE.MeshLambertMaterial({ color: house.wallColor }),
       );
-      // Position at back of house, extending downward
-      rearWall.position.set(width / 2, -rearDrop / 2, depth + 0.05);
+      rearWall.position.set(houseWidth / 2, -rearDrop / 2, depth + 0.05);
       rearWall.name = 'rearFoundation';
       house.group.add(rearWall);
     }
 
-    // Position in row: X along row, Y at terrain height, Z at setback from road
-    house.group.position.x = xOffset;
+    // Position in row: X along plot, Y at terrain height, Z at setback
+    house.group.position.x = xOffset + sideGap;
     house.group.position.y += terrainFront;
     house.group.position.z = frontZ;
     group.add(house.group);
-    xOffset += width;
+    xOffset += plotWidth;
   }
 
   return group;
