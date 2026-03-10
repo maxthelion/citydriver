@@ -11,7 +11,7 @@
 const ROAD_Y_OFFSET = 0.3;  // road surface sits this far above natural terrain
 const RIVER_Y_OFFSET = -0.3; // river bed sits this far below natural terrain
 const CUT_DEPTH = 0.5;       // terrain depressed this far below road/river surface
-const BLEND_CELLS = 2;       // cells of slope from natural terrain to cut
+const BLEND_CELLS = 3;       // cells of slope from natural terrain to cut
 
 /**
  * @param {import('../core/FeatureMap.js').FeatureMap} map
@@ -61,6 +61,9 @@ function prepareRoads(map, ox, oz, cs) {
       localPts = _chaikinSmooth(localPts);
     }
 
+    // Densify: insert points every ~1 cell so elevation tracks terrain on slopes
+    localPts = _densifyAndResample(localPts, cs, map.elevation, ox, oz);
+
     return {
       localPts,
       halfWidth: halfW,
@@ -89,6 +92,35 @@ function _chaikinSmooth(pts) {
       z: a.z * 0.25 + b.z * 0.75,
       y: a.y * 0.25 + b.y * 0.75,
     });
+  }
+  result.push(pts[pts.length - 1]);
+  return result;
+}
+
+/**
+ * Insert intermediate points along road segments so that no two consecutive
+ * points are more than ~1 cell apart. Resample elevation at each new point
+ * so the road closely tracks the terrain on slopes.
+ */
+function _densifyAndResample(pts, cs, elevation, ox, oz) {
+  if (pts.length < 2) return pts;
+  const result = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    result.push(a);
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const segLen = Math.sqrt(dx * dx + dz * dz);
+    const steps = Math.floor(segLen / cs);
+    if (steps > 1) {
+      for (let s = 1; s < steps; s++) {
+        const t = s / steps;
+        const x = a.x + dx * t;
+        const z = a.z + dz * t;
+        // Resample elevation from the terrain grid at this position
+        const y = elevation.sample((x + ox) / cs, (z + oz) / cs) + ROAD_Y_OFFSET;
+        result.push({ x, z, y });
+      }
+    }
   }
   result.push(pts[pts.length - 1]);
   return result;
@@ -132,21 +164,40 @@ function prepareRivers(map, ox, oz, cs) {
 
 /**
  * Stamp road surface heights into the grid.
- * For each road polyline point, stamp a circle of radius = halfWidth + 1 cell.
+ * Walks along each road segment at cell-sized steps, stamping a circle
+ * of radius = halfWidth + 1 cell at each step for continuous coverage.
  */
 function stampRoadHeights(roads, grid, w, h, cs) {
   for (const road of roads) {
     const stampRadius = Math.ceil(road.halfWidth / cs) + 1;
-    for (const p of road.localPts) {
-      const cgx = Math.round(p.x / cs), cgz = Math.round(p.z / cs);
-      for (let dj = -stampRadius; dj <= stampRadius; dj++) {
-        for (let di = -stampRadius; di <= stampRadius; di++) {
-          const gx = cgx + di, gz = cgz + dj;
-          if (gx < 0 || gx >= w || gz < 0 || gz >= h) continue;
-          const i = gz * w + gx;
-          if (p.y > grid[i]) grid[i] = p.y;
+    const pts = road.localPts;
+    for (let i = 0; i < pts.length; i++) {
+      _stampCircle(grid, pts[i], stampRadius, w, h, cs);
+
+      // Walk along segment to next point, stamping at cell intervals
+      if (i < pts.length - 1) {
+        const a = pts[i], b = pts[i + 1];
+        const dx = b.x - a.x, dz = b.z - a.z;
+        const segLen = Math.sqrt(dx * dx + dz * dz);
+        const steps = Math.ceil(segLen / cs);
+        for (let s = 1; s < steps; s++) {
+          const t = s / steps;
+          const y = a.y + (b.y - a.y) * t;
+          _stampCircle(grid, { x: a.x + dx * t, z: a.z + dz * t, y }, stampRadius, w, h, cs);
         }
       }
+    }
+  }
+}
+
+function _stampCircle(grid, p, radius, w, h, cs) {
+  const cgx = Math.round(p.x / cs), cgz = Math.round(p.z / cs);
+  for (let dj = -radius; dj <= radius; dj++) {
+    for (let di = -radius; di <= radius; di++) {
+      const gx = cgx + di, gz = cgz + dj;
+      if (gx < 0 || gx >= w || gz < 0 || gz >= h) continue;
+      const i = gz * w + gx;
+      if (p.y > grid[i]) grid[i] = p.y;
     }
   }
 }
