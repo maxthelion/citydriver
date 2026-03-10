@@ -474,6 +474,7 @@ export class FeatureMap {
     const roadGrid = this.roadGrid;
     const bridgeGrid = this.bridgeGrid;
     const waterDepth = this.waterDepth;
+    const waterType = this.waterType;
 
     return (fromGx, fromGz, toGx, toGz) => {
       const dx = toGx - fromGx;
@@ -481,6 +482,9 @@ export class FeatureMap {
       const baseDist = Math.sqrt(dx * dx + dz * dz);
 
       if (!elevation) return baseDist;
+
+      // Block sea cells entirely (rivers are allowed with penalty for bridges)
+      if (waterType && waterType.get(toGx, toGz) === 1) return Infinity;
 
       const fromH = elevation.get(fromGx, fromGz);
       const toH = elevation.get(toGx, toGz);
