@@ -42,22 +42,30 @@ function nudgeColor(hex, amount, rng) {
 export const victorianTerrace = {
   typology: 'terraced',
   partyWalls: ['left', 'right'],
-  floors: [2, 3],
-  floorHeight: [2.8, 3.2],
-  roofPitch: [35, 45],
-  roofDirection: 'sides',
-  roofOverhang: 0.2,
-  plotWidth: [4.5, 6],
-  depth: [8, 10],
-  door: 'left',
-  bay: { style: 'box', span: 1, floors: [1, 2], depth: [0.6, 0.9] },
-  groundHeight: [0.3, 0.5],
-  wallColor: 0xd4c4a8,
-  roofColor: 0x6b4e37,
-  colorVariation: 0.06,
-  windowSpacing: [2.2, 2.8],
-  windowHeight: [1.3, 1.6],
-  sills: { protrusion: 0.08 },
+
+  // Sampled once, shared across the whole row
+  shared: {
+    floors: [2, 3],
+    floorHeight: [2.8, 3.2],
+    roofPitch: [35, 45],
+    roofDirection: 'sides',
+    roofOverhang: 0.2,
+    depth: [8, 10],
+    door: 'left',
+    bay: { style: 'box', span: 1, floors: [1, 2], depth: [0.6, 0.9] },
+    windowSpacing: [2.2, 2.8],
+    windowHeight: [1.3, 1.6],
+    groundHeight: [0.3, 0.5],
+    sills: { protrusion: 0.08 },
+    roofColor: 0x6b4e37,
+  },
+
+  // Sampled per house from position-based seed
+  perHouse: {
+    plotWidth: [4.5, 6],
+    wallColor: 0xd4c4a8,
+    colorVariation: 0.06,
+  },
 };
 
 /**
@@ -69,24 +77,30 @@ export const victorianTerrace = {
  */
 export function generateRow(archetype, count, seed) {
   const group = new THREE.Group();
+  const s = archetype.shared;
+  const p = archetype.perHouse;
+
+  // Sample shared values once at row level
+  const rowRng = new SeededRandom(seed);
+  const floors = Math.round(sample(rowRng, s.floors));
+  const floorHeight = sample(rowRng, s.floorHeight);
+  const roofPitch = sample(rowRng, s.roofPitch);
+  const depth = sample(rowRng, s.depth);
+  const winSpacing = sample(rowRng, s.windowSpacing);
+  const winHeight = sample(rowRng, s.windowHeight);
+  const groundHeight = sample(rowRng, s.groundHeight);
+  const bayFloors = Math.round(sample(rowRng, s.bay.floors));
+  const bayDepth = sample(rowRng, s.bay.depth);
+
   let xOffset = 0;
 
   for (let i = 0; i < count; i++) {
+    // Per-house values from position-based seed
     const houseSeed = hashPosition(seed, xOffset, 0);
     const rng = new SeededRandom(houseSeed);
 
-    // Sample concrete values from archetype ranges
-    const width = sample(rng, archetype.plotWidth);
-    const depth = sample(rng, archetype.depth);
-    const floors = Math.round(sample(rng, archetype.floors));
-    const floorHeight = sample(rng, archetype.floorHeight);
-    const roofPitch = sample(rng, archetype.roofPitch);
-    const winSpacing = sample(rng, archetype.windowSpacing);
-    const winHeight = sample(rng, archetype.windowHeight);
-    const groundHeight = sample(rng, archetype.groundHeight);
-    const bayFloors = Math.round(sample(rng, archetype.bay.floors));
-    const bayDepth = sample(rng, archetype.bay.depth);
-    const wallColor = nudgeColor(archetype.wallColor, archetype.colorVariation, rng);
+    const width = sample(rng, p.plotWidth);
+    const wallColor = nudgeColor(p.wallColor, p.colorVariation, rng);
 
     // Party walls: ends get one side exposed
     const partyWalls = [...archetype.partyWalls];
@@ -103,21 +117,21 @@ export function generateRow(archetype, count, seed) {
     const house = createHouse(width, depth, floorHeight, wallColor);
     house._winSpacing = winSpacing;
     house._groundHeight = groundHeight;
-    house.roofColor = archetype.roofColor;
+    house.roofColor = s.roofColor;
 
     setPartyWalls(house, partyWalls);
     for (let f = 1; f < floors; f++) addFloor(house);
-    addPitchedRoof(house, roofPitch, archetype.roofDirection, archetype.roofOverhang);
-    addFrontDoor(house, archetype.door);
+    addPitchedRoof(house, roofPitch, s.roofDirection, s.roofOverhang);
+    addFrontDoor(house, s.door);
     addBayWindow(house, {
-      style: archetype.bay.style,
-      span: archetype.bay.span,
+      style: s.bay.style,
+      span: s.bay.span,
       floors: Math.min(bayFloors, floors),
       depth: bayDepth,
     });
     addWindows(house, { spacing: winSpacing, height: winHeight });
-    if (archetype.sills) {
-      addWindowSills(house, { protrusion: archetype.sills.protrusion });
+    if (s.sills) {
+      addWindowSills(house, { protrusion: s.sills.protrusion });
     }
     if (groundHeight > 0) {
       addGroundLevel(house, groundHeight);

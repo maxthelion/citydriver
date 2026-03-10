@@ -41,11 +41,13 @@ describe('victorianTerrace', () => {
   it('has required archetype fields', () => {
     expect(victorianTerrace.typology).toBe('terraced');
     expect(victorianTerrace.partyWalls).toEqual(['left', 'right']);
-    expect(victorianTerrace.floors).toEqual([2, 3]);
-    expect(victorianTerrace.roofDirection).toBe('sides');
-    expect(victorianTerrace.door).toBe('left');
-    expect(victorianTerrace.bay).toBeDefined();
-    expect(victorianTerrace.sills).toBeDefined();
+    expect(victorianTerrace.shared.floors).toEqual([2, 3]);
+    expect(victorianTerrace.shared.roofDirection).toBe('sides');
+    expect(victorianTerrace.shared.door).toBe('left');
+    expect(victorianTerrace.shared.bay).toBeDefined();
+    expect(victorianTerrace.shared.sills).toBeDefined();
+    expect(victorianTerrace.perHouse.plotWidth).toEqual([4.5, 6]);
+    expect(victorianTerrace.perHouse.wallColor).toBeDefined();
   });
 });
 
