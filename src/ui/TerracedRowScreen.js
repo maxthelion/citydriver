@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { generateRow, victorianTerrace, ROAD_HALF_WIDTH, SIDEWALK_WIDTH } from '../buildings/archetypes.js';
+import { generateRow, victorianTerrace, ROAD_HALF_WIDTH, SIDEWALK_WIDTH, HOUSE_Z } from '../buildings/archetypes.js';
 
 const PRESETS = [
   { label: 'Flat',           streetSlope: 0,    crossSlope: 0 },
@@ -147,12 +147,6 @@ export class TerracedRowScreen {
     sun.position.set(20, 40, 30);
     this._scene.add(sun);
 
-    // Ground plane
-    const groundGeo = new THREE.PlaneGeometry(400, 400);
-    const ground = new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({ color: 0x3a6b35 }));
-    ground.rotation.x = -Math.PI / 2;
-    this._scene.add(ground);
-
     this._camera = new THREE.PerspectiveCamera(40, w / h, 0.1, 800);
 
     this._orbit = { theta: Math.PI / 4, phi: Math.PI / 5, dist: 100 };
@@ -214,6 +208,7 @@ export class TerracedRowScreen {
     const street = new THREE.Group();
     const roadMat = new THREE.MeshLambertMaterial({ color: 0x555555 });
     const swMat = new THREE.MeshLambertMaterial({ color: 0x999999 });
+    const grassMat = new THREE.MeshLambertMaterial({ color: 0x3a6b35 });
 
     // Helper: build a strip as a quad with corners at terrain height
     const buildStrip = (z0, z1, mat) => {
@@ -226,17 +221,24 @@ export class TerracedRowScreen {
         x0, heightFn(x0, z1), z1 + zOffset,
       ]);
       geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      geo.setIndex([0, 1, 2, 0, 2, 3]);
+      geo.setIndex([0, 2, 1, 0, 3, 2]);
       geo.computeVertexNormals();
       street.add(new THREE.Mesh(geo, mat));
     };
 
+    const swEdge = ROAD_HALF_WIDTH + SIDEWALK_WIDTH;
+
+    // Ground strips (grass)
+    buildStrip(-swEdge - 8, -swEdge, grassMat);           // far side of road
+    buildStrip(swEdge, HOUSE_Z, grassMat);                 // setback between sidewalk and houses
+    buildStrip(HOUSE_Z, HOUSE_Z + 20, grassMat);           // behind houses (covers depth + rear garden)
+
     // Road (centered on z=0)
     buildStrip(-ROAD_HALF_WIDTH, ROAD_HALF_WIDTH, roadMat);
     // Near sidewalk (between road and houses)
-    buildStrip(ROAD_HALF_WIDTH, ROAD_HALF_WIDTH + SIDEWALK_WIDTH, swMat);
+    buildStrip(ROAD_HALF_WIDTH, swEdge, swMat);
     // Far sidewalk (other side of road)
-    buildStrip(-ROAD_HALF_WIDTH - SIDEWALK_WIDTH, -ROAD_HALF_WIDTH, swMat);
+    buildStrip(-swEdge, -ROAD_HALF_WIDTH, swMat);
 
     return street;
   }
