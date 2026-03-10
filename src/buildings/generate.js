@@ -105,6 +105,152 @@ export function getWindowTexture(style) {
   return tex;
 }
 
+// ── Roof tile textures ──────────────────────────────────────
+
+const _roofTextureCache = new Map();
+
+function _hexToRgb(hex) {
+  return [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff];
+}
+
+function _drawRoofPattern(ctx, w, h, style, baseColor) {
+  const [br, bg, bb] = _hexToRgb(baseColor);
+
+  // Fill with base colour
+  ctx.fillStyle = `rgb(${br},${bg},${bb})`;
+  ctx.fillRect(0, 0, w, h);
+
+  if (style === 'slate') {
+    // Staggered rectangular tiles
+    const tileH = 16;
+    const tileW = 24;
+    const rows = Math.ceil(h / tileH);
+    for (let row = 0; row < rows; row++) {
+      const y = row * tileH;
+      const offset = (row % 2) * (tileW / 2);
+      // Per-row shade variation
+      const shade = (row % 3 === 0) ? -15 : (row % 3 === 1) ? 10 : 0;
+      const r = Math.min(255, Math.max(0, br + shade));
+      const g = Math.min(255, Math.max(0, bg + shade));
+      const b = Math.min(255, Math.max(0, bb + shade));
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(0, y, w, tileH);
+      // Tile edge lines
+      ctx.strokeStyle = `rgb(${Math.max(0, br - 30)},${Math.max(0, bg - 30)},${Math.max(0, bb - 30)})`;
+      ctx.lineWidth = 1;
+      // Horizontal line at bottom of row
+      ctx.beginPath();
+      ctx.moveTo(0, y + tileH);
+      ctx.lineTo(w, y + tileH);
+      ctx.stroke();
+      // Vertical dividers (staggered)
+      const cols = Math.ceil(w / tileW) + 1;
+      for (let col = 0; col < cols; col++) {
+        const x = col * tileW + offset;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + tileH);
+        ctx.stroke();
+      }
+    }
+  } else if (style === 'clay') {
+    // Wavy interlocking tiles (pantile)
+    const tileH = 20;
+    const tileW = 16;
+    const rows = Math.ceil(h / tileH);
+    for (let row = 0; row < rows; row++) {
+      const y = row * tileH;
+      const offset = (row % 2) * (tileW / 2);
+      // Per-row shade variation (more pronounced for clay)
+      const shade = (row % 3 === 0) ? -20 : (row % 3 === 1) ? 12 : 0;
+      const r = Math.min(255, Math.max(0, br + shade));
+      const g = Math.min(255, Math.max(0, bg + shade));
+      const b = Math.min(255, Math.max(0, bb + shade));
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(0, y, w, tileH);
+      // Horizontal seam
+      ctx.strokeStyle = `rgb(${Math.max(0, br - 25)},${Math.max(0, bg - 25)},${Math.max(0, bb - 25)})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, y + tileH);
+      ctx.lineTo(w, y + tileH);
+      ctx.stroke();
+      // Wavy vertical lines (simulated with alternating half-height strokes)
+      const cols = Math.ceil(w / tileW) + 1;
+      const highlight = `rgba(255,255,255,0.12)`;
+      for (let col = 0; col < cols; col++) {
+        const x = col * tileW + offset;
+        // Dark edge
+        ctx.strokeStyle = `rgb(${Math.max(0, br - 25)},${Math.max(0, bg - 25)},${Math.max(0, bb - 25)})`;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + tileH);
+        ctx.stroke();
+        // Light highlight next to edge (gives the curved tile illusion)
+        ctx.strokeStyle = highlight;
+        ctx.beginPath();
+        ctx.moveTo(x + 2, y);
+        ctx.lineTo(x + 2, y + tileH);
+        ctx.stroke();
+      }
+    }
+  } else {
+    // 'shingle' — small uniform flat tiles, minimal texture
+    const tileH = 10;
+    const tileW = 16;
+    const rows = Math.ceil(h / tileH);
+    for (let row = 0; row < rows; row++) {
+      const y = row * tileH;
+      const offset = (row % 2) * (tileW / 2);
+      const shade = (row % 4 === 0) ? -8 : (row % 4 === 2) ? 6 : 0;
+      const r = Math.min(255, Math.max(0, br + shade));
+      const g = Math.min(255, Math.max(0, bg + shade));
+      const b = Math.min(255, Math.max(0, bb + shade));
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(0, y, w, tileH);
+      // Subtle seam lines
+      ctx.strokeStyle = `rgba(${Math.max(0, br - 20)},${Math.max(0, bg - 20)},${Math.max(0, bb - 20)},0.5)`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, y + tileH);
+      ctx.lineTo(w, y + tileH);
+      ctx.stroke();
+      const cols = Math.ceil(w / tileW) + 1;
+      for (let col = 0; col < cols; col++) {
+        const x = col * tileW + offset;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + tileH);
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+/**
+ * Get a cached CanvasTexture for a roof tile style.
+ * @param {'slate'|'clay'|'shingle'} style
+ * @param {number} baseColor - hex color (e.g. 0x6b4e37)
+ * @returns {THREE.CanvasTexture}
+ */
+export function getRoofTexture(style, baseColor) {
+  const VALID = ['slate', 'clay', 'shingle'];
+  if (!VALID.includes(style)) style = 'slate';
+
+  const key = `${style}:${baseColor}`;
+  if (_roofTextureCache.has(key)) return _roofTextureCache.get(key);
+
+  const canvas = _createCanvas(128, 128);
+  const ctx = canvas.getContext('2d');
+  _drawRoofPattern(ctx, 128, 128, style, baseColor);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  _roofTextureCache.set(key, tex);
+  return tex;
+}
+
 export function createHouse(width, depth, floorHeight, color = 0xd4c4a8) {
   const house = {
     width,

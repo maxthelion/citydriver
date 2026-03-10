@@ -7,6 +7,7 @@ import {
   setPartyWalls,
   generateBuilding,
   getWindowTexture,
+  getRoofTexture,
 } from '../../src/buildings/generate.js';
 import { getClimateStyle, buildRecipe, CLIMATES } from '../../src/buildings/styles.js';
 
@@ -457,6 +458,45 @@ describe('getWindowTexture', () => {
     const tex = getWindowTexture('nonexistent');
     const sash = getWindowTexture('sash');
     expect(tex).toBe(sash);
+  });
+});
+
+describe('getRoofTexture', () => {
+  it('returns a THREE.CanvasTexture for each style', () => {
+    for (const style of ['slate', 'clay', 'shingle']) {
+      const tex = getRoofTexture(style, 0x6b4e37);
+      expect(tex).toBeInstanceOf(THREE.CanvasTexture);
+    }
+  });
+
+  it('caches textures — same style+color returns same object', () => {
+    const a = getRoofTexture('slate', 0x6b4e37);
+    const b = getRoofTexture('slate', 0x6b4e37);
+    expect(a).toBe(b);
+  });
+
+  it('different styles return different objects', () => {
+    const a = getRoofTexture('slate', 0x6b4e37);
+    const b = getRoofTexture('clay', 0x6b4e37);
+    expect(a).not.toBe(b);
+  });
+
+  it('different colors return different objects', () => {
+    const a = getRoofTexture('slate', 0x6b4e37);
+    const b = getRoofTexture('slate', 0x4a4a4a);
+    expect(a).not.toBe(b);
+  });
+
+  it('unknown style falls back to slate', () => {
+    const tex = getRoofTexture('nonexistent', 0x6b4e37);
+    const slate = getRoofTexture('slate', 0x6b4e37);
+    expect(tex).toBe(slate);
+  });
+
+  it('texture has RepeatWrapping', () => {
+    const tex = getRoofTexture('slate', 0x6b4e37);
+    expect(tex.wrapS).toBe(THREE.RepeatWrapping);
+    expect(tex.wrapT).toBe(THREE.RepeatWrapping);
   });
 });
 
