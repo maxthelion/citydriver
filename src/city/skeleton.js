@@ -61,7 +61,7 @@ export function buildSkeletonRoads(map) {
   //    Extras are pathfound last so they get the discount from anchors + MST.
   //    Snap + merge operates on ALL paths together, eliminating cross-group parallels.
   const costFn = map.createPathCost('anchor');
-  const builtRoads = buildRoadNetwork({
+  const networkResult = buildRoadNetwork({
     width: map.width,
     height: map.height,
     cellSize: map.cellSize,
@@ -73,7 +73,15 @@ export function buildSkeletonRoads(map) {
     originZ: map.originZ,
     tagGrids: { anchor: map.debugAnchorGrid, mst: map.debugMstGrid, extra: map.debugExtraGrid },
     popularityGrid: map.roadPopularity,
+    collectDebugPaths: true,
   });
+
+  const builtRoads = networkResult.roads;
+
+  // Store debug path data on the map for the path viewer tool
+  map.debugPaths = networkResult.debugPaths;
+  map.debugPathsGridWidth = networkResult.gridWidth;
+  map.debugPathsGridHeight = networkResult.gridHeight;
 
   // 4. Add merged roads as features
   for (const road of builtRoads) {
@@ -854,4 +862,24 @@ function _trimWeakPoly(poly, skipDist) {
   }
 
   return result;
+}
+
+// ============================================================
+// Debug path export for the path-viewer tool
+// ============================================================
+
+/**
+ * Export debug path data from a FeatureMap as a JSON string.
+ * The resulting JSON can be loaded in tools/path-viewer.html.
+ *
+ * @param {import('../core/FeatureMap.js').FeatureMap} map
+ * @returns {string|null} JSON string, or null if no debug paths collected
+ */
+export function exportDebugPathsJSON(map) {
+  if (!map.debugPaths) return null;
+  return JSON.stringify({
+    gridWidth: map.debugPathsGridWidth,
+    gridHeight: map.debugPathsGridHeight,
+    paths: map.debugPaths,
+  });
 }

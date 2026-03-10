@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A* Path Viewer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Sidebar */
+  #sidebar {
+    width: 360px;
+    min-width: 360px;
+    background: #16213e;
+    border-right: 1px solid #0f3460;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #sidebar h1 {
+    font-size: 16px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #0f3460;
+    color: #e94560;
+  }
+
+  #controls {
+    padding: 12px 16px;
+    border-bottom: 1px solid #0f3460;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  #controls label {
+    font-size: 12px;
+    color: #999;
+  }
+
+  #controls button, #controls input[type="file"] {
+    padding: 6px 12px;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  #controls button:hover {
+    background: #0f3460;
+  }
+
+  .btn-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  .btn-row button {
+    flex: 1;
+  }
+
+  #filter-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  #filter-row label {
+    white-space: nowrap;
+  }
+
+  .tag-btn {
+    padding: 3px 8px;
+    border: 1px solid #0f3460;
+    border-radius: 3px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    cursor: pointer;
+    font-size: 11px;
+  }
+
+  .tag-btn.active {
+    background: #0f3460;
+    border-color: #e94560;
+  }
+
+  /* Path list */
+  #path-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+  }
+
+  .path-item {
+    display: flex;
+    align-items: flex-start;
+    padding: 4px 16px;
+    gap: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+  }
+
+  .path-item:hover {
+    background: rgba(255,255,255,0.05);
+  }
+
+  .path-item.highlighted {
+    background: rgba(255,255,255,0.1);
+    border-left-color: #fff;
+  }
+
+  .path-item input[type="checkbox"] {
+    margin-top: 2px;
+    cursor: pointer;
+  }
+
+  .path-meta {
+    flex: 1;
+    line-height: 1.4;
+  }
+
+  .path-meta .path-label {
+    font-weight: bold;
+  }
+
+  .path-meta .path-detail {
+    color: #888;
+    font-size: 11px;
+  }
+
+  .path-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    margin-top: 2px;
+    flex-shrink: 0;
+  }
+
+  /* Canvas area */
+  #canvas-area {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  #canvas-container {
+    position: relative;
+    transform-origin: 0 0;
+  }
+
+  #canvas-container canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    image-rendering: pixelated;
+  }
+
+  #grid-canvas {
+    z-index: 0;
+  }
+
+  /* Paste overlay */
+  #paste-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+
+  #paste-overlay.hidden { display: none; }
+
+  #paste-box {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    padding: 24px;
+    width: 600px;
+    max-width: 90vw;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  #paste-box h2 {
+    font-size: 14px;
+    color: #e94560;
+  }
+
+  #paste-box textarea {
+    width: 100%;
+    height: 200px;
+    background: #1a1a2e;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 8px;
+    resize: vertical;
+  }
+
+  #paste-box .btn-row {
+    justify-content: flex-end;
+  }
+
+  /* Status bar */
+  #status {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    font-size: 11px;
+    color: #666;
+    pointer-events: none;
+  }
+
+  /* Zoom controls */
+  #zoom-controls {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    gap: 4px;
+  }
+
+  #zoom-controls button {
+    width: 28px;
+    height: 28px;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    background: #16213e;
+    color: #e0e0e0;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #zoom-controls button:hover {
+    background: #0f3460;
+  }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>A* Path Viewer</h1>
+  <div id="controls">
+    <div class="btn-row">
+      <button id="btn-paste">Paste JSON</button>
+      <button id="btn-load">Load File</button>
+      <input type="file" id="file-input" accept=".json" style="display:none">
+    </div>
+    <div class="btn-row">
+      <button id="btn-all">Show All</button>
+      <button id="btn-none">Hide All</button>
+      <button id="btn-invert">Invert</button>
+    </div>
+    <div id="filter-row">
+      <label>Filter:</label>
+      <div id="tag-buttons"></div>
+    </div>
+  </div>
+  <div id="path-list"></div>
+</div>
+
+<div id="canvas-area">
+  <div id="canvas-container"></div>
+  <div id="zoom-controls">
+    <button id="btn-zoom-in">+</button>
+    <button id="btn-zoom-out">-</button>
+    <button id="btn-zoom-fit">F</button>
+  </div>
+  <div id="status">No data loaded. Paste JSON or load a file.</div>
+</div>
+
+<div id="paste-overlay" class="hidden">
+  <div id="paste-box">
+    <h2>Paste debug paths JSON</h2>
+    <textarea id="paste-textarea" placeholder='{"gridWidth":128,"gridHeight":128,"paths":[...]}'></textarea>
+    <div class="btn-row">
+      <button id="btn-paste-cancel">Cancel</button>
+      <button id="btn-paste-ok">Load</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // --- Color scheme ---
+  const HIER_COLORS = {
+    arterial:  { r: 230, g: 50,  b: 50,  hex: '#e63232' },
+    collector: { r: 230, g: 150, b: 30,  hex: '#e6961e' },
+    local:     { r: 220, g: 220, b: 60,  hex: '#dcdc3c' },
+    track:     { r: 100, g: 200, b: 100, hex: '#64c864' },
+  };
+
+  const TAG_COLORS = {
+    anchor: { r: 255, g: 80,  b: 80,  hex: '#ff5050' },
+    mst:    { r: 80,  g: 180, b: 255, hex: '#50b4ff' },
+    extra:  { r: 80,  g: 220, b: 120, hex: '#50dc78' },
+  };
+
+  // Use tag color if available, else hierarchy color
+  function getColor(path) {
+    if (path.tag && TAG_COLORS[path.tag]) return TAG_COLORS[path.tag];
+    return HIER_COLORS[path.hierarchy] || HIER_COLORS.local;
+  }
+
+  // --- State ---
+  let data = null;        // { gridWidth, gridHeight, paths }
+  let visibility = [];    // boolean[] per path
+  let canvases = [];      // canvas elements per path
+  let highlighted = -1;   // index of hovered path
+  let zoom = 1;
+  let panX = 0, panY = 0;
+  let cellPx = 4;        // pixels per grid cell
+
+  // --- DOM refs ---
+  const container = document.getElementById('canvas-container');
+  const canvasArea = document.getElementById('canvas-area');
+  const pathList = document.getElementById('path-list');
+  const status = document.getElementById('status');
+  const tagButtonsDiv = document.getElementById('tag-buttons');
+
+  // --- Load data ---
+  function loadData(json) {
+    try {
+      data = typeof json === 'string' ? JSON.parse(json) : json;
+    } catch (e) {
+      alert('Invalid JSON: ' + e.message);
+      return;
+    }
+
+    if (!data.gridWidth || !data.gridHeight || !Array.isArray(data.paths)) {
+      alert('JSON must have gridWidth, gridHeight, and paths array.');
+      return;
+    }
+
+    // Auto-scale cell size so the grid fits nicely
+    const maxDim = Math.max(data.gridWidth, data.gridHeight);
+    cellPx = maxDim <= 64 ? 8 : maxDim <= 128 ? 4 : maxDim <= 256 ? 2 : 1;
+
+    visibility = data.paths.map(() => true);
+    buildUI();
+    buildCanvases();
+    zoomToFit();
+    renderAll();
+    updateStatus();
+  }
+
+  // --- Build sidebar UI ---
+  function buildUI() {
+    pathList.innerHTML = '';
+
+    // Tag filter buttons
+    const tags = [...new Set(data.paths.map(p => p.tag).filter(Boolean))];
+    tagButtonsDiv.innerHTML = '';
+    for (const tag of tags) {
+      const btn = document.createElement('button');
+      btn.className = 'tag-btn active';
+      btn.textContent = tag;
+      btn.dataset.tag = tag;
+      btn.style.borderColor = (TAG_COLORS[tag] || HIER_COLORS.local).hex;
+      btn.addEventListener('click', () => {
+        btn.classList.toggle('active');
+        const show = btn.classList.contains('active');
+        data.paths.forEach((p, i) => {
+          if (p.tag === tag) {
+            visibility[i] = show;
+            updateCheckbox(i);
+          }
+        });
+        renderAll();
+      });
+      tagButtonsDiv.appendChild(btn);
+    }
+
+    // Path items
+    data.paths.forEach((p, i) => {
+      const item = document.createElement('div');
+      item.className = 'path-item';
+      item.dataset.index = i;
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = true;
+      cb.id = 'cb-' + i;
+      cb.addEventListener('change', () => {
+        visibility[i] = cb.checked;
+        renderAll();
+      });
+
+      const swatch = document.createElement('div');
+      swatch.className = 'path-swatch';
+      const c = getColor(p);
+      swatch.style.background = c.hex;
+
+      const meta = document.createElement('div');
+      meta.className = 'path-meta';
+
+      const label = document.createElement('div');
+      label.className = 'path-label';
+      label.textContent = `#${p.index} ${p.hierarchy}${p.tag ? ' [' + p.tag + ']' : ''}`;
+
+      const detail = document.createElement('div');
+      detail.className = 'path-detail';
+      detail.textContent = `(${p.from.gx},${p.from.gz}) -> (${p.to.gx},${p.to.gz})  cost: ${p.cost.toFixed(1)}  cells: ${p.cells.length}`;
+
+      meta.appendChild(label);
+      meta.appendChild(detail);
+
+      item.appendChild(cb);
+      item.appendChild(swatch);
+      item.appendChild(meta);
+
+      item.addEventListener('mouseenter', () => highlightPath(i));
+      item.addEventListener('mouseleave', () => highlightPath(-1));
+
+      pathList.appendChild(item);
+    });
+  }
+
+  function updateCheckbox(i) {
+    const cb = document.getElementById('cb-' + i);
+    if (cb) cb.checked = visibility[i];
+  }
+
+  function highlightPath(i) {
+    if (highlighted === i) return;
+    highlighted = i;
+
+    // Update sidebar highlighting
+    pathList.querySelectorAll('.path-item').forEach((el, idx) => {
+      el.classList.toggle('highlighted', idx === i);
+    });
+
+    renderAll();
+  }
+
+  // --- Build canvases ---
+  function buildCanvases() {
+    container.innerHTML = '';
+    canvases = [];
+
+    const w = data.gridWidth * cellPx;
+    const h = data.gridHeight * cellPx;
+
+    container.style.width = w + 'px';
+    container.style.height = h + 'px';
+
+    // Background grid canvas
+    const gridCanvas = document.createElement('canvas');
+    gridCanvas.id = 'grid-canvas';
+    gridCanvas.width = w;
+    gridCanvas.height = h;
+    container.appendChild(gridCanvas);
+    drawGrid(gridCanvas);
+
+    // One canvas per path
+    data.paths.forEach((p, i) => {
+      const cvs = document.createElement('canvas');
+      cvs.width = w;
+      cvs.height = h;
+      cvs.style.zIndex = i + 1;
+      container.appendChild(cvs);
+      canvases.push(cvs);
+      drawPath(cvs, p);
+    });
+  }
+
+  function drawGrid(canvas) {
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#111122';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Grid lines (subtle)
+    if (cellPx >= 4) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.lineWidth = 1;
+      for (let x = 0; x <= data.gridWidth; x++) {
+        ctx.beginPath();
+        ctx.moveTo(x * cellPx + 0.5, 0);
+        ctx.lineTo(x * cellPx + 0.5, canvas.height);
+        ctx.stroke();
+      }
+      for (let z = 0; z <= data.gridHeight; z++) {
+        ctx.beginPath();
+        ctx.moveTo(0, z * cellPx + 0.5);
+        ctx.lineTo(canvas.width, z * cellPx + 0.5);
+        ctx.stroke();
+      }
+    }
+  }
+
+  function drawPath(canvas, pathData) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const c = getColor(pathData);
+
+    for (const cell of pathData.cells) {
+      ctx.fillStyle = `rgba(${c.r},${c.g},${c.b},0.8)`;
+      ctx.fillRect(cell.gx * cellPx, cell.gz * cellPx, cellPx, cellPx);
+    }
+
+    // Mark endpoints
+    const from = pathData.cells[0];
+    const to = pathData.cells[pathData.cells.length - 1];
+    if (from) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(from.gx * cellPx, from.gz * cellPx, cellPx, cellPx);
+    }
+    if (to) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(to.gx * cellPx, to.gz * cellPx, cellPx, cellPx);
+    }
+  }
+
+  // --- Render visibility ---
+  function renderAll() {
+    canvases.forEach((cvs, i) => {
+      const show = visibility[i];
+      cvs.style.display = show ? 'block' : 'none';
+
+      if (show && highlighted >= 0) {
+        cvs.style.opacity = (i === highlighted) ? '1' : '0.25';
+      } else {
+        cvs.style.opacity = '1';
+      }
+    });
+  }
+
+  function updateStatus() {
+    const visible = visibility.filter(v => v).length;
+    status.textContent = `${data.paths.length} paths (${visible} visible) | grid ${data.gridWidth}x${data.gridHeight} | ${cellPx}px/cell | zoom ${zoom.toFixed(1)}x`;
+  }
+
+  // --- Zoom / Pan ---
+  function applyTransform() {
+    container.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+    updateStatus();
+  }
+
+  function zoomToFit() {
+    if (!data) return;
+    const w = data.gridWidth * cellPx;
+    const h = data.gridHeight * cellPx;
+    const areaRect = canvasArea.getBoundingClientRect();
+    const scaleX = (areaRect.width - 40) / w;
+    const scaleY = (areaRect.height - 40) / h;
+    zoom = Math.min(scaleX, scaleY, 8);
+    panX = (areaRect.width - w * zoom) / 2;
+    panY = (areaRect.height - h * zoom) / 2;
+    applyTransform();
+  }
+
+  document.getElementById('btn-zoom-in').addEventListener('click', () => {
+    zoom = Math.min(zoom * 1.5, 32);
+    applyTransform();
+  });
+  document.getElementById('btn-zoom-out').addEventListener('click', () => {
+    zoom = Math.max(zoom / 1.5, 0.1);
+    applyTransform();
+  });
+  document.getElementById('btn-zoom-fit').addEventListener('click', zoomToFit);
+
+  // Mouse wheel zoom (centered on cursor)
+  canvasArea.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = canvasArea.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const oldZoom = zoom;
+    if (e.deltaY < 0) {
+      zoom = Math.min(zoom * 1.2, 32);
+    } else {
+      zoom = Math.max(zoom / 1.2, 0.1);
+    }
+
+    // Adjust pan so the point under the cursor stays fixed
+    panX = mx - (mx - panX) * (zoom / oldZoom);
+    panY = my - (my - panY) * (zoom / oldZoom);
+
+    applyTransform();
+  }, { passive: false });
+
+  // Mouse drag to pan
+  let dragging = false, dragStartX, dragStartY, dragPanX, dragPanY;
+  canvasArea.addEventListener('mousedown', (e) => {
+    dragging = true;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    dragPanX = panX;
+    dragPanY = panY;
+    canvasArea.style.cursor = 'grabbing';
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    panX = dragPanX + (e.clientX - dragStartX);
+    panY = dragPanY + (e.clientY - dragStartY);
+    applyTransform();
+  });
+  window.addEventListener('mouseup', () => {
+    dragging = false;
+    canvasArea.style.cursor = '';
+  });
+
+  // --- Button handlers ---
+  document.getElementById('btn-all').addEventListener('click', () => {
+    visibility.fill(true);
+    visibility.forEach((_, i) => updateCheckbox(i));
+    renderAll();
+    updateStatus();
+  });
+  document.getElementById('btn-none').addEventListener('click', () => {
+    visibility.fill(false);
+    visibility.forEach((_, i) => updateCheckbox(i));
+    renderAll();
+    updateStatus();
+  });
+  document.getElementById('btn-invert').addEventListener('click', () => {
+    visibility = visibility.map(v => !v);
+    visibility.forEach((_, i) => updateCheckbox(i));
+    renderAll();
+    updateStatus();
+  });
+
+  // Paste dialog
+  document.getElementById('btn-paste').addEventListener('click', () => {
+    document.getElementById('paste-overlay').classList.remove('hidden');
+    document.getElementById('paste-textarea').focus();
+  });
+  document.getElementById('btn-paste-cancel').addEventListener('click', () => {
+    document.getElementById('paste-overlay').classList.add('hidden');
+  });
+  document.getElementById('btn-paste-ok').addEventListener('click', () => {
+    const text = document.getElementById('paste-textarea').value.trim();
+    if (text) {
+      loadData(text);
+      document.getElementById('paste-overlay').classList.add('hidden');
+    }
+  });
+
+  // File load
+  document.getElementById('btn-load').addEventListener('click', () => {
+    document.getElementById('file-input').click();
+  });
+  document.getElementById('file-input').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => loadData(reader.result);
+    reader.readAsText(file);
+  });
+
+  // Keyboard shortcuts
+  window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+    if (e.key === 'a') { document.getElementById('btn-all').click(); }
+    if (e.key === 'n') { document.getElementById('btn-none').click(); }
+    if (e.key === 'i') { document.getElementById('btn-invert').click(); }
+    if (e.key === 'f') { zoomToFit(); }
+    if (e.key === '=' || e.key === '+') { document.getElementById('btn-zoom-in').click(); }
+    if (e.key === '-') { document.getElementById('btn-zoom-out').click(); }
+  });
+})();
+</script>
+</body>
+</html>

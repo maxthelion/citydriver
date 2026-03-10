@@ -29,7 +29,9 @@ const RANK_HIER = { 1: 'arterial', 2: 'collector', 3: 'local', 4: 'track' };
  * @param {object} [options.smooth] - { simplifyEpsilon }
  * @param {number} [options.originX=0] - World origin for coordinate conversion
  * @param {number} [options.originZ=0]
- * @returns {Array<{ cells, polyline, hierarchy, from, to }>}
+ * @returns {{ roads: Array<{ cells, polyline, hierarchy, from, to }>, debugPaths?: Array }}
+ *   When collectDebugPaths is true the return value is { roads, debugPaths }.
+ *   Otherwise it returns just the roads array (backward-compatible).
  */
 export function buildRoadNetwork(options) {
   const {
@@ -40,12 +42,16 @@ export function buildRoadNetwork(options) {
     originX = 0, originZ = 0,
     tagGrids = {},
     popularityGrid = null,
+    collectDebugPaths = false,
   } = options;
 
   const { simplifyEpsilon = 1.0 } = smooth;
 
   // Collect all raw cell paths for merging
   const rawPaths = [];
+
+  // Optional per-path debug capture
+  const debugPaths = collectDebugPaths ? [] : null;
 
   // Include existing paths so the merge can split them at new junctions
   for (const ep of existingPaths) {
@@ -55,6 +61,7 @@ export function buildRoadNetwork(options) {
   }
 
   // Pathfind each connection, stamp roadGrid between each for reuse
+  let connIndex = 0;
   for (const conn of connections) {
     const result = findPath(
       conn.from.gx, conn.from.gz,
@@ -62,7 +69,20 @@ export function buildRoadNetwork(options) {
       width, height, costFn,
     );
 
-    if (!result) continue;
+    if (!result) { connIndex++; continue; }
+
+    // Capture debug layer for this individual path
+    if (debugPaths) {
+      debugPaths.push({
+        index: connIndex,
+        hierarchy: conn.hierarchy || 'local',
+        tag: conn.tag || null,
+        from: { gx: conn.from.gx, gz: conn.from.gz },
+        to: { gx: conn.to.gx, gz: conn.to.gz },
+        cost: result.cost,
+        cells: result.path.map(p => ({ gx: p.gx, gz: p.gz })),
+      });
+    }
 
     // Stamp onto roadGrid so later pathfinds get the reuse discount
     for (const p of result.path) {
@@ -88,6 +108,8 @@ export function buildRoadNetwork(options) {
       rank: 1,
       hierarchy: conn.hierarchy || 'local',
     });
+
+    connIndex++;
   }
 
   // Snap near-parallel paths onto each other before merging.
@@ -138,6 +160,10 @@ export function buildRoadNetwork(options) {
     });
   }
 
+  // Backward-compatible: only return the new shape when debug was requested
+  if (debugPaths) {
+    return { roads: results, debugPaths, gridWidth: width, gridHeight: height };
+  }
   return results;
 }
 
