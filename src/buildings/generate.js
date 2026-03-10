@@ -1,411 +1,1115 @@
 import * as THREE from 'three';
 
 /**
- * Generate a building as a THREE.Group from style + recipe.
- * Geometry is intentionally simple: box walls, pitched/flat roof, painted window rects.
+ * Composable building API.
+ *
+ * createHouse(w, d, floorHeight) → house object with a one-storey box
+ * addFloor(house)                → adds a storey
+ * addPitchedRoof(house, pitch, direction) → gable roof
+ * addFrontDoor(house, placement)  → door on front face
+ * addBackDoor(house, placement)  → door on back face
+ * addPorch(house, {face})        → covered porch (front or back)
+ * addWindows(house, opts)        → windows on all walls
+ * addExtension(house, opts)      → rear extension (half/full width)
+ * addDormer(house, opts)         → dormer on roof slope
+ *
+ * house.group is the THREE.Group to add to a scene.
  */
-export function generateBuilding(style, recipe) {
-  const group = new THREE.Group();
 
-  const volumes = buildVolumes(recipe);
-  const fh = style.floorHeight;
-
-  // --- Walls (one merged mesh) ---
-  const wallGeo = mergeGeos(volumes.map(v => boxWalls(v, v.floors * fh)));
-  const wallMesh = new THREE.Mesh(wallGeo, new THREE.MeshLambertMaterial({ color: recipe.wallColor }));
-  wallMesh.name = 'walls';
-  group.add(wallMesh);
-
-  // --- Roof ---
-  const roofGeo = mergeGeos(volumes.map(v => buildRoof(v, v.floors * fh, style)));
-  const roofMesh = new THREE.Mesh(roofGeo, new THREE.MeshLambertMaterial({ color: recipe.roofColor }));
-  roofMesh.name = 'roof';
-  group.add(roofMesh);
-
-  // --- Windows ---
-  const winGeo = mergeGeos(volumes.map(v => buildWindows(v, v.floors * fh, v.floors, style)));
-  if (winGeo) {
-    const winMesh = new THREE.Mesh(winGeo, new THREE.MeshLambertMaterial({
-      color: recipe.windowColor,
-      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
-    }));
-    winMesh.name = 'windows';
-    group.add(winMesh);
-  }
-
-  // --- Chimney ---
-  if (recipe.chimneyCount > 0) {
-    const chimGeo = buildChimneys(volumes[0], volumes[0].floors * fh, style, recipe.chimneyCount);
-    if (chimGeo) {
-      const chimMesh = new THREE.Mesh(chimGeo, new THREE.MeshLambertMaterial({ color: 0x8b4513 }));
-      chimMesh.name = 'chimneys';
-      group.add(chimMesh);
-    }
-  }
-
-  return group;
-}
-
-// ── Volume layout ─────────────────────────────────────────────
-
-function buildVolumes(recipe) {
-  const main = {
-    x: 0, z: 0,
-    w: recipe.mainWidth, d: recipe.mainDepth,
-    floors: recipe.floors, role: 'main',
+export function createHouse(width, depth, floorHeight, color = 0xd4c4a8) {
+  const house = {
+    width,
+    depth,
+    floorHeight,
+    floors: 1,
+    wallColor: color,
+    roofColor: 0x6b4e37,
+    group: new THREE.Group(),
+    _roofPitch: null,
+    _roofDirection: null,
   };
-  const vols = [main];
-  for (const wing of recipe.wings) {
-    const v = { w: wing.width, d: wing.depth, floors: wing.floors, role: 'wing' };
-    if (wing.side === 'left')  { v.x = -wing.width; v.z = 0; }
-    else if (wing.side === 'right') { v.x = recipe.mainWidth; v.z = 0; }
-    else { v.x = (recipe.mainWidth - wing.width) / 2; v.z = recipe.mainDepth; }
-    vols.push(v);
-  }
-  return vols;
+  _rebuildWalls(house);
+  return house;
 }
 
-// ── Box walls ─────────────────────────────────────────────────
-
-function boxWalls(vol, h) {
-  const { x, z, w, d } = vol;
-  const x0 = x, x1 = x + w, z0 = z, z1 = z + d;
-  const P = [], N = [], I = [];
-
-  // 4 wall quads + top cap
-  const faces = [
-    // front (-Z)
-    [[x0,0,z0],[x1,0,z0],[x1,h,z0],[x0,h,z0], [0,0,-1]],
-    // back (+Z)
-    [[x1,0,z1],[x0,0,z1],[x0,h,z1],[x1,h,z1], [0,0,1]],
-    // left (-X)
-    [[x0,0,z1],[x0,0,z0],[x0,h,z0],[x0,h,z1], [-1,0,0]],
-    // right (+X)
-    [[x1,0,z0],[x1,0,z1],[x1,h,z1],[x1,h,z0], [1,0,0]],
-  ];
-
-  for (const [a, b, c, dd, n] of faces) {
-    const i = P.length / 3;
-    P.push(...a, ...b, ...c, ...dd);
-    N.push(...n, ...n, ...n, ...n);
-    I.push(i, i+1, i+2, i, i+2, i+3);
+export function addFloor(house) {
+  house.floors++;
+  _rebuildWalls(house);
+  // Move roof up if one exists
+  if (house._roofPitch !== null) {
+    addPitchedRoof(house, house._roofPitch, house._roofDirection);
   }
-
-  return makeGeo(P, N, I);
+  return house;
 }
 
-// ── Roof ──────────────────────────────────────────────────────
-
-function buildRoof(vol, wallH, style) {
-  const { x, z, w, d } = vol;
-  const pitch = style.roofPitch * Math.PI / 180;
-  const oh = style.roofOverhang;
-
-  if (style.roofType === 'flat') {
-    return flatRoof(x, z, w, d, wallH);
+export function removeFloor(house) {
+  if (house.floors <= 1) return house;
+  house.floors--;
+  _rebuildWalls(house);
+  if (house._roofPitch !== null) {
+    addPitchedRoof(house, house._roofPitch, house._roofDirection);
   }
-  if (style.roofType === 'gable') {
-    return gableRoof(x, z, w, d, wallH, pitch, oh);
-  }
-  if (style.roofType === 'hip') {
-    return hipRoof(x, z, w, d, wallH, pitch, oh);
-  }
-  if (style.roofType === 'mansard') {
-    return mansardRoof(x, z, w, d, wallH, pitch);
-  }
-  return flatRoof(x, z, w, d, wallH);
+  return house;
 }
 
-function flatRoof(x, z, w, d, wallH) {
-  const P = [], N = [], I = [];
-  const y = wallH + 0.15;
-  const i = 0;
-  P.push(x, y, z,  x+w, y, z,  x+w, y, z+d,  x, y, z+d);
-  N.push(0,1,0, 0,1,0, 0,1,0, 0,1,0);
-  I.push(i, i+1, i+2, i, i+2, i+3);
-  return makeGeo(P, N, I);
-}
+/**
+ * Add a pitched roof.
+ * @param {object} house
+ * @param {number} pitch - degrees
+ * @param {'sides'|'frontback'|'all'|'mansard'} direction
+ *   'sides'     – gable: slopes on left/right, flat gable triangles front/back
+ *   'frontback' – gable: slopes on front/back, flat gable triangles left/right
+ *   'all'       – hip: all four sides slope up; ridge along the longer axis
+ *   'mansard'   – hip slopes that stop partway up, with a flat top
+ */
+export function addPitchedRoof(house, pitch = 35, direction = 'sides', overhang = 0) {
+  _removePart(house, 'roof');
+  house._roofPitch = pitch;
+  house._roofDirection = direction;
 
-function gableRoof(x, z, w, d, wallH, pitch, oh) {
-  const P = [], N = [], I = [];
-  // Ridge along longer axis
-  const ridgeAlongX = w >= d;
-  const span = ridgeAlongX ? d : w;
-  const rise = (span / 2) * Math.tan(pitch);
-  const ridgeY = wallH + rise;
+  const { width: w, depth: d } = house;
+  const h = house.floors * house.floorHeight;
+  const pitchRad = pitch * Math.PI / 180;
+  const oh = overhang;
 
-  if (ridgeAlongX) {
-    const mz = z + d / 2;
-    // Left slope
-    quad(P, N, I,
-      [x-oh, wallH, z-oh], [x+w+oh, wallH, z-oh],
-      [x+w+oh, ridgeY, mz], [x-oh, ridgeY, mz]);
-    // Right slope
-    quad(P, N, I,
-      [x+w+oh, wallH, z+d+oh], [x-oh, wallH, z+d+oh],
-      [x-oh, ridgeY, mz], [x+w+oh, ridgeY, mz]);
-    // Gable ends
-    tri(P, N, I, [x, wallH, z], [x, wallH, z+d], [x, ridgeY, mz]);
-    tri(P, N, I, [x+w, wallH, z+d], [x+w, wallH, z], [x+w, ridgeY, mz]);
+  const P = [];
+  const I = [];
+
+  if (direction === 'mansard') {
+    _mansardRoof(P, I, w, d, h, pitchRad);
+  } else if (direction === 'all') {
+    _hipRoof(P, I, w, d, h, pitchRad, oh);
+  } else if (direction === 'sides') {
+    _gableRoofSides(P, I, w, d, h, pitchRad, oh);
   } else {
-    const mx = x + w / 2;
-    quad(P, N, I,
-      [x-oh, wallH, z-oh], [x-oh, wallH, z+d+oh],
-      [mx, ridgeY, z+d+oh], [mx, ridgeY, z-oh]);
-    quad(P, N, I,
-      [x+w+oh, wallH, z+d+oh], [x+w+oh, wallH, z-oh],
-      [mx, ridgeY, z-oh], [mx, ridgeY, z+d+oh]);
-    tri(P, N, I, [x, wallH, z], [x+w, wallH, z], [mx, ridgeY, z]);
-    tri(P, N, I, [x+w, wallH, z+d], [x, wallH, z+d], [mx, ridgeY, z+d]);
+    _gableRoofFrontBack(P, I, w, d, h, pitchRad, oh);
   }
-  return makeGeo(P, N, I);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  geo.setIndex(I);
+  geo.computeVertexNormals();
+
+  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+    color: house.roofColor,
+    side: THREE.DoubleSide,
+  }));
+  mesh.name = 'roof';
+  house.group.add(mesh);
+  return house;
 }
 
-function hipRoof(x, z, w, d, wallH, pitch, oh) {
-  const P = [], N = [], I = [];
+function _gableRoofSides(P, I, w, d, h, pitchRad, oh = 0) {
+  const rise = (w / 2) * Math.tan(pitchRad);
+  const ry = h + rise;
+  const mx = w / 2;
+
+  // Left slope (with overhang)
+  _quad(P, I, [-oh,h,d+oh], [-oh,h,-oh], [mx,ry,-oh], [mx,ry,d+oh]);
+  // Right slope
+  _quad(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [mx,ry,d+oh], [mx,ry,-oh]);
+  // Front gable
+  _tri(P, I, [w+oh,h,-oh], [-oh,h,-oh], [mx,ry,-oh]);
+  // Back gable
+  _tri(P, I, [-oh,h,d+oh], [w+oh,h,d+oh], [mx,ry,d+oh]);
+}
+
+function _gableRoofFrontBack(P, I, w, d, h, pitchRad, oh = 0) {
+  const rise = (d / 2) * Math.tan(pitchRad);
+  const ry = h + rise;
+  const mz = d / 2;
+
+  // Front slope (with overhang)
+  _quad(P, I, [w+oh,h,-oh], [-oh,h,-oh], [-oh,ry,mz], [w+oh,ry,mz]);
+  // Back slope
+  _quad(P, I, [-oh,h,d+oh], [w+oh,h,d+oh], [w+oh,ry,mz], [-oh,ry,mz]);
+  // Left gable
+  _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [-oh,ry,mz]);
+  // Right gable
+  _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [w+oh,ry,mz]);
+}
+
+function _hipRoof(P, I, w, d, h, pitchRad, oh = 0) {
   const span = Math.min(w, d);
-  const rise = (span / 2) * Math.tan(pitch);
-  const ridgeY = wallH + rise;
+  const rise = (span / 2) * Math.tan(pitchRad);
+  const ry = h + rise;
   const inset = span / 2;
 
   if (w >= d) {
-    const mz = z + d / 2;
-    const rx0 = x + inset, rx1 = x + w - inset;
+    const rx0 = inset, rx1 = w - inset, mz = d / 2;
     if (rx0 >= rx1) {
-      // Pyramid
-      const cx = x + w / 2;
-      tri(P, N, I, [x-oh, wallH, z-oh], [x+w+oh, wallH, z-oh], [cx, ridgeY, mz]);
-      tri(P, N, I, [x+w+oh, wallH, z-oh], [x+w+oh, wallH, z+d+oh], [cx, ridgeY, mz]);
-      tri(P, N, I, [x+w+oh, wallH, z+d+oh], [x-oh, wallH, z+d+oh], [cx, ridgeY, mz]);
-      tri(P, N, I, [x-oh, wallH, z+d+oh], [x-oh, wallH, z-oh], [cx, ridgeY, mz]);
+      const cx = w / 2;
+      _tri(P, I, [-oh,h,-oh], [w+oh,h,-oh], [cx,ry,mz]);
+      _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [cx,ry,mz]);
+      _tri(P, I, [w+oh,h,d+oh], [-oh,h,d+oh], [cx,ry,mz]);
+      _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [cx,ry,mz]);
     } else {
-      // Front slope
-      quad(P, N, I,
-        [x-oh, wallH, z-oh], [x+w+oh, wallH, z-oh],
-        [rx1, ridgeY, mz], [rx0, ridgeY, mz]);
-      // Back slope
-      quad(P, N, I,
-        [x+w+oh, wallH, z+d+oh], [x-oh, wallH, z+d+oh],
-        [rx0, ridgeY, mz], [rx1, ridgeY, mz]);
-      // Hip ends
-      tri(P, N, I, [x-oh, wallH, z+d+oh], [x-oh, wallH, z-oh], [rx0, ridgeY, mz]);
-      tri(P, N, I, [x+w+oh, wallH, z-oh], [x+w+oh, wallH, z+d+oh], [rx1, ridgeY, mz]);
+      _quad(P, I, [-oh,h,-oh], [w+oh,h,-oh], [rx1,ry,mz], [rx0,ry,mz]);
+      _quad(P, I, [w+oh,h,d+oh], [-oh,h,d+oh], [rx0,ry,mz], [rx1,ry,mz]);
+      _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [rx0,ry,mz]);
+      _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [rx1,ry,mz]);
     }
   } else {
-    const mx = x + w / 2;
-    const rz0 = z + inset, rz1 = z + d - inset;
+    const rz0 = inset, rz1 = d - inset, mx = w / 2;
     if (rz0 >= rz1) {
-      const cz = z + d / 2;
-      tri(P, N, I, [x-oh, wallH, z-oh], [x+w+oh, wallH, z-oh], [mx, ridgeY, cz]);
-      tri(P, N, I, [x+w+oh, wallH, z-oh], [x+w+oh, wallH, z+d+oh], [mx, ridgeY, cz]);
-      tri(P, N, I, [x+w+oh, wallH, z+d+oh], [x-oh, wallH, z+d+oh], [mx, ridgeY, cz]);
-      tri(P, N, I, [x-oh, wallH, z+d+oh], [x-oh, wallH, z-oh], [mx, ridgeY, cz]);
+      const cz = d / 2;
+      _tri(P, I, [-oh,h,-oh], [w+oh,h,-oh], [mx,ry,cz]);
+      _tri(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [mx,ry,cz]);
+      _tri(P, I, [w+oh,h,d+oh], [-oh,h,d+oh], [mx,ry,cz]);
+      _tri(P, I, [-oh,h,d+oh], [-oh,h,-oh], [mx,ry,cz]);
     } else {
-      quad(P, N, I,
-        [x-oh, wallH, z-oh], [x-oh, wallH, z+d+oh],
-        [mx, ridgeY, rz1], [mx, ridgeY, rz0]);
-      quad(P, N, I,
-        [x+w+oh, wallH, z+d+oh], [x+w+oh, wallH, z-oh],
-        [mx, ridgeY, rz0], [mx, ridgeY, rz1]);
-      tri(P, N, I, [x-oh, wallH, z-oh], [x+w+oh, wallH, z-oh], [mx, ridgeY, rz0]);
-      tri(P, N, I, [x+w+oh, wallH, z+d+oh], [x-oh, wallH, z+d+oh], [mx, ridgeY, rz1]);
+      _quad(P, I, [-oh,h,d+oh], [-oh,h,-oh], [mx,ry,rz0], [mx,ry,rz1]);
+      _quad(P, I, [w+oh,h,-oh], [w+oh,h,d+oh], [mx,ry,rz1], [mx,ry,rz0]);
+      _tri(P, I, [w+oh,h,-oh], [-oh,h,-oh], [mx,ry,rz0]);
+      _tri(P, I, [-oh,h,d+oh], [w+oh,h,d+oh], [mx,ry,rz1]);
     }
   }
-  return makeGeo(P, N, I);
 }
 
-function mansardRoof(x, z, w, d, wallH, pitch) {
-  const P = [], N = [], I = [];
-  const inset = Math.min(w, d) * 0.15;
-  const lowerAngle = 70 * Math.PI / 180;
-  const lowerRise = inset * Math.tan(lowerAngle);
-  const breakY = wallH + lowerRise;
+function _mansardRoof(P, I, w, d, h, pitchRad) {
+  // Steep lower slopes (70°) inset by a fraction of the shorter span,
+  // then a flat top. The pitch parameter controls how much of the
+  // building footprint the flat top covers (higher pitch = steeper
+  // lower slope = smaller flat top, but we keep the 70° steep angle
+  // and use pitch to set the inset fraction instead).
+  const insetFrac = 0.2;
+  const insetX = w * insetFrac;
+  const insetZ = d * insetFrac;
+  const steepAngle = 70 * Math.PI / 180;
+  const rise = Math.min(insetX, insetZ) * Math.tan(steepAngle);
+  const topY = h + rise;
 
-  const bx0 = x + inset, bx1 = x + w - inset;
-  const bz0 = z + inset, bz1 = z + d - inset;
+  const bx0 = insetX, bx1 = w - insetX;
+  const bz0 = insetZ, bz1 = d - insetZ;
 
-  // Lower steep slopes (4 quads)
-  quad(P, N, I, [x, wallH, z], [x+w, wallH, z], [bx1, breakY, bz0], [bx0, breakY, bz0]);
-  quad(P, N, I, [x+w, wallH, z], [x+w, wallH, z+d], [bx1, breakY, bz1], [bx1, breakY, bz0]);
-  quad(P, N, I, [x+w, wallH, z+d], [x, wallH, z+d], [bx0, breakY, bz1], [bx1, breakY, bz1]);
-  quad(P, N, I, [x, wallH, z+d], [x, wallH, z], [bx0, breakY, bz0], [bx0, breakY, bz1]);
+  // Four steep lower slopes
+  _quad(P, I, [0,h,0], [w,h,0], [bx1,topY,bz0], [bx0,topY,bz0]);  // front
+  _quad(P, I, [w,h,0], [w,h,d], [bx1,topY,bz1], [bx1,topY,bz0]);  // right
+  _quad(P, I, [w,h,d], [0,h,d], [bx0,topY,bz1], [bx1,topY,bz1]);  // back
+  _quad(P, I, [0,h,d], [0,h,0], [bx0,topY,bz0], [bx0,topY,bz1]);  // left
 
-  // Upper flat or low-pitch cap
-  const upperPitch = pitch * Math.PI / 180;
-  const upperSpan = Math.min(bx1 - bx0, bz1 - bz0);
-  const upperRise = (upperSpan / 2) * Math.tan(upperPitch);
-  const topY = breakY + upperRise;
-
-  // Simple flat cap on the upper section
-  const ci = P.length / 3;
-  P.push(bx0, topY, bz0,  bx1, topY, bz0,  bx1, topY, bz1,  bx0, topY, bz1);
-  N.push(0,1,0, 0,1,0, 0,1,0, 0,1,0);
-  I.push(ci, ci+1, ci+2, ci, ci+2, ci+3);
-
-  // Connect break to top with 4 sloped quads
-  quad(P, N, I, [bx0, breakY, bz0], [bx1, breakY, bz0], [bx1, topY, bz0], [bx0, topY, bz0]);
-  quad(P, N, I, [bx1, breakY, bz0], [bx1, breakY, bz1], [bx1, topY, bz1], [bx1, topY, bz0]);
-  quad(P, N, I, [bx1, breakY, bz1], [bx0, breakY, bz1], [bx0, topY, bz1], [bx1, topY, bz1]);
-  quad(P, N, I, [bx0, breakY, bz1], [bx0, breakY, bz0], [bx0, topY, bz0], [bx0, topY, bz1]);
-
-  return makeGeo(P, N, I);
+  // Flat top cap
+  _quad(P, I, [bx0,topY,bz0], [bx1,topY,bz0], [bx1,topY,bz1], [bx0,topY,bz1]);
 }
 
-// ── Windows ───────────────────────────────────────────────────
+// Append a quad (4 verts, 2 triangles) to position/index arrays
+function _quad(P, I, a, b, c, d) {
+  const i = P.length / 3;
+  P.push(...a, ...b, ...c, ...d);
+  I.push(i, i+1, i+2, i, i+2, i+3);
+}
 
-function buildWindows(vol, wallH, floors, style) {
-  const P = [], N = [], I = [];
-  const { x, z, w, d } = vol;
-  const fh = style.floorHeight;
-  const ww = style.windowWidth;
-  const wh = style.windowHeight;
-  const spacing = style.windowSpacing;
-  const sillFrac = 0.3; // window sill at 30% of floor height
-  const OFF = 0.02; // offset from wall
+// Append a triangle (3 verts, 1 triangle) to position/index arrays
+function _tri(P, I, a, b, c) {
+  const i = P.length / 3;
+  P.push(...a, ...b, ...c);
+  I.push(i, i+1, i+2);
+}
 
-  // Define 4 walls: start corner, direction along wall, length, outward normal
+export function addFrontDoor(house, placement = 'center') {
+  return _addDoor(house, 'front', placement);
+}
+
+export function addBackDoor(house, placement = 'center') {
+  return _addDoor(house, 'back', placement);
+}
+
+function _addDoor(house, face, placement) {
+  const name = face === 'front' ? 'door' : 'backDoor';
+  _removePart(house, name);
+  const dw = 0.9, dh = 2.1;
+
+  // Place door on the window grid so they align
+  const cx = _doorPositionOnGrid(house.width, house._winSpacing || 2.5, placement);
+
+  if (face === 'front') { house._doorX = cx; house._doorW = dw; }
+  else { house._backDoorX = cx; house._backDoorW = dw; }
+
+  const geo = new THREE.PlaneGeometry(dw, dh);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+    color: 0x4a3728,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+    side: THREE.DoubleSide,
+  }));
+  const z = face === 'front' ? -0.01 : house.depth + 0.01;
+  mesh.position.set(cx, dh / 2, z);
+  mesh.name = name;
+  house.group.add(mesh);
+  return house;
+}
+
+export function addPorch(house, {
+  face = 'front',
+  porchDepth = 1.8,
+  porchWidth,
+  porchCenter,
+  postSize = 0.12,
+  roofStyle = 'slope', // 'slope' (lean-to) or 'hip' (3-sided)
+} = {}) {
+  const name = face === 'front' ? 'porch' : 'backPorch';
+  _removePart(house, name);
+  const pw = porchWidth != null ? porchWidth : house.width;
+  const cx = porchCenter != null ? porchCenter : house.width / 2;
+  const roofY = house.floorHeight * 0.85;
+  const stepH = 0.15;
+  const sign = face === 'front' ? -1 : 1;
+  const wallZ = face === 'front' ? 0 : house.depth;
+
+  // Inherit pitch from main roof
+  const pitch = house._roofPitch || 25;
+  const pitchRad = pitch * Math.PI / 180;
+  const rise = porchDepth * Math.tan(pitchRad);
+
+  const porch = new THREE.Group();
+  porch.name = name;
+
+  const wallMat = new THREE.MeshLambertMaterial({ color: house.wallColor });
+
+  // Floor slab / step
+  const stepGeo = new THREE.BoxGeometry(pw, stepH, porchDepth);
+  stepGeo.translate(cx, stepH / 2, wallZ + sign * porchDepth / 2);
+  porch.add(new THREE.Mesh(stepGeo, wallMat));
+
+  // Two posts at the outer edge
+  const postH = roofY - stepH;
+  const postInset = postSize * 2;
+  const leftX = cx - pw / 2 + postInset;
+  const rightX = cx + pw / 2 - postInset;
+  const postZ = wallZ + sign * (porchDepth - postInset);
+
+  for (const px of [leftX, rightX]) {
+    const postGeo = new THREE.BoxGeometry(postSize, postH, postSize);
+    postGeo.translate(px, stepH + postH / 2, postZ);
+    porch.add(new THREE.Mesh(postGeo, wallMat));
+  }
+
+  // Pitched roof
+  const oh = 0.1;
+  const lx = cx - pw / 2 - oh;
+  const rx = cx + pw / 2 + oh;
+  const wz = wallZ - sign * oh;                    // wall edge (with overhang into wall)
+  const oz = wallZ + sign * (porchDepth + oh);      // outer edge (with overhang)
+  const wy = roofY + rise;                          // wall edge height (high)
+  const oy = roofY;                                 // outer edge height (low, at posts)
+
+  const P = [], I = [];
+
+  if (roofStyle === 'hip') {
+    const inset = Math.min(porchDepth + oh, (rx - lx) / 2);
+    const rlx = lx + inset;
+    const rrx = rx - inset;
+
+    if (rlx >= rrx) {
+      // Pyramid
+      const peakX = (lx + rx) / 2;
+      _tri(P, I, [rx,oy,oz], [lx,oy,oz], [peakX,wy,wz]);
+      _tri(P, I, [lx,oy,oz], [lx,oy,wz], [peakX,wy,wz]);
+      _tri(P, I, [rx,oy,wz], [rx,oy,oz], [peakX,wy,wz]);
+    } else {
+      // Front slope + 2 side triangles
+      _quad(P, I, [rx,oy,oz], [lx,oy,oz], [rlx,wy,wz], [rrx,wy,wz]);
+      _tri(P, I, [lx,oy,oz], [lx,oy,wz], [rlx,wy,wz]);
+      _tri(P, I, [rx,oy,wz], [rx,oy,oz], [rrx,wy,wz]);
+    }
+  } else if (roofStyle === 'gable') {
+    // Gable — ridge runs front-to-back along the center, slopes fall left/right
+    const mx = (lx + rx) / 2;
+    const gableRise = (pw / 2) * Math.tan(pitchRad);
+    const gy = roofY + gableRise;
+    // Left slope
+    _quad(P, I, [lx,oy,oz], [lx,oy,wz], [mx,gy,wz], [mx,gy,oz]);
+    // Right slope
+    _quad(P, I, [rx,oy,wz], [rx,oy,oz], [mx,gy,oz], [mx,gy,wz]);
+    // Front gable triangle
+    _tri(P, I, [rx,oy,oz], [lx,oy,oz], [mx,gy,oz]);
+    // Back gable triangle (at wall)
+    _tri(P, I, [lx,oy,wz], [rx,oy,wz], [mx,gy,wz]);
+  } else {
+    // Lean-to (single slope)
+    _quad(P, I, [rx,wy,wz], [lx,wy,wz], [lx,oy,oz], [rx,oy,oz]);
+  }
+
+  const roofGeo = new THREE.BufferGeometry();
+  roofGeo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  roofGeo.setIndex(I);
+  roofGeo.computeVertexNormals();
+  porch.add(new THREE.Mesh(roofGeo, new THREE.MeshLambertMaterial({
+    color: house.roofColor,
+    side: THREE.DoubleSide,
+  })));
+
+  // Store front porch info for addGroundLevel
+  if (face === 'front') {
+    house._porchDepth = porchDepth;
+    house._porchWidth = pw;
+    house._porchCenter = cx;
+    house._porchPostSize = postSize;
+  }
+
+  house.group.add(porch);
+  return house;
+}
+
+/**
+ * Mark sides as party walls — suppresses windows and features on those sides.
+ * @param {object} house
+ * @param {string[]} sides - Array of 'left', 'right', 'front', 'back'
+ */
+export function setPartyWalls(house, sides) {
+  house._partyWalls = new Set(sides);
+  return house;
+}
+
+export function addWindows(house, {
+  width = 1.0,
+  height = 1.5,
+  spacing = 2.5,
+  color = 0x88aabb,
+} = {}) {
+  _removePart(house, 'windows');
+  house._winSpacing = spacing;
+
+  const fh = house.floorHeight;
+  const sillY = fh * 0.3;
+  const windowGroup = new THREE.Group();
+  windowGroup.name = 'windows';
+
+  const mat = new THREE.MeshLambertMaterial({
+    color,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+
+  // 4 walls: front, back, left, right
   const walls = [
-    { sx: x,   sz: z,   dx: 1,  dz: 0,  len: w, nx: 0,  nz: -1 }, // front
-    { sx: x+w, sz: z,   dx: 0,  dz: 1,  len: d, nx: 1,  nz: 0 },  // right
-    { sx: x+w, sz: z+d, dx: -1, dz: 0,  len: w, nx: 0,  nz: 1 },  // back
-    { sx: x,   sz: z+d, dx: 0,  dz: -1, len: d, nx: -1, nz: 0 },  // left
+    { span: house.width, rot: Math.PI, posFn: (cx, cy) => [cx, cy, -0.01], face: 'front' },
+    { span: house.width, rot: 0, posFn: (cx, cy) => [cx, cy, house.depth + 0.01], face: 'back' },
+    { span: house.depth, rot: Math.PI / 2, posFn: (cz, cy) => [-0.01, cy, cz], face: 'left' },
+    { span: house.depth, rot: -Math.PI / 2, posFn: (cz, cy) => [house.width + 0.01, cy, cz], face: 'right' },
   ];
 
   for (const wall of walls) {
-    const nWin = Math.max(1, Math.floor(wall.len / spacing));
-    const startOffset = (wall.len - (nWin - 1) * spacing) / 2;
+    if (house._partyWalls?.has(wall.face)) continue;
+    const nWin = Math.max(1, Math.floor(wall.span / spacing));
+    const startOffset = (wall.span - (nWin - 1) * spacing) / 2;
 
-    for (let floor = 0; floor < floors; floor++) {
-      const decay = 1 - style.windowHeightDecay * floor;
-      const curWh = wh * decay;
-      const bot = floor * fh + fh * sillFrac;
-      const top = bot + curWh;
-      if (top > (floor + 1) * fh - 0.15) continue;
+    for (let floor = 0; floor < house.floors; floor++) {
+      const cy = floor * fh + sillY + height / 2;
 
-      for (let wi = 0; wi < nWin; wi++) {
-        const along = startOffset + wi * spacing;
-        const cx = wall.sx + wall.dx * along;
-        const cz = wall.sz + wall.dz * along;
-        const ox = wall.nx * OFF;
-        const oz = wall.nz * OFF;
-        const hw = ww / 2;
+      for (let i = 0; i < nWin; i++) {
+        const along = startOffset + i * spacing;
 
-        const i = P.length / 3;
-        if (wall.nx === 0) {
-          // Z-facing wall, window spans in X
-          P.push(
-            cx - wall.dx * hw + ox, bot, cz + oz,
-            cx + wall.dx * hw + ox, bot, cz + oz,
-            cx + wall.dx * hw + ox, top, cz + oz,
-            cx - wall.dx * hw + ox, top, cz + oz,
-          );
-        } else {
-          // X-facing wall, window spans in Z
-          P.push(
-            cx + ox, bot, cz - wall.dz * hw + oz,
-            cx + ox, bot, cz + wall.dz * hw + oz,
-            cx + ox, top, cz + wall.dz * hw + oz,
-            cx + ox, top, cz - wall.dz * hw + oz,
-          );
+        // Skip ground-floor windows that overlap a door
+        if (floor === 0) {
+          const doorX = wall.face === 'front' ? house._doorX : wall.face === 'back' ? house._backDoorX : null;
+          const doorW = wall.face === 'front' ? house._doorW : wall.face === 'back' ? house._backDoorW : null;
+          if (doorX != null) {
+            if (Math.abs(along - doorX) < (doorW || 0.9) / 2 + width / 2) continue;
+          }
         }
-        N.push(wall.nx, 0, wall.nz, wall.nx, 0, wall.nz, wall.nx, 0, wall.nz, wall.nx, 0, wall.nz);
-        I.push(i, i+1, i+2, i, i+2, i+3);
+
+        // Skip front windows overlapping a bay window
+        if (wall.face === 'front' && house._bayX != null && floor < (house._bayFloors || 0)) {
+          if (Math.abs(along - house._bayX) < (house._bayW + width) / 2) continue;
+        }
+
+        const geo = new THREE.PlaneGeometry(width, height);
+        const win = new THREE.Mesh(geo, mat);
+        win.rotation.y = wall.rot;
+        const [px, py, pz] = wall.posFn(along, cy);
+        win.position.set(px, py, pz);
+        windowGroup.add(win);
       }
     }
   }
 
-  if (P.length === 0) return null;
-  return makeGeo(P, N, I);
+  house.group.add(windowGroup);
+  return house;
 }
 
-// ── Chimneys ──────────────────────────────────────────────────
+export function addDormer(house, {
+  position = 0.5,     // 0–1 along ridge (Z for 'sides', X for 'frontback')
+  width = 1.2,
+  height = 1.2,
+  depth = 1.0,        // how far it protrudes from the slope
+  slopeFrac = 0.35,   // 0=eave, 1=ridge — where the back edge sits on slope
+  style = 'window',   // 'window' or 'balcony' (taller, with door + railing)
+} = {}) {
+  if (house._roofPitch === null) return house;
 
-function buildChimneys(vol, wallH, style, count) {
-  const P = [], N = [], I = [];
-  const pitch = style.roofPitch * Math.PI / 180;
-  const span = Math.min(vol.w, vol.d);
-  const rise = style.roofType === 'flat' ? 0.15 : (span / 2) * Math.tan(pitch);
-  const ridgeY = wallH + rise;
-  const cw = 0.4, cd = 0.5, ch = 1.2;
+  const wallH = house.floors * house.floorHeight;
+  const pitchRad = house._roofPitch * Math.PI / 180;
+  const w = house.width, d = house.depth;
 
-  for (let ci = 0; ci < count; ci++) {
-    const t = count === 1 ? 0.5 : (ci === 0 ? 0.3 : 0.7);
-    const cx = vol.x + vol.w * t;
-    const cz = vol.z + vol.d * 0.5;
-    // Simple box
-    addBox(P, N, I, cx - cw/2, ridgeY, cz - cd/2, cw, ch, cd);
+  const isBalcony = style === 'balcony';
+  const actualH = isBalcony ? height * 1.4 : height;
+
+  // Build dormer in local coords:
+  //   origin at back-bottom-center (where it meets the roof slope)
+  //   +X = along ridge, +Y = up, -Z = outward from slope
+  const dormer = new THREE.Group();
+
+  // Walls — box from z=-depth to z=0, y=0 to y=height
+  const boxGeo = new THREE.BoxGeometry(width, actualH, depth);
+  boxGeo.translate(0, actualH / 2, -depth / 2);
+  const boxMesh = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: house.wallColor }));
+  dormer.add(boxMesh);
+
+  if (isBalcony) {
+    // Door-like opening on front face
+    const doorW = width * 0.6, doorH = actualH * 0.75;
+    const doorGeo = new THREE.PlaneGeometry(doorW, doorH);
+    const doorMesh = new THREE.Mesh(doorGeo, new THREE.MeshLambertMaterial({
+      color: 0x88aabb,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    }));
+    doorMesh.position.set(0, doorH / 2 + 0.05, -depth - 0.01);
+    dormer.add(doorMesh);
+
+    // Small balcony slab + railing
+    const balcD = 0.5;
+    const railH = 0.7;
+    const slabMat = new THREE.MeshLambertMaterial({ color: house.wallColor });
+    const railMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
+
+    const slabGeo = new THREE.BoxGeometry(width, 0.08, balcD);
+    slabGeo.translate(0, 0, -depth - balcD / 2);
+    dormer.add(new THREE.Mesh(slabGeo, slabMat));
+
+    // Front railing
+    const fGeo = new THREE.BoxGeometry(width, railH, 0.03);
+    fGeo.translate(0, railH / 2, -depth - balcD);
+    dormer.add(new THREE.Mesh(fGeo, railMat));
+
+    // Side railings
+    for (const dx of [-width / 2, width / 2]) {
+      const sGeo = new THREE.BoxGeometry(0.03, railH, balcD);
+      sGeo.translate(dx, railH / 2, -depth - balcD / 2);
+      dormer.add(new THREE.Mesh(sGeo, railMat));
+    }
+  } else {
+    // Window on front face (z = -depth)
+    const winW = width * 0.6, winH = actualH * 0.6;
+    const winGeo = new THREE.PlaneGeometry(winW, winH);
+    const winMesh = new THREE.Mesh(winGeo, new THREE.MeshLambertMaterial({
+      color: 0x88aabb,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    }));
+    winMesh.position.set(0, actualH * 0.55, -depth - 0.01);
+    dormer.add(winMesh);
   }
 
-  if (P.length === 0) return null;
-  return makeGeo(P, N, I);
-}
-
-function addBox(P, N, I, x, y, z, w, h, d) {
-  const faces = [
-    [[x,y,z],[x+w,y,z],[x+w,y+h,z],[x,y+h,z], [0,0,-1]],
-    [[x+w,y,z+d],[x,y,z+d],[x,y+h,z+d],[x+w,y+h,z+d], [0,0,1]],
-    [[x,y,z+d],[x,y,z],[x,y+h,z],[x,y+h,z+d], [-1,0,0]],
-    [[x+w,y,z],[x+w,y,z+d],[x+w,y+h,z+d],[x+w,y+h,z], [1,0,0]],
-    [[x,y+h,z],[x+w,y+h,z],[x+w,y+h,z+d],[x,y+h,z+d], [0,1,0]],
+  // Small gable roof — ridge along Z (local), slopes fall in X
+  // Inherit pitch from main roof
+  const roofPitch = house._roofPitch || 35;
+  const roofPitchRad = roofPitch * Math.PI / 180;
+  const oh = 0.1; // small overhang
+  const roofRise = (width / 2) * Math.tan(roofPitchRad);
+  const topY = actualH;
+  const positions = [
+    // Left slope
+    -width / 2 - oh, topY, -depth - oh,
+    -width / 2 - oh, topY, oh,
+    0, topY + roofRise, oh,
+    0, topY + roofRise, -depth - oh,
+    // Right slope
+    width / 2 + oh, topY, -depth - oh,
+    width / 2 + oh, topY, oh,
+    0, topY + roofRise, oh,
+    0, topY + roofRise, -depth - oh,
   ];
-  for (const [a, b, c, dd, n] of faces) {
-    const i = P.length / 3;
-    P.push(...a, ...b, ...c, ...dd);
-    N.push(...n, ...n, ...n, ...n);
-    I.push(i, i+1, i+2, i, i+2, i+3);
+  const roofIndices = [
+    0, 1, 2, 0, 2, 3,  // left slope
+    4, 7, 6, 4, 6, 5,  // right slope
+  ];
+  const roofGeo = new THREE.BufferGeometry();
+  roofGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  roofGeo.setIndex(roofIndices);
+  roofGeo.computeVertexNormals();
+  const roofMesh = new THREE.Mesh(roofGeo, new THREE.MeshLambertMaterial({
+    color: house.roofColor,
+    side: THREE.DoubleSide,
+  }));
+  dormer.add(roofMesh);
+
+  // Position and rotate onto the correct roof slope
+  if (house._roofDirection === 'sides') {
+    const rise = (w / 2) * Math.tan(pitchRad);
+    const sx = slopeFrac * (w / 2);
+    const sy = wallH + slopeFrac * rise;
+    const pz = position * d;
+    // Local -Z (outward) should face world -X (left slope)
+    dormer.rotation.y = Math.PI / 2;
+    dormer.position.set(sx, sy, pz);
+  } else {
+    const rise = (d / 2) * Math.tan(pitchRad);
+    const sz = slopeFrac * (d / 2);
+    const sy = wallH + slopeFrac * rise;
+    const px = position * w;
+    // Local -Z (outward) should face world -Z (front slope) — no rotation needed
+    dormer.position.set(px, sy, sz);
+  }
+
+  const n = house.group.children.filter(c => c.name.startsWith('dormer')).length;
+  dormer.name = `dormer${n}`;
+  house.group.add(dormer);
+  return house;
+}
+
+/**
+ * Add a balcony on the front wall at the given floor.
+ * @param {object} house
+ * @param {number} floor - 1-indexed floor (1 = first above ground)
+ * @param {'full'|'window'} style - full-width or per-window balconies
+ */
+export function addBalcony(house, floor, style = 'full') {
+  const name = `balcony_${floor}`;
+  _removePart(house, name);
+
+  if (floor < 1 || floor >= house.floors) return house;
+
+  const fh = house.floorHeight;
+  const slabY = floor * fh;
+  const balconyDepth = 0.9;
+  const railH = 1.0;
+  const railThick = 0.04;
+  const slabThick = 0.12;
+
+  const balcony = new THREE.Group();
+  balcony.name = name;
+
+  const slabMat = new THREE.MeshLambertMaterial({ color: house.wallColor });
+  const railMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
+
+  if (style === 'full') {
+    const bw = house.width;
+
+    // Floor slab
+    const slabGeo = new THREE.BoxGeometry(bw, slabThick, balconyDepth);
+    slabGeo.translate(bw / 2, slabY - slabThick / 2, -balconyDepth / 2);
+    balcony.add(new THREE.Mesh(slabGeo, slabMat));
+
+    // Railings — front + left + right
+    const frontGeo = new THREE.BoxGeometry(bw, railH, railThick);
+    frontGeo.translate(bw / 2, slabY + railH / 2, -balconyDepth);
+    balcony.add(new THREE.Mesh(frontGeo, railMat));
+
+    const leftGeo = new THREE.BoxGeometry(railThick, railH, balconyDepth);
+    leftGeo.translate(0, slabY + railH / 2, -balconyDepth / 2);
+    balcony.add(new THREE.Mesh(leftGeo, railMat));
+
+    const rightGeo = new THREE.BoxGeometry(railThick, railH, balconyDepth);
+    rightGeo.translate(bw, slabY + railH / 2, -balconyDepth / 2);
+    balcony.add(new THREE.Mesh(rightGeo, railMat));
+
+    // Support brackets
+    const bracketH = 0.3;
+    const bracketMat = new THREE.MeshLambertMaterial({ color: house.wallColor });
+    for (const bx of [bw * 0.15, bw * 0.85]) {
+      const bGeo = new THREE.BoxGeometry(0.08, bracketH, balconyDepth * 0.8);
+      bGeo.translate(bx, slabY - slabThick - bracketH / 2, -balconyDepth * 0.4);
+      balcony.add(new THREE.Mesh(bGeo, bracketMat));
+    }
+
+  } else {
+    // Window-style balconies — one per window slot on the front wall
+    const spacing = house._winSpacing || 2.5;
+    const nWin = Math.max(1, Math.floor(house.width / spacing));
+    const startOffset = (house.width - (nWin - 1) * spacing) / 2;
+    const bw = Math.min(spacing * 0.65, 1.2);
+
+    for (let i = 0; i < nWin; i++) {
+      const wx = startOffset + i * spacing;
+
+      // Slab
+      const slabGeo = new THREE.BoxGeometry(bw, slabThick, balconyDepth * 0.6);
+      const bd = balconyDepth * 0.6;
+      slabGeo.translate(wx, slabY - slabThick / 2, -bd / 2);
+      balcony.add(new THREE.Mesh(slabGeo, slabMat));
+
+      // Railing — front
+      const frontGeo = new THREE.BoxGeometry(bw, railH * 0.8, railThick);
+      frontGeo.translate(wx, slabY + railH * 0.4, -bd);
+      balcony.add(new THREE.Mesh(frontGeo, railMat));
+
+      // Railing — sides
+      for (const dx of [-bw / 2, bw / 2]) {
+        const sideGeo = new THREE.BoxGeometry(railThick, railH * 0.8, bd);
+        sideGeo.translate(wx + dx, slabY + railH * 0.4, -bd / 2);
+        balcony.add(new THREE.Mesh(sideGeo, railMat));
+      }
+    }
+  }
+
+  house.group.add(balcony);
+  return house;
+}
+
+export function addBayWindow(house, {
+  floors = 1,
+  style = 'box',      // 'box' or 'angled'
+  span = 1,            // window-grid slots wide
+  depth = 0.8,         // protrusion depth
+  position = 'center', // 'left', 'center', 'right'
+} = {}) {
+  _removePart(house, 'bay');
+
+  const spacing = house._winSpacing || 2.5;
+  const fh = house.floorHeight;
+  const bayFloors = Math.min(floors, house.floors);
+  const bayH = bayFloors * fh;
+  const bayW = span * spacing;
+
+  const cx = _doorPositionOnGrid(house.width, spacing, position);
+  const x0 = cx - bayW / 2;
+  const x1 = cx + bayW / 2;
+
+  house._bayX = cx;
+  house._bayW = bayW;
+  house._bayFloors = bayFloors;
+
+  const bay = new THREE.Group();
+  bay.name = 'bay';
+
+  const wallMat = new THREE.MeshLambertMaterial({ color: house.wallColor, side: THREE.DoubleSide });
+  const roofMat = new THREE.MeshLambertMaterial({ color: house.roofColor });
+  const winMat = new THREE.MeshLambertMaterial({
+    color: 0x88aabb,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    side: THREE.DoubleSide,
+  });
+
+  const winW = 0.9, winH = 1.3;
+  const sillY = fh * 0.3;
+  const d = depth;
+  const gh = house._groundHeight || 0;
+
+  if (style === 'box') {
+    // Box protrusion walls (extend down to ground if house is raised)
+    const totalH = bayH + gh;
+    const geo = new THREE.BoxGeometry(bayW, totalH, d);
+    geo.translate(cx, bayH / 2 - gh / 2, -d / 2);
+    bay.add(new THREE.Mesh(geo, wallMat));
+
+    // Windows per floor
+    for (let f = 0; f < bayFloors; f++) {
+      const wy = f * fh + sillY + winH / 2;
+      // Front face
+      const nFront = span;
+      const start = (bayW - (nFront - 1) * spacing) / 2;
+      for (let i = 0; i < nFront; i++) {
+        const wg = new THREE.PlaneGeometry(winW, winH);
+        const wm = new THREE.Mesh(wg, winMat);
+        wm.rotation.y = Math.PI;
+        wm.position.set(x0 + start + i * spacing, wy, -d - 0.01);
+        bay.add(wm);
+      }
+      // Side windows
+      if (d >= 0.5) {
+        const sw = Math.min(winW, d * 0.7);
+        for (const [sx, rot] of [[x0 - 0.01, Math.PI / 2], [x1 + 0.01, -Math.PI / 2]]) {
+          const wg = new THREE.PlaneGeometry(sw, winH);
+          const wm = new THREE.Mesh(wg, winMat);
+          wm.rotation.y = rot;
+          wm.position.set(sx, wy, -d / 2);
+          bay.add(wm);
+        }
+      }
+    }
+
+    // Lean-to roof sloping away from wall
+    const ovh = 0.1;
+    const roofRise = 0.25;
+    const rP = [], rI = [];
+    // Top face (sloped)
+    _quad(rP, rI,
+      [x0 - ovh, bayH + roofRise, ovh],
+      [x0 - ovh, bayH, -d - ovh],
+      [x1 + ovh, bayH, -d - ovh],
+      [x1 + ovh, bayH + roofRise, ovh]
+    );
+    // Underside
+    _quad(rP, rI,
+      [x1 + ovh, bayH + roofRise - 0.06, ovh],
+      [x1 + ovh, bayH - 0.06, -d - ovh],
+      [x0 - ovh, bayH - 0.06, -d - ovh],
+      [x0 - ovh, bayH + roofRise - 0.06, ovh]
+    );
+    const rGeo = new THREE.BufferGeometry();
+    rGeo.setAttribute('position', new THREE.Float32BufferAttribute(rP, 3));
+    rGeo.setIndex(rI);
+    rGeo.computeVertexNormals();
+    bay.add(new THREE.Mesh(rGeo, new THREE.MeshLambertMaterial({ color: house.roofColor, side: THREE.DoubleSide })));
+
+  } else {
+    // Angled/canted bay
+    const ai = Math.min(d, bayW * 0.3);
+    const fx0 = x0 + ai, fx1 = x1 - ai;
+
+    // Walls as custom geometry (extend down to ground if house is raised)
+    const by = -gh;
+    const P = [], I = [];
+    _quad(P, I, [fx1,by,-d], [fx0,by,-d], [fx0,bayH,-d], [fx1,bayH,-d]); // front
+    _quad(P, I, [fx0,by,-d], [x0,by,0], [x0,bayH,0], [fx0,bayH,-d]);     // left angled
+    _quad(P, I, [x1,by,0], [fx1,by,-d], [fx1,bayH,-d], [x1,bayH,0]);     // right angled
+
+    const wallGeo = new THREE.BufferGeometry();
+    wallGeo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+    wallGeo.setIndex(I);
+    wallGeo.computeVertexNormals();
+    bay.add(new THREE.Mesh(wallGeo, wallMat));
+
+    // Windows
+    const frontW = fx1 - fx0;
+    for (let f = 0; f < bayFloors; f++) {
+      const wy = f * fh + sillY + winH / 2;
+      // Front face
+      const nFront = Math.max(1, Math.floor(frontW / spacing));
+      const fStart = (frontW - (nFront - 1) * spacing) / 2;
+      for (let i = 0; i < nFront; i++) {
+        const wg = new THREE.PlaneGeometry(Math.min(winW, frontW * 0.8), winH);
+        const wm = new THREE.Mesh(wg, winMat);
+        wm.rotation.y = Math.PI;
+        wm.position.set(fx0 + fStart + i * spacing, wy, -d - 0.01);
+        bay.add(wm);
+      }
+      // Angled side windows
+      const sideLen = Math.sqrt(ai * ai + d * d);
+      if (sideLen >= 0.6) {
+        const sw = Math.min(winW * 0.7, sideLen * 0.6);
+        // Left angled side
+        const leftAngle = Math.atan2(-d, -ai);
+        const wgL = new THREE.PlaneGeometry(sw, winH);
+        const wmL = new THREE.Mesh(wgL, winMat);
+        wmL.rotation.y = leftAngle;
+        wmL.position.set((x0 + fx0) / 2, wy, -d / 2);
+        bay.add(wmL);
+        // Right angled side
+        const rightAngle = Math.atan2(d, -ai);
+        const wgR = new THREE.PlaneGeometry(sw, winH);
+        const wmR = new THREE.Mesh(wgR, winMat);
+        wmR.rotation.y = rightAngle;
+        wmR.position.set((x1 + fx1) / 2, wy, -d / 2);
+        bay.add(wmR);
+      }
+    }
+
+    // Lean-to roof (trapezoidal, sloping away from wall)
+    const ovh = 0.1;
+    const roofRise = 0.25;
+    const rP = [], rI = [];
+    // Top face (sloped)
+    _quad(rP, rI,
+      [x0 - ovh, bayH + roofRise, ovh],
+      [fx0 - ovh, bayH, -d - ovh],
+      [fx1 + ovh, bayH, -d - ovh],
+      [x1 + ovh, bayH + roofRise, ovh]
+    );
+    // Underside
+    _quad(rP, rI,
+      [x1 + ovh, bayH + roofRise - 0.06, ovh],
+      [fx1 + ovh, bayH - 0.06, -d - ovh],
+      [fx0 - ovh, bayH - 0.06, -d - ovh],
+      [x0 - ovh, bayH + roofRise - 0.06, ovh]
+    );
+    const rGeo = new THREE.BufferGeometry();
+    rGeo.setAttribute('position', new THREE.Float32BufferAttribute(rP, 3));
+    rGeo.setIndex(rI);
+    rGeo.computeVertexNormals();
+    bay.add(new THREE.Mesh(rGeo, new THREE.MeshLambertMaterial({ color: house.roofColor, side: THREE.DoubleSide })));
+  }
+
+  house.group.add(bay);
+  return house;
+}
+
+export function addWindowSills(house, {
+  protrusion = 0.08,
+  thickness = 0.05,
+  color,
+} = {}) {
+  _removePart(house, 'sills');
+
+  const sillGroup = new THREE.Group();
+  sillGroup.name = 'sills';
+  const sillColor = color != null ? color : house.wallColor;
+  const mat = new THREE.MeshLambertMaterial({ color: sillColor });
+
+  const winGroup = house.group.children.find(c => c.name === 'windows');
+  if (!winGroup) { house.group.add(sillGroup); return house; }
+
+  for (const win of winGroup.children) {
+    // Each window is a PlaneGeometry mesh with position and rotation
+    const ww = win.geometry.parameters.width;
+    const wh = win.geometry.parameters.height;
+    const sillW = ww + 0.1;
+    const sillD = protrusion;
+    const sillGeo = new THREE.BoxGeometry(sillW, thickness, sillD);
+
+    const sill = new THREE.Mesh(sillGeo, mat);
+    // Position below the window, offset outward by sill depth/2
+    // Need to account for wall rotation
+    const ry = win.rotation.y;
+    const outX = Math.sin(ry) * sillD / 2;
+    const outZ = Math.cos(ry) * sillD / 2;
+    sill.position.set(
+      win.position.x - outX,
+      win.position.y - wh / 2 - thickness / 2,
+      win.position.z - outZ,
+    );
+    sill.rotation.y = ry;
+    sillGroup.add(sill);
+  }
+
+  house.group.add(sillGroup);
+  return house;
+}
+
+export function addExtension(house, {
+  widthFrac = 0.5,    // fraction of house width (0.5 = half, 1 = full)
+  extDepth = 3,       // how far it extends from the back wall
+  floors = 1,         // number of storeys
+  side = 'left',      // 'left', 'right', or 'center' (only matters when < full width)
+  roofDirection = 'sides', // 'sides', 'frontback', 'all', 'mansard'
+  roofPitch = 30,
+} = {}) {
+  _removePart(house, 'extension');
+
+  const ew = house.width * Math.min(widthFrac, 1);
+  const eh = floors * house.floorHeight;
+  let ex;
+  if (widthFrac >= 1) ex = 0;
+  else if (side === 'left') ex = 0;
+  else if (side === 'right') ex = house.width - ew;
+  else ex = (house.width - ew) / 2;
+
+  const ext = new THREE.Group();
+  ext.name = 'extension';
+
+  // Walls
+  const wallGeo = new THREE.BoxGeometry(ew, eh, extDepth);
+  wallGeo.translate(ex + ew / 2, eh / 2, house.depth + extDepth / 2);
+  ext.add(new THREE.Mesh(wallGeo, new THREE.MeshLambertMaterial({ color: house.wallColor })));
+
+  // Roof — reuse the roof builders, extended back to overlap with main roof
+  const pitchRad = roofPitch * Math.PI / 180;
+  const roofOverlap = 1.0;
+  const roofDepth = extDepth + roofOverlap;
+  const P = [], I = [];
+
+  if (roofDirection === 'mansard') {
+    _mansardRoof(P, I, ew, roofDepth, eh, pitchRad);
+  } else if (roofDirection === 'all') {
+    _hipRoof(P, I, ew, roofDepth, eh, pitchRad);
+  } else if (roofDirection === 'sides') {
+    _gableRoofSides(P, I, ew, roofDepth, eh, pitchRad);
+  } else {
+    _gableRoofFrontBack(P, I, ew, roofDepth, eh, pitchRad);
+  }
+
+  // Offset roof positions to extension origin, shifted back by overlap
+  for (let i = 0; i < P.length; i += 3) {
+    P[i] += ex;
+    P[i + 2] += house.depth - roofOverlap;
+  }
+
+  const roofGeo = new THREE.BufferGeometry();
+  roofGeo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  roofGeo.setIndex(I);
+  roofGeo.computeVertexNormals();
+  ext.add(new THREE.Mesh(roofGeo, new THREE.MeshLambertMaterial({
+    color: house.roofColor,
+    side: THREE.DoubleSide,
+  })));
+
+  // Windows on the extension (back and exposed side walls)
+  const spacing = house._winSpacing || 2.5;
+  const winMat = new THREE.MeshLambertMaterial({
+    color: 0x88aabb,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+  const fh = house.floorHeight;
+  const sillY = fh * 0.3;
+  const winW = 1.0, winH = 1.5;
+
+  // Back wall of extension
+  const nBack = Math.max(1, Math.floor(ew / spacing));
+  const backStart = (ew - (nBack - 1) * spacing) / 2;
+  for (let f = 0; f < floors; f++) {
+    const cy = f * fh + sillY + winH / 2;
+    for (let i = 0; i < nBack; i++) {
+      const wg = new THREE.PlaneGeometry(winW, winH);
+      const wm = new THREE.Mesh(wg, winMat);
+      wm.position.set(ex + backStart + i * spacing, cy, house.depth + extDepth + 0.01);
+      ext.add(wm);
+    }
+  }
+
+  // Side walls of extension (only exposed sides)
+  const sideWalls = [];
+  if (widthFrac < 1 || side !== 'center') {
+    if (side === 'left' || widthFrac >= 1) {
+      // Right side wall exposed (at ex + ew)
+      sideWalls.push({ wx: ex + ew + 0.01, rot: -Math.PI / 2 });
+    }
+    if (side === 'right' || widthFrac >= 1) {
+      // Left side wall exposed (at ex)
+      sideWalls.push({ wx: ex - 0.01, rot: Math.PI / 2 });
+    }
+    if (side === 'center') {
+      sideWalls.push({ wx: ex - 0.01, rot: Math.PI / 2 });
+      sideWalls.push({ wx: ex + ew + 0.01, rot: -Math.PI / 2 });
+    }
+  }
+
+  const nSide = Math.max(1, Math.floor(extDepth / spacing));
+  const sideStart = (extDepth - (nSide - 1) * spacing) / 2;
+  for (const sw of sideWalls) {
+    for (let f = 0; f < floors; f++) {
+      const cy = f * fh + sillY + winH / 2;
+      for (let i = 0; i < nSide; i++) {
+        const wg = new THREE.PlaneGeometry(winW, winH);
+        const wm = new THREE.Mesh(wg, winMat);
+        wm.rotation.y = sw.rot;
+        wm.position.set(sw.wx, cy, house.depth + sideStart + i * spacing);
+        ext.add(wm);
+      }
+    }
+  }
+
+  house.group.add(ext);
+  return house;
+}
+
+export function addGroundLevel(house, height) {
+  if (height <= 0) return house;
+  _removePart(house, 'groundLevel');
+
+  const gl = new THREE.Group();
+  gl.name = 'groundLevel';
+  const mat = new THREE.MeshLambertMaterial({ color: house.wallColor });
+
+  // Raise the entire house
+  house.group.position.y = height;
+
+  // Foundation wall (visible base below the house)
+  const foundGeo = new THREE.BoxGeometry(house.width + 0.1, height, house.depth + 0.1);
+  foundGeo.translate(house.width / 2, -height / 2, house.depth / 2);
+  gl.add(new THREE.Mesh(foundGeo, mat));
+
+  const hasPorch = house._porchDepth != null;
+  const porchDepth = house._porchDepth || 0;
+  const porchWidth = house._porchWidth || house.width;
+  const porchCenter = house._porchCenter || house.width / 2;
+  const postSize = house._porchPostSize || 0.12;
+
+  // Steps — from porch front if there's a porch, otherwise from front wall
+  const stepH = 0.18;
+  const stepD = 0.28;
+  const stepW = hasPorch ? porchWidth : 1.2;
+  const stepStartZ = hasPorch ? -porchDepth : 0;
+  const nSteps = Math.ceil(height / stepH);
+  const stepCenterX = hasPorch ? porchCenter : (house._doorX || house.width / 2);
+
+  for (let i = 0; i < nSteps; i++) {
+    const sy = -height + (i + 1) * stepH;
+    const sd = (nSteps - i) * stepD;
+    const geo = new THREE.BoxGeometry(stepW, stepH, sd);
+    geo.translate(stepCenterX, sy - stepH / 2, stepStartZ - sd / 2);
+    gl.add(new THREE.Mesh(geo, mat));
+  }
+
+  // Extend porch posts down to ground
+  if (hasPorch) {
+    const postInset = postSize * 2;
+    const leftX = porchCenter - porchWidth / 2 + postInset;
+    const rightX = porchCenter + porchWidth / 2 - postInset;
+    const postZ = -(porchDepth - postInset);
+
+    for (const px of [leftX, rightX]) {
+      const postGeo = new THREE.BoxGeometry(postSize, height, postSize);
+      postGeo.translate(px, -height / 2, postZ);
+      gl.add(new THREE.Mesh(postGeo, mat));
+    }
+  }
+
+  house.group.add(gl);
+  return house;
+}
+
+// ── Internals ────────────────────────────────────────────────
+
+/**
+ * Pick a door X position that sits on the window spacing grid.
+ * 'left' picks the first grid slot, 'right' the last, 'center' the middle.
+ */
+function _doorPositionOnGrid(houseWidth, spacing, placement) {
+  const nSlots = Math.max(1, Math.floor(houseWidth / spacing));
+  const startOffset = (houseWidth - (nSlots - 1) * spacing) / 2;
+  let idx;
+  if (placement === 'left') idx = 0;
+  else if (placement === 'right') idx = nSlots - 1;
+  else idx = Math.floor(nSlots / 2);
+  return startOffset + idx * spacing;
+}
+
+function _removePart(house, name) {
+  const child = house.group.children.find(c => c.name === name);
+  if (child) {
+    house.group.remove(child);
+    child.traverse(c => {
+      if (c.geometry) c.geometry.dispose();
+    });
   }
 }
 
-// ── Geometry helpers ──────────────────────────────────────────
-
-function quad(P, N, I, a, b, c, d) {
-  const i = P.length / 3;
-  P.push(...a, ...b, ...c, ...d);
-  // Compute face normal from cross product
-  const ux = b[0]-a[0], uy = b[1]-a[1], uz = b[2]-a[2];
-  const vx = c[0]-a[0], vy = c[1]-a[1], vz = c[2]-a[2];
-  let nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
-  const len = Math.sqrt(nx*nx + ny*ny + nz*nz) || 1;
-  nx /= len; ny /= len; nz /= len;
-  N.push(nx,ny,nz, nx,ny,nz, nx,ny,nz, nx,ny,nz);
-  I.push(i, i+1, i+2, i, i+2, i+3);
+function _rebuildWalls(house) {
+  _removePart(house, 'walls');
+  const h = house.floors * house.floorHeight;
+  const geo = new THREE.BoxGeometry(house.width, h, house.depth);
+  geo.translate(house.width / 2, h / 2, house.depth / 2);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: house.wallColor }));
+  mesh.name = 'walls';
+  house.group.add(mesh);
 }
 
-function tri(P, N, I, a, b, c) {
-  const i = P.length / 3;
-  P.push(...a, ...b, ...c);
-  const ux = b[0]-a[0], uy = b[1]-a[1], uz = b[2]-a[2];
-  const vx = c[0]-a[0], vy = c[1]-a[1], vz = c[2]-a[2];
-  let nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
-  const len = Math.sqrt(nx*nx + ny*ny + nz*nz) || 1;
-  nx /= len; ny /= len; nz /= len;
-  N.push(nx,ny,nz, nx,ny,nz, nx,ny,nz);
-  I.push(i, i+1, i+2);
-}
+// ── Legacy adapter ───────────────────────────────────────────
+// Keeps existing tests + BuildingStyleScreen working until they're updated.
 
-function makeGeo(P, N, I) {
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
-  geo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
-  geo.setIndex(I);
-  return geo;
-}
+export function generateBuilding(style, recipe) {
+  const house = createHouse(recipe.mainWidth, recipe.mainDepth, style.floorHeight, recipe.wallColor);
 
-function mergeGeos(geos) {
-  const filtered = geos.filter(Boolean);
-  if (filtered.length === 0) return makeGeo([], [], []);
-  if (filtered.length === 1) return filtered[0];
-
-  const P = [], N = [], I = [];
-  for (const geo of filtered) {
-    const offset = P.length / 3;
-    const pos = geo.attributes.position.array;
-    const nor = geo.attributes.normal.array;
-    const idx = geo.index.array;
-    for (let i = 0; i < pos.length; i++) P.push(pos[i]);
-    for (let i = 0; i < nor.length; i++) N.push(nor[i]);
-    for (let i = 0; i < idx.length; i++) I.push(idx[i] + offset);
-    geo.dispose();
+  // Add extra floors
+  for (let i = 1; i < recipe.floors; i++) {
+    addFloor(house);
   }
-  return makeGeo(P, N, I);
+
+  // Roof
+  if (style.roofType === 'flat') {
+    // Flat roof = pitched roof with 0 pitch
+    addPitchedRoof(house, 0, 'sides');
+  } else {
+    addPitchedRoof(house, style.roofPitch, 'sides');
+  }
+
+  // Windows
+  addWindows(house, {
+    width: style.windowWidth,
+    height: style.windowHeight,
+    spacing: style.windowSpacing,
+    color: recipe.windowColor,
+  });
+
+  return house.group;
 }
