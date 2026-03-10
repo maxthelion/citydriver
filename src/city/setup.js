@@ -140,7 +140,7 @@ export function setupCity(layers, settlement, rng) {
       margin: cityCellSize,
     });
     for (const river of cityRivers) {
-      map.addFeature('river', { polyline: river.polyline });
+      map.addFeature('river', { polyline: river.polyline, systemId: river.systemId });
     }
   }
 
