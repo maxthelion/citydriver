@@ -106,14 +106,14 @@ export function generateLandCover(params, elevation, slope, soilFertility, perme
 
       // Forest: dominates below treeline on moderate slopes.
       // Trees grow on poor soil too (just slower) — fertility is a mild bonus, not a gate.
-      // Sharp cutoff at treeline creates a visible treeline boundary.
-      const forestElev = smoothstep(0, 15, h) * smoothstep(treeline, treeline * 0.75, h);
+      // Tight transition at treeline creates a visible treeline boundary.
+      const forestElev = smoothstep(0, 15, h) * smoothstep(treeline, treeline * 0.88, h);
       const forestFertilityBonus = 0.5 + fertility * 0.5; // 0.5–1.0 (not a gate)
-      const forestSlope = clamp(1.0 - s * 1.5, 0.1, 1); // tolerant of moderate slopes
+      const forestSlope = clamp(1.0 - s * 0.8, 0.15, 1); // trees grow on mountain slopes
       const forestSuit = forestElev * forestFertilityBonus * forestSlope;
 
       // Moorland: above treeline only. Exposed upland with no tree cover.
-      const moorElev = smoothstep(treeline * 0.75, treeline * 1.1, h);
+      const moorElev = smoothstep(treeline * 0.88, treeline * 1.2, h);
       const moorSoil = clamp(1.0 - fertility, 0, 1);
       const moorSuit = moorElev * (0.5 + moorSoil * 0.5);
 
@@ -124,14 +124,14 @@ export function generateLandCover(params, elevation, slope, soilFertility, perme
       const marshSuit = marshElev * marshPerm * marshSlope;
 
       // Open woodland: transition zone just below treeline
-      const owElev = smoothstep(treeline * 0.5, treeline * 0.8, h) * smoothstep(treeline * 1.1, treeline * 0.9, h);
-      const owSuit = owElev * (0.3 + fertility * 0.4) * clamp(1.0 - s * 2, 0, 1);
+      const owElev = smoothstep(treeline * 0.7, treeline * 0.85, h) * smoothstep(treeline * 1.1, treeline * 0.95, h);
+      const owSuit = owElev * (0.3 + fertility * 0.4) * clamp(1.0 - s * 1.5, 0, 1);
 
-      // Bare rock: very steep slopes or above treeline with hard rock
-      const bareSlope = smoothstep(0.4, 0.7, s);
+      // Bare rock: very steep slopes or well above treeline with hard rock
+      const bareSlope = smoothstep(0.65, 0.9, s);
       const bareResistance = clamp((1.0 - fertility) * (1.0 - perm), 0, 1);
-      const bareElev = smoothstep(treeline * 0.5, treeline * 1.3, h);
-      const bareSuit = Math.max(bareSlope * 0.8, bareResistance * bareElev * 0.6);
+      const bareElev = smoothstep(treeline * 0.8, treeline * 1.5, h);
+      const bareSuit = Math.max(bareSlope * 0.8, bareResistance * bareElev * 0.5);
 
       // Scrubland: dry, moderate slope, poor soil
       const scrubDry = clamp(1.0 - fertility, 0, 1) * clamp(perm, 0, 1); // permeable + infertile = dry

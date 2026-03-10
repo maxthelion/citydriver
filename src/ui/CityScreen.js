@@ -1,20 +1,513 @@
 /**
- * CityScreen stub — 3D city view (not yet implemented in v5).
- * Redirects to debug viewer for now.
+ * CityScreen — 3D city view with fly camera.
+ * Runs the city pipeline (setup + skeleton), then renders terrain, water,
+ * rivers, and roads in a THREE.js scene with WASD + mouse-look controls.
  */
 
-import { DebugScreen } from './DebugScreen.js';
+import * as THREE from 'three';
+import { setupCity } from '../city/setup.js';
+import { buildSkeletonRoads } from '../city/skeleton.js';
+import { prepareCityScene } from '../rendering/prepareCityScene.js';
+import { getRoadMaterial, getRiverMaterial } from '../rendering/materials.js';
+import { FlyCamera } from './FlyCamera.js';
+import { renderMap, drawRivers, drawRoads, drawSettlements } from '../rendering/mapRenderer.js';
+import { CITY_RADIUS } from '../city/constants.js';
+import { placeBuildings } from '../city/placeBuildings.js';
+
+// Land cover colors (same as regionPreview3D.js)
+const COVER_COLORS = {
+  0: [0.1, 0.25, 0.5],     // Water
+  1: [0.55, 0.65, 0.2],    // Farmland
+  2: [0.08, 0.32, 0.05],   // Forest
+  3: [0.45, 0.4, 0.3],     // Moorland
+  4: [0.3, 0.45, 0.3],     // Marsh
+  5: [0.6, 0.5, 0.4],      // Settlement
+  6: [0.3, 0.5, 0.15],     // Open woodland
+  7: [0.55, 0.52, 0.48],   // Bare rock
+  8: [0.5, 0.48, 0.25],    // Scrubland
+};
+const DEFAULT_COLOR = [0.35, 0.5, 0.2];
+const PAVED_COLOR = [0.55, 0.53, 0.5];
 
 export class CityScreen {
   constructor(container, layers, settlement, rng, seed, onBack) {
-    // V5: redirect to debug viewer until 3D rendering is built
-    this._debug = new DebugScreen(container, layers, settlement, seed, onBack);
+    this.container = container;
+    this.onBack = onBack;
+    this._regionalLayers = layers;
+    this._settlement = settlement;
+    this._seed = seed || 42;
+    this._hud = [];
+
+    // Run city pipeline
+    const map = setupCity(layers, settlement, rng);
+    buildSkeletonRoads(map);
+    this._map = map;
+
+    this._buildScene();
+  }
+
+  _buildScene() {
+    const map = this._map;
+
+    // Renderer — full window, device pixel ratio for sharp rendering
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x87ceeb);
+    this.container.appendChild(renderer.domElement);
+    this._renderer = renderer;
+
+    // Scene
+    const scene = new THREE.Scene();
+    this._scene = scene;
+    // No fog — let the full city terrain be visible
+    scene.add(new THREE.AmbientLight(0x8899aa, 0.6));
+    const sun = new THREE.DirectionalLight(0xffeedd, 1.2);
+    sun.position.set(200, 400, 300);
+    scene.add(sun);
+
+    // Pre-process city data for 3D (coord conversion, camber, river flow, terrain cuts)
+    this._sceneData = prepareCityScene(this._map);
+
+    // Meshes (tracked for layer toggle)
+    this._meshLayers = {};
+
+    const terrain = this._buildTerrain();
+    scene.add(terrain);
+    this._meshLayers.terrain = terrain;
+
+    const roads = this._buildRoads();
+    scene.add(roads);
+    this._meshLayers.roads = roads;
+
+    const water = this._buildWater();
+    scene.add(water);
+    this._meshLayers.water = water;
+
+    const rivers = this._buildRivers();
+    scene.add(rivers);
+    this._meshLayers.rivers = rivers;
+
+    const trees = this._buildTrees();
+    scene.add(trees);
+    this._meshLayers.trees = trees;
+
+    const buildings = placeBuildings(this._map, this._seed);
+    scene.add(buildings);
+    this._meshLayers.buildings = buildings;
+
+    // Camera + fly controls
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.5, 10000);
+    this._camera = camera;
+    this._flyCamera = new FlyCamera(camera, renderer.domElement);
+
+    // Position camera: 100m above ground, 200m from city center
+    const cityW = map.width * map.cellSize;
+    const cityH = map.height * map.cellSize;
+    const cx = cityW / 2;
+    const cz = cityH / 2;
+    const cy = map.elevation.sample(map.width / 2, map.height / 2);
+    this._flyCamera.setPosition(cx + 200, cy + 100, cz);
+
+    // Minimap camera (top-down orthographic) — high enough to clear any terrain
+    const hw = cityW / 2, hh = cityH / 2;
+    this._minimapCamera = new THREE.OrthographicCamera(-hw, hw, hh, -hh, 1, 5000);
+    this._minimapCamera.position.set(hw, 3000, hh);
+    this._minimapCamera.lookAt(hw, 0, hh);
+
+    // Player dot on minimap
+    const dotGeo = new THREE.CircleGeometry(cityW * 0.012, 16);
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0xff3333, depthTest: false });
+    this._minimapDot = new THREE.Mesh(dotGeo, dotMat);
+    this._minimapDot.rotation.x = -Math.PI / 2;
+    this._minimapDot.renderOrder = 999;
+    this._minimapDot.layers.set(1);
+    this._minimapCamera.layers.enableAll();
+    scene.add(this._minimapDot);
+
+    // Resize handler
+    this._onResize = () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+    window.addEventListener('resize', this._onResize);
+
+    // Animation loop
+    this._clock = new THREE.Clock();
+    this._running = true;
+    const animate = () => {
+      if (!this._running) return;
+      requestAnimationFrame(animate);
+      const dt = Math.min(this._clock.getDelta(), 0.1);
+      this._flyCamera.update(dt);
+
+      // Update minimap dot
+      this._minimapDot.position.set(camera.position.x, 400, camera.position.z);
+
+      const w = window.innerWidth, h = window.innerHeight;
+
+      // Main render
+      renderer.setViewport(0, 0, w, h);
+      renderer.setScissorTest(false);
+      renderer.render(scene, camera);
+
+      // Minimap (bottom-right)
+      const mapSize = 180;
+      const mx = w - mapSize - 10;
+      const my = 10;
+      renderer.setViewport(mx, my, mapSize, mapSize);
+      renderer.setScissor(mx, my, mapSize, mapSize);
+      renderer.setScissorTest(true);
+      renderer.render(scene, this._minimapCamera);
+      renderer.setScissorTest(false);
+    };
+    animate();
+
+    // Build HUD
+    this._buildHUD();
+
+    // Region minimap overlay
+    this._buildRegionMinimap();
+  }
+
+  _buildHUD() {
+    // Back button
+    const backBtn = document.createElement('button');
+    backBtn.textContent = '\u2190 Back to Region';
+    backBtn.style.cssText = 'position:fixed;top:10px;left:10px;padding:8px 16px;background:#444;color:#eee;border:1px solid #666;cursor:pointer;font-family:monospace;font-size:13px;border-radius:4px;z-index:100';
+    backBtn.addEventListener('click', () => this.onBack());
+    document.body.appendChild(backBtn);
+    this._hud.push(backBtn);
+
+    // Layer toggles
+    const palette = document.createElement('div');
+    palette.style.cssText = 'position:fixed;left:10px;top:50px;background:rgba(0,0,0,0.7);color:#eee;font-family:monospace;font-size:12px;padding:8px 10px;border-radius:4px;z-index:100';
+    for (const [name, mesh] of Object.entries(this._meshLayers)) {
+      const label = document.createElement('label');
+      label.style.cssText = 'display:block;cursor:pointer;margin:2px 0';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = true;
+      cb.style.marginRight = '6px';
+      cb.addEventListener('change', () => { mesh.visible = cb.checked; });
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(name));
+      palette.appendChild(label);
+    }
+    document.body.appendChild(palette);
+    this._hud.push(palette);
+
+    // Instructions
+    const info = document.createElement('div');
+    info.style.cssText = 'position:fixed;bottom:10px;left:10px;color:white;font-family:monospace;font-size:13px;pointer-events:none;text-shadow:1px 1px 2px black;z-index:100';
+    info.textContent = 'Click to capture mouse. WASD move, Mouse look, Space/Shift up/down, Scroll speed.';
+    document.body.appendChild(info);
+    this._hud.push(info);
+  }
+
+  _buildRegionMinimap() {
+    const layers = this._regionalLayers;
+    const settlement = this._settlement;
+    const params = layers.getData('params');
+    if (!params) return;
+
+    const offscreen = document.createElement('canvas');
+    renderMap(layers, offscreen, { mode: 'elevation' });
+    const ctx = offscreen.getContext('2d');
+    drawRivers(layers, ctx);
+    drawRoads(layers, ctx);
+    drawSettlements(layers, ctx);
+
+    // Draw city extent rectangle
+    const cityRadius = CITY_RADIUS;
+    const minGx = Math.max(0, settlement.gx - cityRadius);
+    const minGz = Math.max(0, settlement.gz - cityRadius);
+    const maxGx = Math.min(params.width - 1, settlement.gx + cityRadius);
+    const maxGz = Math.min(params.height - 1, settlement.gz + cityRadius);
+
+    ctx.strokeStyle = '#ff3333';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(minGx, minGz, maxGx - minGx, maxGz - minGz);
+
+    const displaySize = 160;
+    const minimapEl = document.createElement('canvas');
+    minimapEl.width = displaySize;
+    minimapEl.height = displaySize;
+    minimapEl.style.cssText = `position:fixed;top:10px;right:10px;width:${displaySize}px;height:${displaySize}px;border:2px solid rgba(255,255,255,0.5);border-radius:4px;z-index:100;image-rendering:pixelated;pointer-events:none`;
+
+    const displayCtx = minimapEl.getContext('2d');
+    displayCtx.imageSmoothingEnabled = false;
+    displayCtx.drawImage(offscreen, 0, 0, displaySize, displaySize);
+
+    document.body.appendChild(minimapEl);
+    this._hud.push(minimapEl);
+  }
+
+  /**
+   * Terrain mesh colored by regional land cover + city road/water overlays.
+   * Uses pre-computed cut elevation from prepareCityScene (roads/rivers cut in).
+   */
+  _buildTerrain() {
+    const map = this._map;
+    const sd = this._sceneData;
+    const w = map.width, h = map.height, cs = map.cellSize;
+
+    const geometry = new THREE.PlaneGeometry((w - 1) * cs, (h - 1) * cs, w - 1, h - 1);
+    geometry.rotateX(-Math.PI / 2);
+    geometry.translate((w - 1) * cs / 2, 0, (h - 1) * cs / 2);
+
+    const positions = geometry.attributes.position.array;
+    const colors = new Float32Array(positions.length);
+
+    const regionalLandCover = map.regionalLayers.getGrid('landCover');
+    const rcs = map.regionalLayers.getData('params').cellSize;
+
+    for (let gz = 0; gz < h; gz++) {
+      for (let gx = 0; gx < w; gx++) {
+        const idx = gz * w + gx;
+        positions[idx * 3 + 1] = sd.cutElevation[idx];
+
+        let rgb;
+        if (map.roadGrid.get(gx, gz) > 0) {
+          rgb = PAVED_COLOR;
+        } else {
+          const wx = map.originX + gx * cs;
+          const wz = map.originZ + gz * cs;
+          let cover = regionalLandCover.get(
+            Math.min(Math.round(wx / rcs), regionalLandCover.width - 1),
+            Math.min(Math.round(wz / rcs), regionalLandCover.height - 1),
+          );
+          // Skip settlement clearing and water — use natural ground color at city scale.
+          if (cover === 5 || cover === 0) cover = -1;
+          rgb = COVER_COLORS[cover] || DEFAULT_COLOR;
+
+          // Procedural noise on forest/woodland for dappled canopy look
+          if (cover === 2 || cover === 6) {
+            const hash = ((gx * 2654435761 + gz * 2246822519) >>> 0) & 0xffff;
+            const noise = (hash / 0xffff) * 0.15 - 0.075;
+            rgb = [
+              Math.max(0, Math.min(1, rgb[0] + noise * 0.5)),
+              Math.max(0, Math.min(1, rgb[1] + noise)),
+              Math.max(0, Math.min(1, rgb[2] + noise * 0.3)),
+            ];
+          }
+        }
+
+        colors[idx * 3] = rgb[0];
+        colors[idx * 3 + 1] = rgb[1];
+        colors[idx * 3 + 2] = rgb[2];
+      }
+    }
+
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geometry.computeVertexNormals();
+    return new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  }
+
+  /**
+   * Water plane at sea level.
+   */
+  _buildWater() {
+    const map = this._map;
+    const size = Math.max(map.width, map.height) * map.cellSize;
+    const geometry = new THREE.PlaneGeometry(size * 1.5, size * 1.5);
+    geometry.rotateX(-Math.PI / 2);
+
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({
+      color: 0x2255aa, transparent: true, opacity: 0.7,
+    }));
+    mesh.position.set(
+      map.width * map.cellSize / 2,
+      map.seaLevel,
+      map.height * map.cellSize / 2,
+    );
+    return mesh;
+  }
+
+  /**
+   * River ribbon meshes from pre-processed scene data (downhill-enforced, local coords).
+   */
+  _buildRivers() {
+    const vertices = [];
+    const indices = [];
+
+    for (const river of this._sceneData.rivers) {
+      const pts = river.localPts;
+      if (pts.length < 2) continue;
+
+      const baseVertex = vertices.length / 3;
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        const halfW = (p.width || 10) / 2;
+
+        let dx, dz;
+        if (i < pts.length - 1) {
+          dx = pts[i + 1].x - p.x; dz = pts[i + 1].z - p.z;
+        } else {
+          dx = p.x - pts[i - 1].x; dz = p.z - pts[i - 1].z;
+        }
+        const len = Math.sqrt(dx * dx + dz * dz) || 1;
+        const px = -dz / len * halfW, pz = dx / len * halfW;
+
+        vertices.push(p.x + px, p.y, p.z + pz, p.x - px, p.y, p.z - pz);
+        if (i > 0) {
+          const b = baseVertex + (i - 1) * 2;
+          indices.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+        }
+      }
+    }
+
+    if (vertices.length < 6) return new THREE.Group();
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geom.setIndex(indices);
+    geom.computeVertexNormals();
+
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(geom, getRiverMaterial()));
+    return group;
+  }
+
+  /**
+   * Road ribbon meshes from pre-processed scene data (neutral camber, local coords).
+   */
+  _buildRoads() {
+    const group = new THREE.Group();
+    const batches = {};
+
+    for (const road of this._sceneData.roads) {
+      const hier = road.hierarchy;
+      if (!batches[hier]) batches[hier] = { vertices: [], indices: [] };
+      const batch = batches[hier];
+      const pts = road.localPts;
+      const halfW = road.halfWidth;
+      const baseVertex = batch.vertices.length / 3;
+
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        let dx, dz;
+        if (i < pts.length - 1) {
+          dx = pts[i + 1].x - p.x; dz = pts[i + 1].z - p.z;
+        } else {
+          dx = p.x - pts[i - 1].x; dz = p.z - pts[i - 1].z;
+        }
+        const len = Math.sqrt(dx * dx + dz * dz) || 1;
+        const perpX = -dz / len, perpZ = dx / len;
+
+        const lx = p.x + perpX * halfW, lz = p.z + perpZ * halfW;
+        const rx = p.x - perpX * halfW, rz = p.z - perpZ * halfW;
+
+        batch.vertices.push(lx, p.y, lz, rx, p.y, rz);
+        if (i > 0) {
+          const b = baseVertex + (i - 1) * 2;
+          batch.indices.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+        }
+      }
+    }
+
+    for (const [hierarchy, batch] of Object.entries(batches)) {
+      if (batch.vertices.length < 6) continue;
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute('position', new THREE.Float32BufferAttribute(batch.vertices, 3));
+      geom.setIndex(batch.indices);
+      geom.computeVertexNormals();
+      group.add(new THREE.Mesh(geom, getRoadMaterial(hierarchy)));
+    }
+
+    return group;
+  }
+
+  /**
+   * Forest trees as instanced cones. For each forest/woodland cell,
+   * place a random number of trees at random positions within the cell.
+   */
+  _buildTrees() {
+    const map = this._map;
+    const cs = map.cellSize;
+    const regionalLandCover = map.regionalLayers.getGrid('landCover');
+    const rcs = map.regionalLayers.getData('params').cellSize;
+
+    // Deterministic hash with proper bit mixing → 0-1
+    function hash(a, b, seed) {
+      let h = (a * 374761393 + b * 668265263 + seed) | 0;
+      h = Math.imul(h ^ (h >>> 13), 1274126177);
+      h = Math.imul(h ^ (h >>> 16), 1911520717);
+      h = h ^ (h >>> 13);
+      return ((h >>> 0) & 0xffffff) / 0xffffff;
+    }
+
+    const treeData = [];
+    for (let gz = 1; gz < map.height - 1; gz++) {
+      for (let gx = 1; gx < map.width - 1; gx++) {
+        if (map.waterMask.get(gx, gz) > 0) continue;
+        if (map.roadGrid.get(gx, gz) > 0) continue;
+
+        const wx = map.originX + gx * cs;
+        const wz = map.originZ + gz * cs;
+        const cover = regionalLandCover.get(
+          Math.min(Math.round(wx / rcs), regionalLandCover.width - 1),
+          Math.min(Math.round(wz / rcs), regionalLandCover.height - 1),
+        );
+        if (cover !== 2 && cover !== 6) continue;
+
+        // Random tree count: forest 0–4, woodland 0–2
+        const maxTrees = cover === 2 ? 4 : 2;
+        const count = Math.floor(hash(gx, gz, 0) * (maxTrees + 1));
+
+        for (let t = 0; t < count; t++) {
+          const rx = hash(gx, gz, t * 3 + 1);
+          const rz = hash(gx, gz, t * 3 + 2);
+          const rv = hash(gx, gz, t * 3 + 3);
+
+          const x = (gx + rx) * cs;
+          const z = (gz + rz) * cs;
+          const y = map.elevation.sample(x / cs, z / cs);
+
+          const h = cover === 2 ? 7 + rv * 8 : 4 + rv * 5;
+          const rad = cover === 2 ? 2.5 + rx * 2.5 : 1.5 + rx * 2;
+
+          treeData.push(x, y, z, h, rad);
+        }
+      }
+    }
+
+    if (treeData.length === 0) return new THREE.Group();
+
+    const total = treeData.length / 5;
+    const coneGeo = new THREE.ConeGeometry(1, 1, 5);
+    coneGeo.translate(0, 0.5, 0);
+
+    const mat = new THREE.MeshLambertMaterial({ color: 0x1a5c10 });
+    const mesh = new THREE.InstancedMesh(coneGeo, mat, total);
+
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < total; i++) {
+      dummy.position.set(treeData[i * 5], treeData[i * 5 + 1], treeData[i * 5 + 2]);
+      dummy.scale.set(treeData[i * 5 + 4], treeData[i * 5 + 3], treeData[i * 5 + 4]);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+
+    mesh.instanceMatrix.needsUpdate = true;
+    const group = new THREE.Group();
+    group.add(mesh);
+    return group;
   }
 
   dispose() {
-    if (this._debug) {
-      this._debug.dispose();
-      this._debug = null;
+    this._running = false;
+    if (this._flyCamera) {
+      this._flyCamera.dispose();
+      this._flyCamera = null;
     }
+    if (this._renderer) {
+      this._renderer.dispose();
+      this._renderer = null;
+    }
+    window.removeEventListener('resize', this._onResize);
+    for (const el of this._hud) el.remove();
+    this._hud = [];
+    this.container.innerHTML = '';
   }
 }

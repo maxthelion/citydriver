@@ -633,11 +633,50 @@ export class FeatureMap {
   // --- Channel carving ---
 
   /**
-   * Carve river channels into elevation grid.
+   * Carve river channels into elevation grid and enforce monotonic downhill flow.
+   * After carving, recomputes slope and buildability so pathfinding sees correct terrain.
    */
   carveChannels() {
     if (!this.elevation) return;
 
+    // Phase 1: Enforce monotonic downhill flow on each river polyline.
+    // Walk each river in downstream direction (increasing accumulation)
+    // and clamp the centerline elevation so it never increases.
+    for (const river of this.rivers) {
+      const polyline = river.polyline;
+      if (!polyline || polyline.length < 2) continue;
+
+      // Determine downstream direction from accumulation
+      const firstAcc = polyline[0].accumulation || 0;
+      const lastAcc = polyline[polyline.length - 1].accumulation || 0;
+      const downstream = firstAcc <= lastAcc
+        ? polyline
+        : [...polyline].reverse();
+
+      // Sample centerline elevations
+      const elevations = downstream.map(p => {
+        const gx = (p.x - this.originX) / this.cellSize;
+        const gz = (p.z - this.originZ) / this.cellSize;
+        return this.elevation.sample(gx, gz);
+      });
+
+      // Clamp to monotonic decreasing
+      for (let i = 1; i < elevations.length; i++) {
+        if (elevations[i] > elevations[i - 1]) {
+          elevations[i] = elevations[i - 1];
+        }
+      }
+
+      // Store corrected elevations back as target centerline heights
+      // (used by the carving pass below to set absolute channel depth)
+      for (let i = 0; i < downstream.length; i++) {
+        downstream[i]._targetY = elevations[i];
+      }
+    }
+
+    // Phase 2: Carve channels using channel profile.
+    // Where _targetY is set, use it as the absolute river bed elevation
+    // instead of carving relative to current terrain.
     for (const river of this.rivers) {
       const polyline = river.polyline;
       if (!polyline || polyline.length < 2) continue;
@@ -660,6 +699,11 @@ export class FeatureMap {
           const halfW = riverHalfWidth(accum);
           const maxDepth = Math.min(4, 1.5 + halfW / 15);
 
+          // Target bed elevation (monotonic) if available
+          const targetY = (a._targetY != null && b._targetY != null)
+            ? a._targetY * (1 - t) + b._targetY * t - maxDepth
+            : null;
+
           const radius = halfW + 3 * this.cellSize;
           const cellRadius = Math.ceil(radius / this.cellSize);
           const cgx = Math.round((px - this.originX) / this.cellSize);
@@ -676,15 +720,51 @@ export class FeatureMap {
               const dist = Math.sqrt((cellCenterX - px) ** 2 + (cellCenterZ - pz) ** 2);
               const nd = dist / Math.max(halfW, 0.1);
 
-              const carve = channelProfile(nd) * maxDepth;
-              if (carve > 0.05) {
-                const current = this.elevation.get(gx, gz);
-                this.elevation.set(gx, gz, current - carve);
+              const profile = channelProfile(nd);
+              if (profile < 0.01) continue;
+
+              const current = this.elevation.get(gx, gz);
+              let newElev;
+              if (targetY != null) {
+                // Blend between current terrain and target river bed using channel profile
+                const bedElev = targetY + maxDepth * (1 - profile);
+                newElev = Math.min(current, bedElev);
+              } else {
+                // Fallback: relative carving
+                newElev = current - profile * maxDepth;
+              }
+              if (newElev < current) {
+                this.elevation.set(gx, gz, newElev);
               }
             }
           }
         }
       }
+
+      // Clean up temp properties
+      for (const p of polyline) delete p._targetY;
+    }
+
+    // Phase 3: Recompute slope and buildability after carving.
+    if (this.slope) {
+      const w = this.width, h = this.height, cs = this.cellSize;
+      for (let gz = 1; gz < h - 1; gz++) {
+        for (let gx = 1; gx < w - 1; gx++) {
+          const dex = this.elevation.get(gx + 1, gz) - this.elevation.get(gx - 1, gz);
+          const dez = this.elevation.get(gx, gz + 1) - this.elevation.get(gx, gz - 1);
+          this.slope.set(gx, gz, Math.sqrt(dex * dex + dez * dez) / (2 * cs));
+        }
+      }
+      // Edge slopes from nearest interior
+      for (let gx = 0; gx < w; gx++) {
+        this.slope.set(gx, 0, this.slope.get(gx, 1));
+        this.slope.set(gx, h - 1, this.slope.get(gx, h - 2));
+      }
+      for (let gz = 0; gz < h; gz++) {
+        this.slope.set(0, gz, this.slope.get(1, gz));
+        this.slope.set(w - 1, gz, this.slope.get(w - 2, gz));
+      }
+      this._computeInitialBuildability();
     }
   }
 
