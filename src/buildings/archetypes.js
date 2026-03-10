@@ -68,6 +68,131 @@ export const victorianTerrace = {
   },
 };
 
+export const parisianHaussmann = {
+  typology: 'terraced',
+  partyWalls: ['left', 'right'],
+
+  shared: {
+    floors: [5, 6],
+    floorHeight: [3.0, 3.4],
+    roofPitch: [60, 70],
+    roofDirection: 'mansard',
+    roofOverhang: 0.15,
+    depth: [10, 12],
+    door: 'center',
+    bay: null,
+    balcony: { style: 'full', floors: [2, 3] },
+    dormers: { style: 'window', count: [2, 3] },
+    porch: null,
+    extension: null,
+    windowSpacing: [2.4, 2.8],
+    windowHeight: [2.0, 2.4],
+    groundHeight: [0.5, 0.8],
+    sills: { protrusion: 0.08 },
+    roofColor: 0x4a4a4a,
+  },
+
+  perHouse: {
+    plotWidth: [5, 7],
+    wallColor: 0xe8dcc8,
+    colorVariation: 0.04,
+  },
+};
+
+export const germanTownhouse = {
+  typology: 'terraced',
+  partyWalls: ['left', 'right'],
+
+  shared: {
+    floors: [3, 4],
+    floorHeight: [2.8, 3.2],
+    roofPitch: [45, 55],
+    roofDirection: 'sides',
+    roofOverhang: 0.3,
+    depth: [9, 11],
+    door: 'center',
+    bay: null,
+    balcony: null,
+    dormers: { style: 'window', count: [1, 2] },
+    porch: { face: 'front', porchDepth: 1.5, roofStyle: 'gable' },
+    extension: null,
+    windowSpacing: [2.2, 2.6],
+    windowHeight: [1.4, 1.8],
+    groundHeight: [0.3, 0.5],
+    sills: { protrusion: 0.08 },
+    roofColor: 0x8b4513,
+  },
+
+  perHouse: {
+    plotWidth: [5, 6.5],
+    wallColor: 0xc0b8a8,
+    colorVariation: 0.05,
+  },
+};
+
+export const suburbanDetached = {
+  typology: 'detached',
+  partyWalls: [],
+
+  shared: {
+    floors: 2,
+    floorHeight: [2.6, 2.8],
+    roofPitch: [25, 30],
+    roofDirection: 'all',
+    roofOverhang: 0.4,
+    depth: [8, 10],
+    door: 'center',
+    bay: null,
+    balcony: null,
+    dormers: null,
+    porch: { face: 'front', porchDepth: 1.8, roofStyle: 'slope' },
+    extension: { widthFrac: 0.5, extDepth: 3, floors: 1, side: 'left' },
+    windowSpacing: [2.0, 2.4],
+    windowHeight: [1.3, 1.5],
+    groundHeight: [0.2, 0.3],
+    sills: null,
+    roofColor: 0x6b4e37,
+  },
+
+  perHouse: {
+    plotWidth: [8, 12],
+    wallColor: 0xd8d0c0,
+    colorVariation: 0.08,
+    sideGap: [1, 2],
+  },
+};
+
+export const lowRiseApartments = {
+  typology: 'terraced',
+  partyWalls: ['left', 'right'],
+
+  shared: {
+    floors: [4, 5],
+    floorHeight: [2.8, 3.0],
+    roofPitch: 0,
+    roofDirection: 'sides',
+    roofOverhang: 0.1,
+    depth: [12, 15],
+    door: 'center',
+    bay: null,
+    balcony: { style: 'full', floors: [1, 5] },
+    dormers: null,
+    porch: null,
+    extension: null,
+    windowSpacing: [2.2, 2.6],
+    windowHeight: [1.5, 1.8],
+    groundHeight: [0.3, 0.5],
+    sills: null,
+    roofColor: 0x888888,
+  },
+
+  perHouse: {
+    plotWidth: [6, 8],
+    wallColor: 0xe0ddd8,
+    colorVariation: 0.03,
+  },
+};
+
 // Layout constants
 export const ROAD_HALF_WIDTH = 3;
 export const SIDEWALK_WIDTH = 1.5;

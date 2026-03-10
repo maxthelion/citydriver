@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { sample, hashPosition, victorianTerrace, generateRow } from '../../src/buildings/archetypes.js';
+import {
+  sample, hashPosition, victorianTerrace, parisianHaussmann,
+  germanTownhouse, suburbanDetached, lowRiseApartments, generateRow,
+} from '../../src/buildings/archetypes.js';
 import { SeededRandom } from '../../src/core/rng.js';
 import * as THREE from 'three';
 
@@ -48,6 +51,51 @@ describe('victorianTerrace', () => {
     expect(victorianTerrace.shared.sills).toBeDefined();
     expect(victorianTerrace.perHouse.plotWidth).toEqual([4.5, 6]);
     expect(victorianTerrace.perHouse.wallColor).toBeDefined();
+  });
+});
+
+describe('parisianHaussmann', () => {
+  it('has required archetype fields', () => {
+    expect(parisianHaussmann.typology).toBe('terraced');
+    expect(parisianHaussmann.partyWalls).toEqual(['left', 'right']);
+    expect(parisianHaussmann.shared.floors).toEqual([5, 6]);
+    expect(parisianHaussmann.shared.roofDirection).toBe('mansard');
+    expect(parisianHaussmann.shared.balcony).toBeDefined();
+    expect(parisianHaussmann.shared.dormers).toBeDefined();
+    expect(parisianHaussmann.shared.balcony.style).toBe('full');
+  });
+});
+
+describe('germanTownhouse', () => {
+  it('has required archetype fields', () => {
+    expect(germanTownhouse.typology).toBe('terraced');
+    expect(germanTownhouse.shared.floors).toEqual([3, 4]);
+    expect(germanTownhouse.shared.roofDirection).toBe('sides');
+    expect(germanTownhouse.shared.dormers).toBeDefined();
+    expect(germanTownhouse.shared.porch).toBeDefined();
+    expect(germanTownhouse.shared.porch.roofStyle).toBe('gable');
+  });
+});
+
+describe('suburbanDetached', () => {
+  it('has required archetype fields', () => {
+    expect(suburbanDetached.typology).toBe('detached');
+    expect(suburbanDetached.partyWalls).toEqual([]);
+    expect(suburbanDetached.shared.floors).toBe(2);
+    expect(suburbanDetached.shared.roofDirection).toBe('all');
+    expect(suburbanDetached.shared.porch).toBeDefined();
+    expect(suburbanDetached.shared.extension).toBeDefined();
+    expect(suburbanDetached.perHouse.sideGap).toEqual([1, 2]);
+  });
+});
+
+describe('lowRiseApartments', () => {
+  it('has required archetype fields', () => {
+    expect(lowRiseApartments.typology).toBe('terraced');
+    expect(lowRiseApartments.shared.floors).toEqual([4, 5]);
+    expect(lowRiseApartments.shared.roofPitch).toBe(0);
+    expect(lowRiseApartments.shared.balcony).toBeDefined();
+    expect(lowRiseApartments.shared.balcony.style).toBe('full');
   });
 });
 
