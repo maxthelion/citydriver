@@ -106,6 +106,10 @@ export class CityScreen {
     scene.add(buildings);
     this._meshLayers.buildings = buildings;
 
+    const debug = this._buildDebugMarkers();
+    scene.add(debug);
+    this._meshLayers.debug = debug;
+
     // Camera + fly controls
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.5, 10000);
     this._camera = camera;
@@ -461,6 +465,85 @@ export class CityScreen {
       geom.setIndex(batch.indices);
       geom.computeVertexNormals();
       group.add(new THREE.Mesh(geom, getRoadMaterial(hierarchy)));
+    }
+
+    return group;
+  }
+
+  /**
+   * Debug markers: nuclei as coloured circles, regional settlements as
+   * larger circles, bridge cells as red rectangles.
+   */
+  _buildDebugMarkers() {
+    const map = this._map;
+    const cs = map.cellSize;
+    const sd = this._sceneData;
+    const group = new THREE.Group();
+
+    const _elev = (gx, gz) => {
+      const gi = Math.max(0, Math.min(gz, map.height - 1)) * map.width +
+                 Math.max(0, Math.min(gx, map.width - 1));
+      return sd.cutElevation[gi] + 1.5;
+    };
+
+    // Nuclei as circles
+    const nucleusColors = { 1: 0x00aaff, 2: 0x44cc44, 3: 0xffaa00 };
+    for (const n of map.nuclei) {
+      const radius = n.tier === 1 ? 20 : 12;
+      const geo = new THREE.CircleGeometry(radius, 24);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        color: nucleusColors[n.tier] || 0xffffff,
+        transparent: true, opacity: 0.7, depthTest: false,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(n.gx * cs, _elev(n.gx, n.gz), n.gz * cs);
+      mesh.renderOrder = 10;
+      group.add(mesh);
+    }
+
+    // Regional settlements as larger magenta circles
+    for (const s of (map.regionalSettlements || [])) {
+      const geo = new THREE.CircleGeometry(30, 24);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xff00ff, transparent: true, opacity: 0.5, depthTest: false,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(s.cityGx * cs, _elev(s.cityGx, s.cityGz), s.cityGz * cs);
+      mesh.renderOrder = 10;
+      group.add(mesh);
+    }
+
+    // Bridge cells as red rectangles (batched)
+    const bridgeVerts = [], bridgeIdx = [];
+    for (let gz = 0; gz < map.height; gz++) {
+      for (let gx = 0; gx < map.width; gx++) {
+        if (map.bridgeGrid.get(gx, gz) <= 0) continue;
+        const x = gx * cs, z = gz * cs;
+        const y = _elev(gx, gz);
+        const half = cs / 2;
+        const bi = bridgeVerts.length / 3;
+        bridgeVerts.push(
+          x - half, y, z - half,
+          x + half, y, z - half,
+          x + half, y, z + half,
+          x - half, y, z + half,
+        );
+        bridgeIdx.push(bi, bi + 1, bi + 2, bi, bi + 2, bi + 3);
+      }
+    }
+    if (bridgeVerts.length > 0) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(bridgeVerts, 3));
+      geo.setIndex(bridgeIdx);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xff2222, transparent: true, opacity: 0.8,
+        depthTest: false, side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = 10;
+      group.add(mesh);
     }
 
     return group;

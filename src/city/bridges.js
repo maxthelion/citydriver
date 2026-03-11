@@ -91,6 +91,9 @@ export function placeBridges(map) {
     _spliceBridge(crossing.road, crossing.entryX, crossing.entryZ,
                   crossing.exitX, crossing.exitZ, banks.bankA, banks.bankB);
 
+    // Stamp bridgeGrid for water cells between banks
+    _stampBridgeGrid(map, banks.bankA, banks.bankB);
+
     acceptedMidpoints.push({ x: crossing.midX, z: crossing.midZ });
     placed++;
   }
@@ -371,4 +374,27 @@ function _spliceBridge(road, entryX, entryZ, exitX, exitZ, bankA, bankB) {
   const after = polyline.slice(exitIdx);
 
   road.polyline = [...before, nearBank, farBank, ...after];
+}
+
+/**
+ * Walk from bankA to bankB at cell steps, stamping bridgeGrid for water cells.
+ */
+function _stampBridgeGrid(map, bankA, bankB) {
+  const cs = map.cellSize;
+  const dx = bankB.x - bankA.x, dz = bankB.z - bankA.z;
+  const len = Math.sqrt(dx * dx + dz * dz);
+  if (len < 0.01) return;
+
+  const steps = Math.ceil(len / cs);
+  for (let s = 0; s <= steps; s++) {
+    const t = s / steps;
+    const wx = bankA.x + dx * t;
+    const wz = bankA.z + dz * t;
+    const gx = Math.round((wx - map.originX) / cs);
+    const gz = Math.round((wz - map.originZ) / cs);
+    if (gx < 0 || gx >= map.width || gz < 0 || gz >= map.height) continue;
+    if (map.waterMask.get(gx, gz) > 0) {
+      map.bridgeGrid.set(gx, gz, 1);
+    }
+  }
 }
