@@ -10,8 +10,8 @@
 import * as THREE from 'three';
 import { SeededRandom } from '../core/rng.js';
 import {
-  suburbanDetached, generateRow, hashPosition,
-  sample, ROAD_HALF_WIDTH, SIDEWALK_WIDTH, SETBACK,
+  suburbanDetached, victorianTerrace, generateRow, hashPosition,
+  sample, ROAD_HALF_WIDTH, SIDEWALK_WIDTH, SETBACK, HOUSE_Z,
 } from '../buildings/archetypes.js';
 import {
   createHouse, setPartyWalls, addFloor, addPitchedRoof,
@@ -197,4 +197,229 @@ function _nudgeColor(hex, amount, rng) {
   const g = Math.min(255, Math.max(0, ((hex >> 8) & 0xff) + rng.int(-shift, shift)));
   const b = Math.min(255, Math.max(0, (hex & 0xff) + rng.int(-shift, shift)));
   return (r << 16) | (g << 8) | b;
+}
+
+/**
+ * Place simple boxes along development parcels for debugging.
+ *
+ * Each parcel has a roadEdge (polyline along the road) and an offsetEdge.
+ * Places one box per parcel showing its extent.
+ *
+ * @param {import('../core/FeatureMap.js').FeatureMap} map
+ * @param {number} seed
+ * @returns {THREE.Group}
+ */
+const PLOT_WIDTH = 5;      // meters — width of each terraced house plot along road
+const HOUSE_DEPTH = 9;     // meters — depth of house (front to back)
+const HOUSE_HEIGHT = 8;    // meters — height of box placeholder
+const FRONT_GARDEN = 3;    // meters — front garden depth (between fence and house)
+const PLOT_TOTAL_DEPTH = 20; // meters — total plot depth (front fence to back fence)
+const FENCE_HEIGHT = 1.2;  // meters
+const FENCE_THICKNESS = 0.1;
+
+/**
+ * Build a single plot template (house + fence) as a merged BufferGeometry.
+ * This gets instanced for every plot.
+ */
+function _buildPlotTemplate() {
+  const geos = [];
+
+  // House box (centered at origin, bottom at y=0)
+  const houseGeo = new THREE.BoxGeometry(PLOT_WIDTH * 0.9, HOUSE_HEIGHT, HOUSE_DEPTH);
+  houseGeo.translate(0, HOUSE_HEIGHT / 2, FRONT_GARDEN + HOUSE_DEPTH / 2);
+  geos.push(houseGeo);
+
+  // Front fence
+  const frontFence = new THREE.BoxGeometry(PLOT_WIDTH, FENCE_HEIGHT, FENCE_THICKNESS);
+  frontFence.translate(0, FENCE_HEIGHT / 2, 0);
+  geos.push(frontFence);
+
+  // Back fence
+  const backFence = new THREE.BoxGeometry(PLOT_WIDTH, FENCE_HEIGHT, FENCE_THICKNESS);
+  backFence.translate(0, FENCE_HEIGHT / 2, PLOT_TOTAL_DEPTH);
+  geos.push(backFence);
+
+  // Left side fence
+  const leftFence = new THREE.BoxGeometry(FENCE_THICKNESS, FENCE_HEIGHT, PLOT_TOTAL_DEPTH);
+  leftFence.translate(-PLOT_WIDTH / 2, FENCE_HEIGHT / 2, PLOT_TOTAL_DEPTH / 2);
+  geos.push(leftFence);
+
+  // Right side fence
+  const rightFence = new THREE.BoxGeometry(FENCE_THICKNESS, FENCE_HEIGHT, PLOT_TOTAL_DEPTH);
+  rightFence.translate(PLOT_WIDTH / 2, FENCE_HEIGHT / 2, PLOT_TOTAL_DEPTH / 2);
+  geos.push(rightFence);
+
+  return mergeBufferGeometries(geos);
+}
+
+/**
+ * Merge an array of BufferGeometries into one.
+ */
+function mergeBufferGeometries(geometries) {
+  let totalVerts = 0;
+  let totalIdx = 0;
+  for (const g of geometries) {
+    totalVerts += g.attributes.position.count;
+    totalIdx += g.index ? g.index.count : 0;
+  }
+
+  const positions = new Float32Array(totalVerts * 3);
+  const normals = new Float32Array(totalVerts * 3);
+  const indices = new Uint32Array(totalIdx);
+
+  let vertOffset = 0;
+  let idxOffset = 0;
+
+  for (const g of geometries) {
+    const pos = g.attributes.position.array;
+    const norm = g.attributes.normal.array;
+    positions.set(pos, vertOffset * 3);
+    normals.set(norm, vertOffset * 3);
+
+    if (g.index) {
+      for (let i = 0; i < g.index.count; i++) {
+        indices[idxOffset + i] = g.index.array[i] + vertOffset;
+      }
+      idxOffset += g.index.count;
+    }
+    vertOffset += g.attributes.position.count;
+    g.dispose();
+  }
+
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  merged.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  merged.setIndex(new THREE.BufferAttribute(indices, 1));
+  return merged;
+}
+
+/**
+ * Determine plot width based on distance from nucleus.
+ */
+function plotWidthForDensity(distFromNucleus) {
+  if (distFromNucleus < 100) return 5;   // terraced
+  if (distFromNucleus < 300) return 8;   // semi-detached
+  return 12;                              // detached
+}
+
+/**
+ * Place instanced house+fence boxes along ribbon streets from development zones.
+ *
+ * Reads zone._streets (parallel street polylines) from map.developmentZones.
+ * Places houses on both sides of each street.
+ *
+ * @param {import('../core/FeatureMap.js').FeatureMap} map
+ * @param {number} _seed
+ * @returns {THREE.Group}
+ */
+export function placeTerracedRows(map, _seed) {
+  const group = new THREE.Group();
+  const ox = map.originX, oz = map.originZ;
+  const cs = map.cellSize;
+  const zones = map.developmentZones;
+
+  if (!zones || zones.length === 0) return group;
+
+  const templateGeo = _buildPlotTemplate();
+
+  // First pass: count total plots across all zones
+  let totalPlots = 0;
+  for (const zone of zones) {
+    if (!zone._streets) continue;
+    const plotWidth = plotWidthForDensity(zone.distFromNucleus);
+
+    for (const street of zone._streets) {
+      if (street.length < 2) continue;
+      let streetLen = 0;
+      for (let i = 1; i < street.length; i++) {
+        const dx = street[i].x - street[i - 1].x;
+        const dz = street[i].z - street[i - 1].z;
+        streetLen += Math.sqrt(dx * dx + dz * dz);
+      }
+      if (streetLen < plotWidth * 2) continue;
+      totalPlots += Math.floor(streetLen / plotWidth) * 2; // both sides
+    }
+  }
+
+  if (totalPlots === 0) return group;
+
+  const mat = new THREE.MeshLambertMaterial({ color: 0xd4c4a8 });
+  const mesh = new THREE.InstancedMesh(templateGeo, mat, totalPlots);
+  const dummy = new THREE.Object3D();
+  let instanceIdx = 0;
+
+  for (const zone of zones) {
+    if (!zone._streets) continue;
+    const plotWidth = plotWidthForDensity(zone.distFromNucleus);
+
+    for (const street of zone._streets) {
+      if (street.length < 2) continue;
+
+      let streetLen = 0;
+      for (let i = 1; i < street.length; i++) {
+        const dx = street[i].x - street[i - 1].x;
+        const dz = street[i].z - street[i - 1].z;
+        streetLen += Math.sqrt(dx * dx + dz * dz);
+      }
+      if (streetLen < plotWidth * 2) continue;
+
+      const houseCount = Math.floor(streetLen / plotWidth);
+      let segIdx = 0, segStart = 0;
+
+      for (let h = 0; h < houseCount; h++) {
+        const targetDist = (h + 0.5) * plotWidth;
+
+        while (segIdx < street.length - 2) {
+          const dx = street[segIdx + 1].x - street[segIdx].x;
+          const dz = street[segIdx + 1].z - street[segIdx].z;
+          const sLen = Math.sqrt(dx * dx + dz * dz);
+          if (segStart + sLen >= targetDist) break;
+          segStart += sLen;
+          segIdx++;
+        }
+        if (segIdx >= street.length - 1) break;
+
+        const ax = street[segIdx].x, az = street[segIdx].z;
+        const bx = street[segIdx + 1].x, bz = street[segIdx + 1].z;
+        const sdx = bx - ax, sdz = bz - az;
+        const segLen = Math.sqrt(sdx * sdx + sdz * sdz);
+        if (segLen < 0.01) continue;
+
+        const t = (targetDist - segStart) / segLen;
+        const px = ax + sdx * t;
+        const pz = az + sdz * t;
+
+        // Place on both sides of the street
+        for (const side of [-1, 1]) {
+          const perpX = (-sdz / segLen) * side;
+          const perpZ = (sdx / segLen) * side;
+          const angle = Math.atan2(perpX, perpZ);
+
+          const roadHalfWidth = 3;
+          const sidewalk = 1.5;
+          const frontSetback = roadHalfWidth + sidewalk;
+          const frontX = px + perpX * frontSetback;
+          const frontZ = pz + perpZ * frontSetback;
+
+          const lx = frontX - ox;
+          const lz = frontZ - oz;
+          const gx = lx / cs;
+          const gz = lz / cs;
+          if (gx < 1 || gz < 1 || gx >= map.width - 1 || gz >= map.height - 1) continue;
+          const terrainY = map.elevation.sample(gx, gz);
+
+          dummy.position.set(lx, terrainY, lz);
+          dummy.rotation.set(0, angle, 0);
+          dummy.updateMatrix();
+          mesh.setMatrixAt(instanceIdx, dummy.matrix);
+          instanceIdx++;
+        }
+      }
+    }
+  }
+
+  mesh.count = instanceIdx;
+  mesh.instanceMatrix.needsUpdate = true;
+  group.add(mesh);
+  return group;
 }

@@ -6,14 +6,15 @@
 
 import * as THREE from 'three';
 import { setupCity } from '../city/setup.js';
-import { buildSkeletonRoads } from '../city/skeleton.js';
+import { LandFirstDevelopment } from '../city/strategies/landFirstDevelopment.js';
 import { prepareCityScene } from '../rendering/prepareCityScene.js';
 import { getRoadMaterial, getRiverMaterial } from '../rendering/materials.js';
 import { FlyCamera } from './FlyCamera.js';
 import { renderMap, drawRivers, drawRoads, drawSettlements } from '../rendering/mapRenderer.js';
 import { CITY_RADIUS } from '../city/constants.js';
-import { placeBuildings } from '../city/placeBuildings.js';
+import { placeBuildings, placeTerracedRows } from '../city/placeBuildings.js';
 import { chaikinSmooth } from '../core/math.js';
+import { LAYERS } from '../rendering/debugLayers.js';
 
 // Land cover colors (same as regionPreview3D.js)
 const COVER_COLORS = {
@@ -39,9 +40,10 @@ export class CityScreen {
     this._seed = seed || 42;
     this._hud = [];
 
-    // Run city pipeline
+    // Run city pipeline with land-first development strategy
     const map = setupCity(layers, settlement, rng);
-    buildSkeletonRoads(map);
+    const strategy = new LandFirstDevelopment(map);
+    while (strategy.tick()) { /* run all ticks */ }
 
     // Smooth road polylines in-place (2 Chaikin iterations).
     // Done once here so all consumers (rendering, building placement) see the same curves.
@@ -102,7 +104,7 @@ export class CityScreen {
     scene.add(trees);
     this._meshLayers.trees = trees;
 
-    const buildings = placeBuildings(this._map, this._seed);
+    const buildings = placeTerracedRows(this._map, this._seed);
     scene.add(buildings);
     this._meshLayers.buildings = buildings;
 
@@ -208,6 +210,26 @@ export class CityScreen {
     document.body.appendChild(palette);
     this._hud.push(palette);
 
+    // Debug layer overlay dropdown
+    const overlayLabel = document.createElement('label');
+    overlayLabel.style.cssText = 'display:block;margin-top:8px;border-top:1px solid #555;padding-top:6px';
+    overlayLabel.appendChild(document.createTextNode('Overlay: '));
+    const select = document.createElement('select');
+    select.style.cssText = 'background:#333;color:#eee;border:1px solid #555;font-family:monospace;font-size:11px;margin-top:2px;width:100%';
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = 'None';
+    select.appendChild(noneOpt);
+    for (const layer of LAYERS) {
+      const opt = document.createElement('option');
+      opt.value = layer.name;
+      opt.textContent = layer.name;
+      select.appendChild(opt);
+    }
+    select.addEventListener('change', () => this._setDebugOverlay(select.value));
+    overlayLabel.appendChild(select);
+    palette.appendChild(overlayLabel);
+
     // Instructions
     const info = document.createElement('div');
     info.style.cssText = 'position:fixed;bottom:10px;left:10px;color:white;font-family:monospace;font-size:13px;pointer-events:none;text-shadow:1px 1px 2px black;z-index:100';
@@ -252,6 +274,47 @@ export class CityScreen {
 
     document.body.appendChild(minimapEl);
     this._hud.push(minimapEl);
+  }
+
+  /**
+   * Apply a debug layer as a texture overlay on the terrain, or remove it.
+   */
+  _setDebugOverlay(layerName) {
+    const terrain = this._meshLayers.terrain;
+    if (!terrain) return;
+
+    if (!layerName) {
+      // Restore vertex colors
+      if (this._debugTexture) {
+        this._debugTexture.dispose();
+        this._debugTexture = null;
+      }
+      terrain.material.map = null;
+      terrain.material.vertexColors = true;
+      terrain.material.needsUpdate = true;
+      return;
+    }
+
+    const layer = LAYERS.find(l => l.name === layerName);
+    if (!layer) return;
+
+    const map = this._map;
+    const canvas = document.createElement('canvas');
+    canvas.width = map.width;
+    canvas.height = map.height;
+    const ctx = canvas.getContext('2d');
+    layer.render(ctx, map);
+
+    if (this._debugTexture) this._debugTexture.dispose();
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
+    // default flipY=true is correct: canvas gz=0 at top → UV v=1 → scene z=0
+    this._debugTexture = tex;
+
+    terrain.material.map = tex;
+    terrain.material.vertexColors = false;
+    terrain.material.needsUpdate = true;
   }
 
   /**
@@ -545,6 +608,10 @@ export class CityScreen {
 
   dispose() {
     this._running = false;
+    if (this._debugTexture) {
+      this._debugTexture.dispose();
+      this._debugTexture = null;
+    }
     if (this._flyCamera) {
       this._flyCamera.dispose();
       this._flyCamera = null;
