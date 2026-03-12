@@ -585,8 +585,8 @@ export class CityScreen {
         // Skip water
         if (cov.water[ci] > 0.3) continue;
 
-        // Tree count scales with forest coverage: 0-4 trees
-        const maxTrees = Math.round(forestVal * 4);
+        // Tree count scales with forest coverage: 0-2 trees
+        const maxTrees = Math.round(forestVal * 2);
         const count = Math.floor(hash(gx, gz, 0) * (maxTrees + 1));
 
         for (let t = 0; t < count; t++) {
