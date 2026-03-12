@@ -17,3 +17,7 @@ export const RIVER_STAMP_FRACTION = 0.4;
 // Step size for walking along polylines (roads, rivers) when stamping.
 // Half-cell ensures every cell the path crosses gets a stamp.
 export const STAMP_STEP_FRACTION = 0.5;
+
+// Adaptive slope threshold for zone extraction
+export const ZONE_SLOPE_BASE = 0.15;       // minimum slope threshold
+export const ZONE_SLOPE_LV_BONUS = 0.15;   // additional tolerance from land value

@@ -1,11 +1,15 @@
 import { Grid2D } from '../core/Grid2D.js';
+import { ZONE_SLOPE_BASE, ZONE_SLOPE_LV_BONUS } from './constants.js';
 
 // Zone extraction thresholds
 const ZONE_LV_THRESHOLD = 0.3;
 const ZONE_BUILD_THRESHOLD = 0.2;
-const ZONE_SLOPE_MAX = 0.2;
 const ZONE_MORPH_RADIUS_M = 10;     // 2 cells at 5m
 const ZONE_MIN_SIZE = 30;            // cells (~750m² at 5m)
+
+function effectiveSlopeMax(landValue) {
+  return ZONE_SLOPE_BASE + landValue * ZONE_SLOPE_LV_BONUS;
+}
 
 /**
  * Morphological close (dilate then erode) on a binary grid.
@@ -250,7 +254,7 @@ export function extractDevelopmentZones(map) {
         if (map.waterMask.get(gx, gz) > 0) continue;
         if (map.landValue.get(gx, gz) < ZONE_LV_THRESHOLD) continue;
         if (map.buildability.get(gx, gz) < ZONE_BUILD_THRESHOLD) continue;
-        if (map.slope && map.slope.get(gx, gz) >= ZONE_SLOPE_MAX) continue;
+        if (map.slope && map.slope.get(gx, gz) >= effectiveSlopeMax(map.landValue.get(gx, gz))) continue;
         mask.set(gx, gz, 1);
       }
     }
@@ -268,7 +272,7 @@ export function extractDevelopmentZones(map) {
         // Road cells split zones (roads are barriers)
         if (map.roadGrid && map.roadGrid.get(gx, gz) > 0) { closed.set(gx, gz, 0); continue; }
         // Cells added by dilation that fail slope check
-        if (mask.get(gx, gz) === 0 && map.slope && map.slope.get(gx, gz) >= ZONE_SLOPE_MAX) {
+        if (mask.get(gx, gz) === 0 && map.slope && map.slope.get(gx, gz) >= effectiveSlopeMax(map.landValue.get(gx, gz))) {
           closed.set(gx, gz, 0);
         }
       }
@@ -296,6 +300,7 @@ export function extractDevelopmentZones(map) {
       }
 
       const avgSlope = map.slope ? slopeSum / zone.cells.length : 0;
+      const avgLandValue = lvSum / zone.cells.length;
       const gradLen = Math.sqrt(gradX * gradX + gradZ * gradZ);
       const slopeDir = gradLen > 0.01
         ? { x: gradX / gradLen, z: gradZ / gradLen }
@@ -307,14 +312,18 @@ export function extractDevelopmentZones(map) {
 
       const boundary = extractZoneBoundary(zone.cells, cellSize, map.originX, map.originZ);
 
+      const gradingCost = avgSlope > 0.15 ? (avgSlope - 0.15) * 2 : 0;
+      const priority = (lvSum / Math.max(1, distFromNucleus)) * (1 - gradingCost);
+
       allZones.push({
         ...zone,
         nucleusIdx: ni,
         avgSlope,
+        avgLandValue,
         slopeDir,
         totalLandValue: lvSum,
         distFromNucleus,
-        priority: lvSum / Math.max(1, distFromNucleus),
+        priority,
         boundary,
       });
     }

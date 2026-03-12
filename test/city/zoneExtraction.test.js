@@ -133,6 +133,82 @@ describe('extractDevelopmentZones', () => {
   });
 });
 
+// Helper: construct a FeatureMap with manually set grids for isolated testing.
+// Bypasses setTerrain()/computeLandValue() to control exact cell values.
+function makeZoneTestMap(w, h) {
+  const map = new FeatureMap(w, h, 5);
+  map.slope = new Grid2D(w, h, { cellSize: 5, fill: 0 });
+  map.buildability = new Grid2D(w, h, { cellSize: 5, fill: 0 });
+  return map;
+}
+
+describe('adaptive slope threshold', () => {
+  it('includes high-slope cells when land value is high', () => {
+    const map = makeZoneTestMap(20, 20);
+    for (let gz = 0; gz < 20; gz++) {
+      for (let gx = 0; gx < 20; gx++) {
+        map.slope.set(gx, gz, 0.25);
+        map.landValue.set(gx, gz, 0.8);
+        map.buildability.set(gx, gz, 0.5);
+      }
+    }
+    map.nuclei = [{ gx: 10, gz: 10, tier: 1, priority: 1 }];
+    const zones = extractDevelopmentZones(map);
+    expect(zones.length).toBeGreaterThan(0);
+  });
+
+  it('excludes high-slope cells when land value is low', () => {
+    const map = makeZoneTestMap(20, 20);
+    for (let gz = 0; gz < 20; gz++) {
+      for (let gx = 0; gx < 20; gx++) {
+        map.slope.set(gx, gz, 0.25);
+        map.landValue.set(gx, gz, 0.31);
+        map.buildability.set(gx, gz, 0.5);
+      }
+    }
+    map.nuclei = [{ gx: 10, gz: 10, tier: 1, priority: 1 }];
+    const zones = extractDevelopmentZones(map);
+    expect(zones.length).toBe(0);
+  });
+
+  it('stores avgLandValue on zone metadata', () => {
+    const map = makeZoneTestMap(20, 20);
+    for (let gz = 0; gz < 20; gz++) {
+      for (let gx = 0; gx < 20; gx++) {
+        map.slope.set(gx, gz, 0.05);
+        map.landValue.set(gx, gz, 0.7);
+        map.buildability.set(gx, gz, 0.5);
+      }
+    }
+    map.nuclei = [{ gx: 10, gz: 10, tier: 1, priority: 1 }];
+    const zones = extractDevelopmentZones(map);
+    expect(zones.length).toBeGreaterThan(0);
+    expect(zones[0].avgLandValue).toBeCloseTo(0.7, 1);
+  });
+
+  it('steeper zones get lower priority than flat zones of equal land value', () => {
+    const mapFlat = makeZoneTestMap(20, 20);
+    const mapSteep = makeZoneTestMap(20, 20);
+    for (let gz = 0; gz < 20; gz++) {
+      for (let gx = 0; gx < 20; gx++) {
+        mapFlat.slope.set(gx, gz, 0.05);
+        mapFlat.landValue.set(gx, gz, 0.7);
+        mapFlat.buildability.set(gx, gz, 0.5);
+        mapSteep.slope.set(gx, gz, 0.22);
+        mapSteep.landValue.set(gx, gz, 0.7);
+        mapSteep.buildability.set(gx, gz, 0.5);
+      }
+    }
+    mapFlat.nuclei = [{ gx: 10, gz: 10, tier: 1, priority: 1 }];
+    mapSteep.nuclei = [{ gx: 10, gz: 10, tier: 1, priority: 1 }];
+    const flatZones = extractDevelopmentZones(mapFlat);
+    const steepZones = extractDevelopmentZones(mapSteep);
+    expect(flatZones.length).toBeGreaterThan(0);
+    expect(steepZones.length).toBeGreaterThan(0);
+    expect(steepZones[0].priority).toBeLessThan(flatZones[0].priority);
+  });
+});
+
 // Helper for point-in-polygon (ray casting)
 function pointInPolygon(x, z, polygon) {
   let inside = false;
