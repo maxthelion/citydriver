@@ -216,7 +216,7 @@ const LAYER_DEFS = [
   { name: 'water',       stamp: stampWater,       blur: 6, noise: 0.15, seed: 1 },
   { name: 'road',        stamp: stampRoad,        blur: 3, noise: 0.10, seed: 2 },
   { name: 'development', stamp: stampDevelopment, blur: 8, noise: 0.15, seed: 3 },
-  { name: 'forest',      stamp: stampForest,      blur: 4, noise: 0.20, seed: 4 },
+  { name: 'forest',      stamp: stampForest,      blur: 12, noise: 0.25, seed: 4 },
 ];
 
 /**
@@ -237,8 +237,8 @@ export function computeCoverageLayers(map, seed = 42) {
   }
 
   const lc = stampLandCover(map);
-  lc.data = separableBoxBlur(lc.data, w, h, 4);
-  lc.data = applyHashNoise(lc.data, w, h, 0.15, seed + 5);
+  lc.data = separableBoxBlur(lc.data, w, h, 12);
+  lc.data = applyHashNoise(lc.data, w, h, 0.25, seed + 5);
   ordered.push({ data: lc.data });
   result.landCover = lc.data;
   result.dominantCover = lc.dominantCover;
