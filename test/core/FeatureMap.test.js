@@ -149,6 +149,16 @@ describe('FeatureMap', () => {
   });
 });
 
+describe('resolution independence', () => {
+  it('buildability is similar at different cell sizes', () => {
+    const map10 = makeMap(30, 30, 10); // 300m × 300m
+    const map5 = makeMap(60, 60, 5);   // 300m × 300m
+    const b10 = map10.buildability.get(5, 15);
+    const b5 = map5.buildability.get(10, 30);
+    expect(Math.abs(b10 - b5)).toBeLessThan(0.15);
+  });
+});
+
 describe('FeatureMap.clone', () => {
   it('creates an independent deep copy with all grids and features', () => {
     const map = new FeatureMap(20, 20, 10, { originX: 50, originZ: 50 });
