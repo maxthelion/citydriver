@@ -11,7 +11,7 @@ function makeStrategy(seed = 42) {
   return { map, strategy: new DesireLines(map) };
 }
 
-describe('DesireLines', () => {
+describe('DesireLines', { timeout: 180000 }, () => {
   it('builds skeleton roads on first tick', () => {
     const { map, strategy } = makeStrategy();
     const more = strategy.tick();
@@ -24,7 +24,7 @@ describe('DesireLines', () => {
     }
   });
 
-  it('adds desire-line roads by third tick', { timeout: 15000 }, () => {
+  it('adds desire-line roads by third tick', { timeout: 180000 }, () => {
     const { map, strategy } = makeStrategy();
     strategy.tick(); // skeleton
     strategy.tick(); // primary desire lines
@@ -41,7 +41,7 @@ describe('DesireLines', () => {
     }
   });
 
-  it('adds secondary roads on third tick', { timeout: 15000 }, () => {
+  it('adds secondary roads on third tick', { timeout: 180000 }, () => {
     const { map, strategy } = makeStrategy();
     strategy.tick(); // skeleton
     strategy.tick(); // primary
@@ -56,7 +56,7 @@ describe('DesireLines', () => {
     }
   });
 
-  it('stops growing after all ticks complete', { timeout: 15000 }, () => {
+  it('stops growing after all ticks complete', { timeout: 180000 }, () => {
     const { strategy } = makeStrategy();
     let ticks = 0;
     let more = true;

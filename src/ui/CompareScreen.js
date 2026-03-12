@@ -1,23 +1,20 @@
 import { setupCity } from '../city/setup.js';
 import { LAYERS } from '../rendering/debugLayers.js';
 import { SeededRandom } from '../core/rng.js';
-import { FaceSubdivision } from '../city/strategies/faceSubdivision.js';
-import { OffsetInfill } from '../city/strategies/offsetInfill.js';
-import { FrontagePressure } from '../city/strategies/frontagePressure.js';
-import { TriangleMergeSubdiv } from '../city/strategies/triangleMergeSubdiv.js';
+import { LandFirstDevelopment } from '../city/strategies/landFirstDevelopment.js';
 
 const STRATEGY_CLASSES = [
-  FaceSubdivision,
-  OffsetInfill,
-  FrontagePressure,
-  TriangleMergeSubdiv,
+  LandFirstDevelopment,
+  LandFirstDevelopment,
+  LandFirstDevelopment,
+  LandFirstDevelopment,
 ];
 
 const STRATEGY_NAMES = [
-  'Face Subdiv',
-  'Offset Infill',
-  'Frontage Pressure',
-  'Tri Merge',
+  'Land First 1',
+  'Land First 2',
+  'Land First 3',
+  'Land First 4',
 ];
 const DETAIL_SCALE = 4;
 const GRID_DIVISIONS = 6;

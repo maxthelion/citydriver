@@ -6,14 +6,16 @@
 
 import * as THREE from 'three';
 import { setupCity } from '../city/setup.js';
-import { buildSkeletonRoads } from '../city/skeleton.js';
+import { LandFirstDevelopment } from '../city/strategies/landFirstDevelopment.js';
 import { prepareCityScene } from '../rendering/prepareCityScene.js';
 import { getRoadMaterial, getRiverMaterial } from '../rendering/materials.js';
 import { FlyCamera } from './FlyCamera.js';
 import { renderMap, drawRivers, drawRoads, drawSettlements } from '../rendering/mapRenderer.js';
 import { CITY_RADIUS } from '../city/constants.js';
-import { placeBuildings } from '../city/placeBuildings.js';
+import { placeBuildings, placeTerracedRows } from '../city/placeBuildings.js';
 import { chaikinSmooth } from '../core/math.js';
+import { LAYERS } from '../rendering/debugLayers.js';
+import { computeCoverageLayers } from '../city/coverageLayers.js';
 
 // Land cover colors (same as regionPreview3D.js)
 const COVER_COLORS = {
@@ -39,9 +41,10 @@ export class CityScreen {
     this._seed = seed || 42;
     this._hud = [];
 
-    // Run city pipeline
+    // Run city pipeline with land-first development strategy
     const map = setupCity(layers, settlement, rng);
-    buildSkeletonRoads(map);
+    const strategy = new LandFirstDevelopment(map);
+    while (strategy.tick()) { /* run all ticks */ }
 
     // Smooth road polylines in-place (2 Chaikin iterations).
     // Done once here so all consumers (rendering, building placement) see the same curves.
@@ -79,6 +82,10 @@ export class CityScreen {
     // Pre-process city data for 3D (coord conversion, camber, river flow, terrain cuts)
     this._sceneData = prepareCityScene(this._map);
 
+    // Unified coverage layers — continuous float grids for organic rendering boundaries
+    this._coverage = computeCoverageLayers(this._map, this._seed);
+    this._map._coverage = this._coverage;
+
     // Meshes (tracked for layer toggle)
     this._meshLayers = {};
 
@@ -102,7 +109,7 @@ export class CityScreen {
     scene.add(trees);
     this._meshLayers.trees = trees;
 
-    const buildings = placeBuildings(this._map, this._seed);
+    const buildings = placeTerracedRows(this._map, this._seed);
     scene.add(buildings);
     this._meshLayers.buildings = buildings;
 
@@ -212,6 +219,26 @@ export class CityScreen {
     document.body.appendChild(palette);
     this._hud.push(palette);
 
+    // Debug layer overlay dropdown
+    const overlayLabel = document.createElement('label');
+    overlayLabel.style.cssText = 'display:block;margin-top:8px;border-top:1px solid #555;padding-top:6px';
+    overlayLabel.appendChild(document.createTextNode('Overlay: '));
+    const select = document.createElement('select');
+    select.style.cssText = 'background:#333;color:#eee;border:1px solid #555;font-family:monospace;font-size:11px;margin-top:2px;width:100%';
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = 'None';
+    select.appendChild(noneOpt);
+    for (const layer of LAYERS) {
+      const opt = document.createElement('option');
+      opt.value = layer.name;
+      opt.textContent = layer.name;
+      select.appendChild(opt);
+    }
+    select.addEventListener('change', () => this._setDebugOverlay(select.value));
+    overlayLabel.appendChild(select);
+    palette.appendChild(overlayLabel);
+
     // Instructions
     const info = document.createElement('div');
     info.style.cssText = 'position:fixed;bottom:10px;left:10px;color:white;font-family:monospace;font-size:13px;pointer-events:none;text-shadow:1px 1px 2px black;z-index:100';
@@ -259,7 +286,48 @@ export class CityScreen {
   }
 
   /**
-   * Terrain mesh colored by regional land cover + city road/water overlays.
+   * Apply a debug layer as a texture overlay on the terrain, or remove it.
+   */
+  _setDebugOverlay(layerName) {
+    const terrain = this._meshLayers.terrain;
+    if (!terrain) return;
+
+    if (!layerName) {
+      // Restore vertex colors
+      if (this._debugTexture) {
+        this._debugTexture.dispose();
+        this._debugTexture = null;
+      }
+      terrain.material.map = null;
+      terrain.material.vertexColors = true;
+      terrain.material.needsUpdate = true;
+      return;
+    }
+
+    const layer = LAYERS.find(l => l.name === layerName);
+    if (!layer) return;
+
+    const map = this._map;
+    const canvas = document.createElement('canvas');
+    canvas.width = map.width;
+    canvas.height = map.height;
+    const ctx = canvas.getContext('2d');
+    layer.render(ctx, map);
+
+    if (this._debugTexture) this._debugTexture.dispose();
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
+    // default flipY=true is correct: canvas gz=0 at top → UV v=1 → scene z=0
+    this._debugTexture = tex;
+
+    terrain.material.map = tex;
+    terrain.material.vertexColors = false;
+    terrain.material.needsUpdate = true;
+  }
+
+  /**
+   * Terrain mesh colored by unified coverage layers (continuous float grids).
    * Uses pre-computed cut elevation from prepareCityScene (roads/rivers cut in).
    */
   _buildTerrain() {
@@ -274,59 +342,80 @@ export class CityScreen {
     const positions = geometry.attributes.position.array;
     const colors = new Float32Array(positions.length);
 
-    const regionalLandCover = map.regionalLayers.getGrid('landCover');
-    const rcs = map.regionalLayers.getData('params').cellSize;
-
     for (let gz = 0; gz < h; gz++) {
       for (let gx = 0; gx < w; gx++) {
         const idx = gz * w + gx;
         positions[idx * 3 + 1] = sd.cutElevation[idx];
 
-        let rgb;
-        if (map.roadGrid.get(gx, gz) > 0) {
-          rgb = PAVED_COLOR;
-        } else {
-          // Bilinear blend of regional land cover colors for smooth boundaries
-          const wx = map.originX + gx * cs;
-          const wz = map.originZ + gz * cs;
-          const fgx = wx / rcs, fgz = wz / rcs;
-          const rx0 = Math.max(0, Math.min(Math.floor(fgx), regionalLandCover.width - 1));
-          const rz0 = Math.max(0, Math.min(Math.floor(fgz), regionalLandCover.height - 1));
-          const rx1 = Math.min(rx0 + 1, regionalLandCover.width - 1);
-          const rz1 = Math.min(rz0 + 1, regionalLandCover.height - 1);
-          const fx = fgx - rx0, fz = fgz - rz0;
+        // Coverage-layer-driven color blending
+        const ci = gz * w + gx;
+        const cov = this._coverage;
 
-          const covers = [
-            regionalLandCover.get(rx0, rz0),
-            regionalLandCover.get(rx1, rz0),
-            regionalLandCover.get(rx0, rz1),
-            regionalLandCover.get(rx1, rz1),
-          ];
-          const weights = [(1 - fx) * (1 - fz), fx * (1 - fz), (1 - fx) * fz, fx * fz];
+        // Start with base grass color
+        let r = DEFAULT_COLOR[0], g = DEFAULT_COLOR[1], b = DEFAULT_COLOR[2];
 
-          rgb = [0, 0, 0];
-          let isForest = false;
-          for (let ci = 0; ci < 4; ci++) {
-            let c = covers[ci];
-            if (c === 5 || c === 0) c = -1;
-            if (c === 2 || c === 6) isForest = true;
-            const cc = COVER_COLORS[c] || DEFAULT_COLOR;
-            rgb[0] += cc[0] * weights[ci];
-            rgb[1] += cc[1] * weights[ci];
-            rgb[2] += cc[2] * weights[ci];
-          }
+        // Blend land cover (lowest priority — sets base terrain color)
+        if (cov.landCover[ci] > 0.01) {
+          const cover = cov.dominantCover[ci];
+          const cc = COVER_COLORS[cover] || DEFAULT_COLOR;
+          const t = cov.landCover[ci];
+          r = r + (cc[0] - r) * t;
+          g = g + (cc[1] - g) * t;
+          b = b + (cc[2] - b) * t;
+        }
 
-          // Procedural noise on forest/woodland for dappled canopy look
-          if (isForest) {
-            const hash = ((gx * 2654435761 + gz * 2246822519) >>> 0) & 0xffff;
-            const noise = (hash / 0xffff) * 0.15 - 0.075;
-            rgb = [
-              Math.max(0, Math.min(1, rgb[0] + noise * 0.5)),
-              Math.max(0, Math.min(1, rgb[1] + noise)),
-              Math.max(0, Math.min(1, rgb[2] + noise * 0.3)),
-            ];
+        // Blend forest
+        if (cov.forest[ci] > 0.01) {
+          const fc = COVER_COLORS[2]; // forest green
+          const t = cov.forest[ci];
+          r = r + (fc[0] - r) * t;
+          g = g + (fc[1] - g) * t;
+          b = b + (fc[2] - b) * t;
+
+          // Dappled canopy noise on forested areas
+          const hash = ((gx * 2654435761 + gz * 2246822519) >>> 0) & 0xffff;
+          const noise = (hash / 0xffff) * 0.15 - 0.075;
+          r = Math.max(0, Math.min(1, r + noise * 0.5 * t));
+          g = Math.max(0, Math.min(1, g + noise * t));
+          b = Math.max(0, Math.min(1, b + noise * 0.3 * t));
+        }
+
+        // Blend development (urban ground tone)
+        if (cov.development[ci] > 0.01) {
+          const dc = COVER_COLORS[5]; // settlement color
+          const t = cov.development[ci];
+          r = r + (dc[0] - r) * t;
+          g = g + (dc[1] - g) * t;
+          b = b + (dc[2] - b) * t;
+        }
+
+        // Blend road (pavement apron — ground coloring only, road ribbon mesh is separate)
+        if (cov.road[ci] > 0.01) {
+          const t = cov.road[ci];
+          r = r + (PAVED_COLOR[0] - r) * t;
+          g = g + (PAVED_COLOR[1] - g) * t;
+          b = b + (PAVED_COLOR[2] - b) * t;
+        }
+
+        // Blend water → sand/beach in transition zone
+        if (cov.water[ci] > 0.01) {
+          const SAND_COLOR = [0.76, 0.70, 0.50];
+          const WATER_COLOR = COVER_COLORS[0];
+          // 0.0–0.4: blend toward sand; 0.4–1.0: blend toward water
+          if (cov.water[ci] < 0.4) {
+            const t = cov.water[ci] / 0.4;
+            r = r + (SAND_COLOR[0] - r) * t;
+            g = g + (SAND_COLOR[1] - g) * t;
+            b = b + (SAND_COLOR[2] - b) * t;
+          } else {
+            const t = (cov.water[ci] - 0.4) / 0.6;
+            r = SAND_COLOR[0] + (WATER_COLOR[0] - SAND_COLOR[0]) * t;
+            g = SAND_COLOR[1] + (WATER_COLOR[1] - SAND_COLOR[1]) * t;
+            b = SAND_COLOR[2] + (WATER_COLOR[2] - SAND_COLOR[2]) * t;
           }
         }
+
+        const rgb = [r, g, b];
 
         colors[idx * 3] = rgb[0];
         colors[idx * 3 + 1] = rgb[1];
@@ -550,14 +639,14 @@ export class CityScreen {
   }
 
   /**
-   * Forest trees as instanced cones. For each forest/woodland cell,
-   * place a random number of trees at random positions within the cell.
+   * Forest trees as instanced cones. Tree density and size scale with
+   * the continuous forest coverage layer for organic woodland edges.
    */
   _buildTrees() {
     const map = this._map;
     const cs = map.cellSize;
-    const regionalLandCover = map.regionalLayers.getGrid('landCover');
-    const rcs = map.regionalLayers.getData('params').cellSize;
+    const cov = this._coverage;
+    const w = map.width;
 
     // Deterministic hash with proper bit mixing → 0-1
     function hash(a, b, seed) {
@@ -571,19 +660,16 @@ export class CityScreen {
     const treeData = [];
     for (let gz = 1; gz < map.height - 1; gz++) {
       for (let gx = 1; gx < map.width - 1; gx++) {
-        if (map.waterMask.get(gx, gz) > 0) continue;
-        if (map.roadGrid.get(gx, gz) > 0) continue;
+        const ci = gz * w + gx;
+        const forestVal = cov.forest[ci];
 
-        const wx = map.originX + gx * cs;
-        const wz = map.originZ + gz * cs;
-        const cover = regionalLandCover.get(
-          Math.min(Math.round(wx / rcs), regionalLandCover.width - 1),
-          Math.min(Math.round(wz / rcs), regionalLandCover.height - 1),
-        );
-        if (cover !== 2 && cover !== 6) continue;
+        // Skip cells with negligible forest coverage
+        if (forestVal < 0.1) continue;
+        // Skip water
+        if (cov.water[ci] > 0.3) continue;
 
-        // Random tree count: forest 0–4, woodland 0–2
-        const maxTrees = cover === 2 ? 4 : 2;
+        // Tree count scales with forest coverage: 0-2 trees
+        const maxTrees = Math.round(forestVal * 2);
         const count = Math.floor(hash(gx, gz, 0) * (maxTrees + 1));
 
         for (let t = 0; t < count; t++) {
@@ -595,10 +681,18 @@ export class CityScreen {
           const z = (gz + rz) * cs;
           const y = map.elevation.sample(x / cs, z / cs);
 
-          const h = cover === 2 ? 7 + rv * 8 : 4 + rv * 5;
-          const rad = cover === 2 ? 2.5 + rx * 2.5 : 1.5 + rx * 2;
+          // Tree size: woodland (forestVal < 0.7) vs forest dimensions
+          // Matches old behavior: woodland ~60% height, ~65% radius of forest
+          let treeH, rad;
+          if (forestVal < 0.7) {
+            treeH = 4 + rv * 5;   // 4-9m (old woodland range)
+            rad = 1.5 + rx * 2;   // 1.5-3.5m
+          } else {
+            treeH = 7 + rv * 8;   // 7-15m (old forest range)
+            rad = 2.5 + rx * 2.5; // 2.5-5m
+          }
 
-          treeData.push(x, y, z, h, rad);
+          treeData.push(x, y, z, treeH, rad);
         }
       }
     }
@@ -628,6 +722,10 @@ export class CityScreen {
 
   dispose() {
     this._running = false;
+    if (this._debugTexture) {
+      this._debugTexture.dispose();
+      this._debugTexture = null;
+    }
     if (this._flyCamera) {
       this._flyCamera.dispose();
       this._flyCamera = null;

@@ -10,8 +10,8 @@
 import * as THREE from 'three';
 import { SeededRandom } from '../core/rng.js';
 import {
-  suburbanDetached, generateRow, hashPosition,
-  sample, ROAD_HALF_WIDTH, SIDEWALK_WIDTH, SETBACK,
+  suburbanDetached, victorianTerrace, generateRow, hashPosition,
+  sample, ROAD_HALF_WIDTH, SIDEWALK_WIDTH, SETBACK, HOUSE_Z,
 } from '../buildings/archetypes.js';
 import {
   createHouse, setPartyWalls, addFloor, addPitchedRoof,
@@ -197,4 +197,402 @@ function _nudgeColor(hex, amount, rng) {
   const g = Math.min(255, Math.max(0, ((hex >> 8) & 0xff) + rng.int(-shift, shift)));
   const b = Math.min(255, Math.max(0, (hex & 0xff) + rng.int(-shift, shift)));
   return (r << 16) | (g << 8) | b;
+}
+
+/**
+ * Place simple boxes along development parcels for debugging.
+ *
+ * Each parcel has a roadEdge (polyline along the road) and an offsetEdge.
+ * Places one box per parcel showing its extent.
+ *
+ * @param {import('../core/FeatureMap.js').FeatureMap} map
+ * @param {number} seed
+ * @returns {THREE.Group}
+ */
+const PLOT_WIDTH = 5;      // meters — width of each terraced house plot along road
+const HOUSE_DEPTH = 9;     // meters — depth of house (front to back)
+const HOUSE_HEIGHT = 8;    // meters — height of box placeholder
+const FRONT_GARDEN = 3;    // meters — front garden depth (between fence and house)
+const PLOT_TOTAL_DEPTH = 20; // meters — total plot depth (front fence to back fence)
+const FENCE_HEIGHT = 1.2;  // meters
+const FENCE_THICKNESS = 0.1;
+
+/**
+ * Build a single plot template (house + fence) as a merged BufferGeometry.
+ * This gets instanced for every plot.
+ */
+function _buildPlotTemplate() {
+  const geos = [];
+
+  // House box (centered at origin, bottom at y=0)
+  const houseGeo = new THREE.BoxGeometry(PLOT_WIDTH * 0.9, HOUSE_HEIGHT, HOUSE_DEPTH);
+  houseGeo.translate(0, HOUSE_HEIGHT / 2, FRONT_GARDEN + HOUSE_DEPTH / 2);
+  geos.push(houseGeo);
+
+  // Front fence
+  const frontFence = new THREE.BoxGeometry(PLOT_WIDTH, FENCE_HEIGHT, FENCE_THICKNESS);
+  frontFence.translate(0, FENCE_HEIGHT / 2, 0);
+  geos.push(frontFence);
+
+  // Back fence
+  const backFence = new THREE.BoxGeometry(PLOT_WIDTH, FENCE_HEIGHT, FENCE_THICKNESS);
+  backFence.translate(0, FENCE_HEIGHT / 2, PLOT_TOTAL_DEPTH);
+  geos.push(backFence);
+
+  // Left side fence
+  const leftFence = new THREE.BoxGeometry(FENCE_THICKNESS, FENCE_HEIGHT, PLOT_TOTAL_DEPTH);
+  leftFence.translate(-PLOT_WIDTH / 2, FENCE_HEIGHT / 2, PLOT_TOTAL_DEPTH / 2);
+  geos.push(leftFence);
+
+  // Right side fence
+  const rightFence = new THREE.BoxGeometry(FENCE_THICKNESS, FENCE_HEIGHT, PLOT_TOTAL_DEPTH);
+  rightFence.translate(PLOT_WIDTH / 2, FENCE_HEIGHT / 2, PLOT_TOTAL_DEPTH / 2);
+  geos.push(rightFence);
+
+  return mergeBufferGeometries(geos);
+}
+
+/**
+ * Merge an array of BufferGeometries into one.
+ */
+function mergeBufferGeometries(geometries) {
+  let totalVerts = 0;
+  let totalIdx = 0;
+  for (const g of geometries) {
+    totalVerts += g.attributes.position.count;
+    totalIdx += g.index ? g.index.count : 0;
+  }
+
+  const positions = new Float32Array(totalVerts * 3);
+  const normals = new Float32Array(totalVerts * 3);
+  const indices = new Uint32Array(totalIdx);
+
+  let vertOffset = 0;
+  let idxOffset = 0;
+
+  for (const g of geometries) {
+    const pos = g.attributes.position.array;
+    const norm = g.attributes.normal.array;
+    positions.set(pos, vertOffset * 3);
+    normals.set(norm, vertOffset * 3);
+
+    if (g.index) {
+      for (let i = 0; i < g.index.count; i++) {
+        indices[idxOffset + i] = g.index.array[i] + vertOffset;
+      }
+      idxOffset += g.index.count;
+    }
+    vertOffset += g.attributes.position.count;
+    g.dispose();
+  }
+
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  merged.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  merged.setIndex(new THREE.BufferAttribute(indices, 1));
+  return merged;
+}
+
+/**
+ * Determine plot width based on distance from nucleus.
+ */
+function plotWidthForDensity(distFromNucleus) {
+  if (distFromNucleus < 100) return 5;   // terraced
+  if (distFromNucleus < 300) return 8;   // semi-detached
+  return 12;                              // detached
+}
+
+/**
+ * Place instanced house+fence boxes along ribbon streets from development zones.
+ *
+ * Reads zone._streets (parallel street polylines) from map.developmentZones.
+ * Places houses on both sides of each street.
+ *
+ * @param {import('../core/FeatureMap.js').FeatureMap} map
+ * @param {number} _seed
+ * @returns {THREE.Group}
+ */
+/**
+ * Get the 4 world-space corners of a plot rectangle.
+ * The plot's local frame: front edge at origin, extends plotDepth in the perp direction.
+ * Along-road axis = (adx, adz), perp axis = (perpX, perpZ).
+ */
+function _plotCorners(frontX, frontZ, adx, adz, perpX, perpZ, plotWidth, plotDepth) {
+  const hw = plotWidth / 2;
+  return [
+    { x: frontX - adx * hw,               z: frontZ - adz * hw },
+    { x: frontX + adx * hw,               z: frontZ + adz * hw },
+    { x: frontX + adx * hw + perpX * plotDepth, z: frontZ + adz * hw + perpZ * plotDepth },
+    { x: frontX - adx * hw + perpX * plotDepth, z: frontZ - adz * hw + perpZ * plotDepth },
+  ];
+}
+
+/**
+ * Check whether a rotated rectangle collides with an occupancy grid.
+ * Rasterises the rectangle's axis-aligned bounding box and tests each cell
+ * inside the rotated rect against the grid.
+ * Returns true if ANY cell is occupied.
+ */
+function _rectCollides(corners, occupancy, cs, ox, oz) {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const c of corners) {
+    if (c.x < minX) minX = c.x;
+    if (c.x > maxX) maxX = c.x;
+    if (c.z < minZ) minZ = c.z;
+    if (c.z > maxZ) maxZ = c.z;
+  }
+  const gx0 = Math.max(0, Math.floor((minX - ox) / cs));
+  const gx1 = Math.min(occupancy.width - 1, Math.ceil((maxX - ox) / cs));
+  const gz0 = Math.max(0, Math.floor((minZ - oz) / cs));
+  const gz1 = Math.min(occupancy.height - 1, Math.ceil((maxZ - oz) / cs));
+
+  for (let gz = gz0; gz <= gz1; gz++) {
+    for (let gx = gx0; gx <= gx1; gx++) {
+      const wx = ox + gx * cs;
+      const wz = oz + gz * cs;
+      if (_pointInQuad(wx, wz, corners) && occupancy.get(gx, gz) > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Stamp a rotated rectangle onto the occupancy grid (mark cells as occupied).
+ */
+function _stampRect(corners, occupancy, cs, ox, oz) {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const c of corners) {
+    if (c.x < minX) minX = c.x;
+    if (c.x > maxX) maxX = c.x;
+    if (c.z < minZ) minZ = c.z;
+    if (c.z > maxZ) maxZ = c.z;
+  }
+  const gx0 = Math.max(0, Math.floor((minX - ox) / cs));
+  const gx1 = Math.min(occupancy.width - 1, Math.ceil((maxX - ox) / cs));
+  const gz0 = Math.max(0, Math.floor((minZ - oz) / cs));
+  const gz1 = Math.min(occupancy.height - 1, Math.ceil((maxZ - oz) / cs));
+
+  for (let gz = gz0; gz <= gz1; gz++) {
+    for (let gx = gx0; gx <= gx1; gx++) {
+      const wx = ox + gx * cs;
+      const wz = oz + gz * cs;
+      if (_pointInQuad(wx, wz, corners)) {
+        occupancy.set(gx, gz, 1);
+      }
+    }
+  }
+}
+
+/** Point-in-convex-quad — works for both CW and CCW winding. */
+function _pointInQuad(px, pz, corners) {
+  let pos = 0, neg = 0;
+  for (let i = 0; i < 4; i++) {
+    const a = corners[i];
+    const b = corners[(i + 1) % 4];
+    const cross = (b.x - a.x) * (pz - a.z) - (b.z - a.z) * (px - a.x);
+    if (cross > 0) pos++;
+    else if (cross < 0) neg++;
+  }
+  // All same sign = inside (works for CW or CCW)
+  return pos === 0 || neg === 0;
+}
+
+/**
+ * Compute plot placements using occupancy bitmap collision.
+ * Pure function — no THREE.js dependency. Returns array of placed plots.
+ *
+ * Each plot: { frontX, frontZ, angle, corners, plotWidth, plotDepth }
+ * (frontX/frontZ are in world coords)
+ *
+ * @param {import('../core/FeatureMap.js').FeatureMap} map
+ * @returns {{ plots: Array, occupancy: Grid2D }}
+ */
+export function computePlotPlacements(map) {
+  const ox = map.originX, oz = map.originZ;
+  const cs = map.cellSize;
+  const zones = map.developmentZones;
+  const plots = [];
+
+  if (!zones || zones.length === 0) return { plots, occupancy: null };
+
+  // Build occupancy grid: water + unbuildable + skeleton/collector roads = occupied.
+  // Ribbon (local land-first) roads are excluded — plots are designed to line them.
+  const { Grid2D } = _getGrid2D(map);
+  const occupancy = new Grid2D(map.width, map.height, { type: 'uint8' });
+  for (let gz = 0; gz < map.height; gz++) {
+    for (let gx = 0; gx < map.width; gx++) {
+      if (map.waterMask.get(gx, gz) > 0) { occupancy.set(gx, gz, 1); continue; }
+      if (map.buildability.get(gx, gz) < 0.15) { occupancy.set(gx, gz, 1); continue; }
+    }
+  }
+  // Stamp non-ribbon roads onto occupancy (skeleton, collector, bridges)
+  _stampRoadsOntoOccupancy(map, occupancy);
+
+  for (const zone of zones) {
+    if (!zone._streets) continue;
+    const plotWidth = plotWidthForDensity(zone.distFromNucleus);
+    const spacing = zone._spacing || 30;
+    const roadHalfW = 3;
+    const plotDepth = Math.min(PLOT_TOTAL_DEPTH, (spacing / 2) - roadHalfW - 1);
+
+    for (const street of zone._streets) {
+      if (street.length < 2) continue;
+
+      let streetLen = 0;
+      for (let i = 1; i < street.length; i++) {
+        const dx = street[i].x - street[i - 1].x;
+        const dz = street[i].z - street[i - 1].z;
+        streetLen += Math.sqrt(dx * dx + dz * dz);
+      }
+      if (streetLen < plotWidth * 2) continue;
+
+      const houseCount = Math.floor(streetLen / plotWidth);
+      let segIdx = 0, segStart = 0;
+
+      for (let h = 0; h < houseCount; h++) {
+        const targetDist = (h + 0.5) * plotWidth;
+
+        while (segIdx < street.length - 2) {
+          const dx = street[segIdx + 1].x - street[segIdx].x;
+          const dz = street[segIdx + 1].z - street[segIdx].z;
+          const sLen = Math.sqrt(dx * dx + dz * dz);
+          if (segStart + sLen >= targetDist) break;
+          segStart += sLen;
+          segIdx++;
+        }
+        if (segIdx >= street.length - 1) break;
+
+        const ax = street[segIdx].x, az = street[segIdx].z;
+        const bx = street[segIdx + 1].x, bz = street[segIdx + 1].z;
+        const sdx = bx - ax, sdz = bz - az;
+        const segLen = Math.sqrt(sdx * sdx + sdz * sdz);
+        if (segLen < 0.01) continue;
+
+        const t = (targetDist - segStart) / segLen;
+        const px = ax + sdx * t;
+        const pz = az + sdz * t;
+
+        // Along-road unit vector
+        const adx = sdx / segLen;
+        const adz = sdz / segLen;
+
+        for (const side of [-1, 1]) {
+          const perpX = (-sdz / segLen) * side;
+          const perpZ = (sdx / segLen) * side;
+          const angle = Math.atan2(perpX, perpZ);
+
+          const roadHalfWidth = 3;
+          const sidewalk = 1.5;
+          const frontSetback = roadHalfWidth + sidewalk;
+          const frontX = px + perpX * frontSetback;
+          const frontZ = pz + perpZ * frontSetback;
+
+          // Check full plot rectangle against occupancy grid
+          const corners = _plotCorners(
+            frontX, frontZ, adx, adz, perpX, perpZ, plotWidth, plotDepth
+          );
+          if (_rectCollides(corners, occupancy, cs, ox, oz)) continue;
+
+          // Bounds check
+          const lx = frontX - ox, lz = frontZ - oz;
+          const gx = lx / cs, gz = lz / cs;
+          if (gx < 1 || gz < 1 || gx >= map.width - 1 || gz >= map.height - 1) continue;
+
+          // Plot is clear — stamp it into occupancy
+          _stampRect(corners, occupancy, cs, ox, oz);
+          plots.push({ frontX, frontZ, angle, corners, plotWidth, plotDepth });
+        }
+      }
+    }
+  }
+
+  return { plots, occupancy };
+}
+
+export function placeTerracedRows(map, _seed) {
+  const group = new THREE.Group();
+  const { plots } = computePlotPlacements(map);
+
+  if (plots.length === 0) return group;
+
+  const templateGeo = _buildPlotTemplate();
+  const mat = new THREE.MeshLambertMaterial({ color: 0xd4c4a8 });
+  const mesh = new THREE.InstancedMesh(templateGeo, mat, plots.length);
+  const dummy = new THREE.Object3D();
+  const ox = map.originX, oz = map.originZ;
+  const cs = map.cellSize;
+
+  for (let i = 0; i < plots.length; i++) {
+    const { frontX, frontZ, angle } = plots[i];
+    const lx = frontX - ox, lz = frontZ - oz;
+    const gx = lx / cs, gz = lz / cs;
+    const terrainY = map.elevation.sample(gx, gz);
+
+    dummy.position.set(lx, terrainY, lz);
+    dummy.rotation.set(0, angle, 0);
+    dummy.updateMatrix();
+    mesh.setMatrixAt(i, dummy.matrix);
+  }
+
+  mesh.count = plots.length;
+  mesh.instanceMatrix.needsUpdate = true;
+  group.add(mesh);
+  return group;
+}
+
+/** Extract Grid2D constructor from the map's existing grids. */
+function _getGrid2D(map) {
+  return { Grid2D: map.waterMask.constructor };
+}
+
+/**
+ * Stamp non-ribbon roads onto the occupancy grid.
+ * Includes skeleton roads, collector connections, and bridges — anything
+ * that isn't a local land-first ribbon street (source='land-first', hierarchy='local').
+ */
+function _stampRoadsOntoOccupancy(map, occupancy) {
+  const cs = map.cellSize;
+  const ox = map.originX, oz = map.originZ;
+  const w = map.width, h = map.height;
+
+  for (const road of map.roads) {
+    // Skip local ribbon roads — plots are designed to line them
+    if (road.source === 'land-first' && road.hierarchy === 'local') continue;
+
+    const polyline = road.polyline;
+    if (!polyline || polyline.length < 2) continue;
+
+    const halfWidth = (road.width || 6) / 2 + 2; // +2m buffer
+
+    for (let i = 0; i < polyline.length - 1; i++) {
+      const ax = polyline[i].x, az = polyline[i].z;
+      const bx = polyline[i + 1].x, bz = polyline[i + 1].z;
+      const dx = bx - ax, dz = bz - az;
+      const segLen = Math.sqrt(dx * dx + dz * dz);
+      if (segLen < 0.01) continue;
+
+      const steps = Math.ceil(segLen / (cs * 0.5));
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const px = ax + dx * t, pz = az + dz * t;
+        const cellRadius = Math.ceil(halfWidth / cs);
+        const cgx = Math.round((px - ox) / cs);
+        const cgz = Math.round((pz - oz) / cs);
+
+        for (let ddz = -cellRadius; ddz <= cellRadius; ddz++) {
+          for (let ddx = -cellRadius; ddx <= cellRadius; ddx++) {
+            const gx = cgx + ddx, gz = cgz + ddz;
+            if (gx < 0 || gx >= w || gz < 0 || gz >= h) continue;
+            const cellX = ox + gx * cs, cellZ = oz + gz * cs;
+            const distSq = (cellX - px) ** 2 + (cellZ - pz) ** 2;
+            if (distSq <= halfWidth * halfWidth) {
+              occupancy.set(gx, gz, 1);
+            }
+          }
+        }
+      }
+    }
+  }
 }

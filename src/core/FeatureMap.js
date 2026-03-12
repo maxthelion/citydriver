@@ -14,16 +14,22 @@ import { PlanarGraph } from './PlanarGraph.js';
 import { riverHalfWidth, channelProfile } from './riverGeometry.js';
 import { RIVER_STAMP_FRACTION, STAMP_STEP_FRACTION } from '../city/constants.js';
 
-// Land value source weights
-const LV_TOWN_CENTER = 1.0;
-const LV_WATERFRONT = 0.2;
-const LV_HILLTOP = 0.9;
-const LV_JUNCTION = 0.75;
-const LV_BRIDGE = 0.85;
-const LV_HILLTOP_MIN_PROMINENCE = 2;    // meters above local average
-const LV_HILLTOP_PROMINENCE_SCALE = 8;  // prominence for max value
-const LV_BLUR_RADIUS = 20;              // cells (~200m at 10m resolution)
-const LV_BUILDABLE_FLOOR = 0.2;         // min value for buildable land
+// Land value constants (land-first formula)
+const LV_FLATNESS_WEIGHT = 0.6;
+const LV_PROXIMITY_WEIGHT = 0.4;
+const LV_FLATNESS_RADIUS_M = 15;       // local averaging radius for flatness
+const LV_FLATNESS_MAX_SLOPE = 0.4;     // slope at which flatness = 0
+const LV_PROXIMITY_FALLOFF_M = 200;    // distance at which proximity halves
+const LV_WATER_BONUS_MAX = 0.15;       // max water proximity bonus
+const LV_WATER_BONUS_RANGE_M = 50;     // range for water bonus
+const LV_BUILDABLE_FLOOR = 0.2;
+
+// Buildability constants (meters)
+const BUILD_EDGE_MARGIN_M = 60;
+const BUILD_EDGE_TAPER_M = 160;
+const BUILD_WATERFRONT_RANGE_M = 200;
+const BUILD_WATERFRONT_BONUS = 0.3;
+const WATER_DIST_CUTOFF_M = 300;
 
 // Buildability slope scoring table (from technical-reference.md)
 function slopeScore(slope) {
@@ -33,52 +39,6 @@ function slopeScore(slope) {
   if (slope < 0.5) return 0.4;
   if (slope < 0.7) return 0.15;
   return 0;
-}
-
-/**
- * Separable Gaussian blur on a Float32Array treated as w×h grid.
- * Two-pass (horizontal then vertical), O(n) per pixel via running sum.
- */
-function _gaussianBlur2D(data, w, h, radius) {
-  // Build 1D Gaussian kernel
-  const sigma = radius / 3;
-  const kernelSize = radius * 2 + 1;
-  const kernel = new Float32Array(kernelSize);
-  let kernelSum = 0;
-  for (let i = 0; i < kernelSize; i++) {
-    const x = i - radius;
-    kernel[i] = Math.exp(-(x * x) / (2 * sigma * sigma));
-    kernelSum += kernel[i];
-  }
-  for (let i = 0; i < kernelSize; i++) kernel[i] /= kernelSum;
-
-  // Horizontal pass
-  const temp = new Float32Array(w * h);
-  for (let gz = 0; gz < h; gz++) {
-    for (let gx = 0; gx < w; gx++) {
-      let sum = 0;
-      for (let k = -radius; k <= radius; k++) {
-        const sx = Math.max(0, Math.min(w - 1, gx + k));
-        sum += data[gz * w + sx] * kernel[k + radius];
-      }
-      temp[gz * w + gx] = sum;
-    }
-  }
-
-  // Vertical pass
-  const result = new Float32Array(w * h);
-  for (let gx = 0; gx < w; gx++) {
-    for (let gz = 0; gz < h; gz++) {
-      let sum = 0;
-      for (let k = -radius; k <= radius; k++) {
-        const sz = Math.max(0, Math.min(h - 1, gz + k));
-        sum += temp[sz * w + gx] * kernel[k + radius];
-      }
-      result[gz * w + gx] = sum;
-    }
-  }
-
-  return result;
 }
 
 export class FeatureMap {
@@ -173,14 +133,18 @@ export class FeatureMap {
   _computeInitialBuildability() {
     if (!this.elevation || !this.slope) return;
 
-    // Water distance BFS (cutoff 15 cells)
-    const waterDist = this._computeWaterDistance(15);
+    const edgeMargin = Math.round(BUILD_EDGE_MARGIN_M / this.cellSize);
+    const edgeTaper = Math.round(BUILD_EDGE_TAPER_M / this.cellSize);
+    const waterfrontRange = Math.round(BUILD_WATERFRONT_RANGE_M / this.cellSize);
+    const cutoffCells = Math.round(WATER_DIST_CUTOFF_M / this.cellSize);
+    this.waterDist = this._computeWaterDistance(cutoffCells);
+    const waterDist = this.waterDist;
 
     for (let gz = 0; gz < this.height; gz++) {
       for (let gx = 0; gx < this.width; gx++) {
         // Edge margin
         const edgeDist = Math.min(gx, gz, this.width - 1 - gx, this.height - 1 - gz);
-        if (edgeDist < 3) {
+        if (edgeDist < edgeMargin) {
           this.buildability.set(gx, gz, 0);
           continue;
         }
@@ -193,15 +157,15 @@ export class FeatureMap {
 
         let score = slopeScore(this.slope.get(gx, gz));
 
-        // Edge taper (3-8 cells)
-        if (edgeDist < 8) {
-          score *= edgeDist / 8;
+        // Edge taper
+        if (edgeDist < edgeTaper) {
+          score *= edgeDist / edgeTaper;
         }
 
         // Waterfront bonus
         const wd = waterDist.get(gx, gz);
-        if (wd > 0 && wd < 10) {
-          score = Math.min(1, score + 0.3 * (1 - wd / 10));
+        if (wd > 0 && wd < waterfrontRange) {
+          score = Math.min(1, score + BUILD_WATERFRONT_BONUS * (1 - wd / waterfrontRange));
         }
 
         this.buildability.set(gx, gz, score);
@@ -786,110 +750,90 @@ export class FeatureMap {
   computeLandValue() {
     const w = this.width;
     const h = this.height;
-    const raw = new Float32Array(w * h);
+    const cs = this.cellSize;
 
-    // 1. Paint value sources
+    // Pre-compute local flatness: average slope in a radius around each cell
+    const flatnessR = Math.max(1, Math.round(LV_FLATNESS_RADIUS_M / cs));
+    const flatness = new Float32Array(w * h);
+    if (this.slope) {
+      for (let gz = 0; gz < h; gz++) {
+        for (let gx = 0; gx < w; gx++) {
+          let sum = 0, count = 0;
+          const r = flatnessR;
+          const gxMin = Math.max(0, gx - r), gxMax = Math.min(w - 1, gx + r);
+          const gzMin = Math.max(0, gz - r), gzMax = Math.min(h - 1, gz + r);
+          for (let nz = gzMin; nz <= gzMax; nz++) {
+            for (let nx = gxMin; nx <= gxMax; nx++) {
+              sum += this.slope.get(nx, nz);
+              count++;
+            }
+          }
+          const avgSlope = sum / count;
+          flatness[gz * w + gx] = 1.0 - Math.min(1, avgSlope / LV_FLATNESS_MAX_SLOPE);
+        }
+      }
+    }
 
-    // Town center (if settlement is set)
-    if (this.settlement) {
+    // Pre-compute water distance in cells for bonus (reuse existing waterDist if available)
+    const waterBonusRange = Math.round(LV_WATER_BONUS_RANGE_M / cs);
+
+    // Nucleus centers for proximity calculation
+    const nucleiWorld = [];
+    if (this.nuclei && this.nuclei.length > 0) {
+      for (const n of this.nuclei) {
+        nucleiWorld.push({
+          wx: this.originX + n.gx * cs,
+          wz: this.originZ + n.gz * cs,
+        });
+      }
+    } else if (this.settlement) {
+      // Fallback: use settlement as single center
       const params = this.regionalLayers?.getData('params');
       const rcs = params?.cellSize || 50;
-      const cx = Math.round((this.settlement.gx * rcs - this.originX) / this.cellSize);
-      const cz = Math.round((this.settlement.gz * rcs - this.originZ) / this.cellSize);
-      if (cx >= 0 && cx < w && cz >= 0 && cz < h) {
-        raw[cz * w + cx] = LV_TOWN_CENTER;
-      }
+      nucleiWorld.push({
+        wx: this.settlement.gx * rcs,
+        wz: this.settlement.gz * rcs,
+      });
     }
 
-    // Waterfront edges: walk waterMask boundary (land cells adjacent to water)
-    for (let gz = 1; gz < h - 1; gz++) {
-      for (let gx = 1; gx < w - 1; gx++) {
-        if (this.waterMask.get(gx, gz) > 0) continue;
-        // Check 4-connected neighbors for water
-        if (this.waterMask.get(gx - 1, gz) > 0 ||
-            this.waterMask.get(gx + 1, gz) > 0 ||
-            this.waterMask.get(gx, gz - 1) > 0 ||
-            this.waterMask.get(gx, gz + 1) > 0) {
-          raw[gz * w + gx] = Math.max(raw[gz * w + gx], LV_WATERFRONT);
-        }
-      }
-    }
-
-    // Hilltops: local elevation maxima (prominence above 10-cell neighborhood)
-    if (this.elevation) {
-      for (let gz = 10; gz < h - 10; gz += 2) {
-        for (let gx = 10; gx < w - 10; gx += 2) {
-          const elev = this.elevation.get(gx, gz);
-          let localMax = true;
-          let localSum = 0, localCount = 0;
-          for (let dz = -10; dz <= 10; dz += 3) {
-            for (let dx = -10; dx <= 10; dx += 3) {
-              const ne = this.elevation.get(gx + dx, gz + dz);
-              if (ne > elev) { localMax = false; }
-              localSum += ne;
-              localCount++;
-            }
-          }
-          if (!localMax) continue;
-          const prominence = elev - (localSum / localCount);
-          if (prominence > LV_HILLTOP_MIN_PROMINENCE) {
-            const v = Math.min(1, prominence / LV_HILLTOP_PROMINENCE_SCALE) * LV_HILLTOP;
-            raw[gz * w + gx] = Math.max(raw[gz * w + gx], v);
-          }
-        }
-      }
-    }
-
-    // Road junctions: cells where roads meet from 3+ directions
-    for (let gz = 3; gz < h - 3; gz++) {
-      for (let gx = 3; gx < w - 3; gx++) {
-        if (this.roadGrid.get(gx, gz) === 0) continue;
-        let dirs = 0;
-        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          for (let r = 1; r <= 4; r++) {
-            const nx = gx + dx * r, nz = gz + dz * r;
-            if (nx >= 0 && nx < w && nz >= 0 && nz < h && this.roadGrid.get(nx, nz) > 0) {
-              dirs++;
-              break;
-            }
-          }
-        }
-        if (dirs >= 3) {
-          raw[gz * w + gx] = Math.max(raw[gz * w + gx], LV_JUNCTION);
-        }
-      }
-    }
-
-    // Bridge crossings
     for (let gz = 0; gz < h; gz++) {
       for (let gx = 0; gx < w; gx++) {
-        if (this.bridgeGrid.get(gx, gz) > 0) {
-          raw[gz * w + gx] = Math.max(raw[gz * w + gx], LV_BRIDGE);
+        if (this.waterMask.get(gx, gz) > 0) {
+          this.landValue.set(gx, gz, 0);
+          continue;
         }
-      }
-    }
 
-    // 2. Gaussian blur (separable, two-pass)
-    const blurred = _gaussianBlur2D(raw, w, h, LV_BLUR_RADIUS);
+        const localFlatness = flatness[gz * w + gx];
 
-    // 3. Normalize to 0-1
-    let maxVal = 0;
-    for (let i = 0; i < blurred.length; i++) {
-      if (blurred[i] > maxVal) maxVal = blurred[i];
-    }
-    if (maxVal > 0) {
-      for (let i = 0; i < blurred.length; i++) {
-        blurred[i] /= maxVal;
-      }
-    }
+        // Proximity to nearest nucleus
+        const wx = this.originX + gx * cs;
+        const wz = this.originZ + gz * cs;
+        let minDist = Infinity;
+        for (const nc of nucleiWorld) {
+          const dx = wx - nc.wx, dz = wz - nc.wz;
+          const d = Math.sqrt(dx * dx + dz * dz);
+          if (d < minDist) minDist = d;
+        }
+        const proximity = 1.0 / (1.0 + minDist / LV_PROXIMITY_FALLOFF_M);
 
-    // 4. Write to grid, with a floor for buildable land
-    for (let gz = 0; gz < h; gz++) {
-      for (let gx = 0; gx < w; gx++) {
-        let v = blurred[gz * w + gx];
-        if (this.waterMask.get(gx, gz) === 0 && this.buildability.get(gx, gz) > LV_BUILDABLE_FLOOR) {
+        let base = localFlatness * LV_FLATNESS_WEIGHT + proximity * LV_PROXIMITY_WEIGHT;
+
+        // Water bonus: buildable land near water gets a small additive bonus
+        let waterBonus = 0;
+        if (this.waterDist) {
+          const wd = this.waterDist.get(gx, gz);
+          if (wd > 0 && wd <= waterBonusRange) {
+            waterBonus = LV_WATER_BONUS_MAX * (1 - wd / waterBonusRange);
+          }
+        }
+
+        let v = base + waterBonus;
+
+        // Floor for buildable land
+        if (this.buildability.get(gx, gz) > LV_BUILDABLE_FLOOR) {
           v = Math.max(v, LV_BUILDABLE_FLOOR);
         }
+
         this.landValue.set(gx, gz, v);
       }
     }
@@ -899,83 +843,10 @@ export class FeatureMap {
    * Incrementally add value from a newly added road and re-blur locally.
    * Lighter than full recompute — just stamps junction value near the new road.
    */
-  _stampRoadValue(feature) {
-    const polyline = feature.polyline;
-    if (!polyline || polyline.length < 2) return;
-
-    // Find cells along the road and detect junctions
-    const touched = new Set();
-    for (let i = 0; i < polyline.length - 1; i++) {
-      const a = polyline[i], b = polyline[i + 1];
-      const dx = b.x - a.x, dz = b.z - a.z;
-      const segLen = Math.sqrt(dx * dx + dz * dz);
-      if (segLen < 0.01) continue;
-      const steps = Math.ceil(segLen / (this.cellSize * 2));
-      for (let s = 0; s <= steps; s++) {
-        const t = s / steps;
-        const gx = Math.round((a.x + dx * t - this.originX) / this.cellSize);
-        const gz = Math.round((a.z + dz * t - this.originZ) / this.cellSize);
-        if (gx >= 0 && gx < this.width && gz >= 0 && gz < this.height) {
-          touched.add(`${gx},${gz}`);
-        }
-      }
-    }
-
-    // For each touched cell, check if it's become a junction and add value
-    const w = this.width, h = this.height;
-    let needsReblur = false;
-    for (const key of touched) {
-      const [gx, gz] = key.split(',').map(Number);
-      let dirs = 0;
-      for (const [ddx, ddz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        for (let r = 1; r <= 4; r++) {
-          const nx = gx + ddx * r, nz = gz + ddz * r;
-          if (nx >= 0 && nx < w && nz >= 0 && nz < h && this.roadGrid.get(nx, nz) > 0) {
-            dirs++;
-            break;
-          }
-        }
-      }
-      if (dirs >= 3) {
-        const current = this.landValue.get(gx, gz);
-        if (current < 0.5) {
-          // Stamp junction value and spread locally
-          this._spreadValue(gx, gz, 0.5, 10);
-          needsReblur = true;
-        }
-      }
-    }
-
-    // Also add value near bridge crossings on this road
-    for (const key of touched) {
-      const [gx, gz] = key.split(',').map(Number);
-      if (this.bridgeGrid.get(gx, gz) > 0) {
-        this._spreadValue(gx, gz, 0.7, 12);
-        needsReblur = true;
-      }
-    }
-  }
-
-  /**
-   * Spread a value source outward from a point with distance falloff.
-   */
-  _spreadValue(cx, cz, intensity, radius) {
-    const w = this.width, h = this.height;
-    const rSq = radius * radius;
-    for (let dz = -radius; dz <= radius; dz++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        const gx = cx + dx, gz = cz + dz;
-        if (gx < 0 || gx >= w || gz < 0 || gz >= h) continue;
-        const distSq = dx * dx + dz * dz;
-        if (distSq > rSq) continue;
-        const falloff = 1 - Math.sqrt(distSq) / radius;
-        const v = intensity * falloff * falloff; // quadratic falloff
-        const current = this.landValue.get(gx, gz);
-        if (v > current) {
-          this.landValue.set(gx, gz, v);
-        }
-      }
-    }
+  _stampRoadValue(_feature) {
+    // No-op: land value is computed from terrain (flatness + proximity + water),
+    // not from road junctions/bridges. The strategy recomputes land value
+    // explicitly after skeleton roads are placed.
   }
 
   // --- Cloning ---
@@ -997,6 +868,8 @@ export class FeatureMap {
     copy.roadGrid = this.roadGrid.clone();
     copy.landValue = this.landValue.clone();
     if (this.waterType) copy.waterType = this.waterType.clone();
+    if (this.waterDist) copy.waterDist = this.waterDist.clone();
+    if (this.waterDepth) copy.waterDepth = this.waterDepth.clone();
 
     // Features (deep copy data, not object references)
     for (const f of this.features) {
@@ -1019,6 +892,7 @@ export class FeatureMap {
     copy.seaLevel = this.seaLevel;
     copy.settlement = this.settlement;
     copy.regionalLayers = this.regionalLayers;
+    copy.regionalSettlements = this.regionalSettlements;
     copy.rng = this.rng;
 
     return copy;

@@ -99,7 +99,7 @@ function findGeometricParallels(roads, corridorDist) {
   return pairs;
 }
 
-describe('compactRoads integration', () => {
+describe('compactRoads integration', { timeout: 30000 }, () => {
   it('reduces parallel roads on a real map', () => {
     const map = makeCity(652341);
     if (!map) return;

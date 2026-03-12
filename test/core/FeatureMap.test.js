@@ -149,6 +149,67 @@ describe('FeatureMap', () => {
   });
 });
 
+describe('resolution independence', () => {
+  it('buildability is similar at different cell sizes', () => {
+    const map10 = makeMap(30, 30, 10); // 300m × 300m
+    const map5 = makeMap(60, 60, 5);   // 300m × 300m
+    const b10 = map10.buildability.get(5, 15);
+    const b5 = map5.buildability.get(10, 30);
+    expect(Math.abs(b10 - b5)).toBeLessThan(0.15);
+  });
+});
+
+describe('revised land value', () => {
+  it('flat ground near center has high value', () => {
+    const map = makeMap(60, 60, 5);
+    map.nuclei = [{ gx: 30, gz: 30, type: 'market' }];
+    map.computeLandValue();
+    expect(map.landValue.get(30, 30)).toBeGreaterThan(0.7);
+  });
+
+  it('flat ground far from center has lower value', () => {
+    const map = makeMap(60, 60, 5);
+    map.nuclei = [{ gx: 30, gz: 30, type: 'market' }];
+    map.computeLandValue();
+    const center = map.landValue.get(30, 30);
+    const far = map.landValue.get(55, 55);
+    expect(center).toBeGreaterThan(far);
+  });
+
+  it('steep ground has low value regardless of location', () => {
+    const map = new FeatureMap(60, 60, 5);
+    const elevation = new Grid2D(60, 60, { cellSize: 5, fill: 100 });
+    const slope = new Grid2D(60, 60, { cellSize: 5, fill: 0.35 });
+    map.setTerrain(elevation, slope);
+    map.nuclei = [{ gx: 30, gz: 30, type: 'market' }];
+    map.computeLandValue();
+    expect(map.landValue.get(30, 30)).toBeLessThan(0.5);
+  });
+
+  it('water proximity adds bonus to nearby land', () => {
+    const map = new FeatureMap(60, 60, 5);
+    const elevation = new Grid2D(60, 60, { cellSize: 5, fill: 100 });
+    const slope = new Grid2D(60, 60, { cellSize: 5, fill: 0.02 });
+    // Water column at gx=29 — cells at gx=30 are 5m away (within 50m bonus range)
+    for (let gz = 0; gz < 60; gz++) map.waterMask.set(29, gz, 1);
+    map.setTerrain(elevation, slope);
+    map.nuclei = [{ gx: 15, gz: 30, type: 'market' }];
+    map.computeLandValue();
+    // gx=30 is near water (5m), gx=0 is far (145m) — both at different nucleus distances
+    // but compare symmetric points: (30,30) near water vs (0,30) far from water
+    // Better: compare two cells equidistant from nucleus but one near water
+    const nearWater = map.landValue.get(30, 30); // 5m from water at gx=29
+    const farWater = map.landValue.get(0, 30);   // 145m from water
+    // nearWater is farther from nucleus but has water bonus
+    // To isolate: compare cells at same nucleus distance on different sides
+    // gx=20 is 25m from nucleus, 45m from water (within range)
+    // gx=10 is 25m from nucleus, 95m from water (outside range)
+    const withBonus = map.landValue.get(20, 30);
+    const withoutBonus = map.landValue.get(10, 30);
+    expect(withBonus).toBeGreaterThan(withoutBonus);
+  });
+});
+
 describe('FeatureMap.clone', () => {
   it('creates an independent deep copy with all grids and features', () => {
     const map = new FeatureMap(20, 20, 10, { originX: 50, originZ: 50 });

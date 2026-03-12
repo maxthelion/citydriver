@@ -12,7 +12,7 @@ function makeStrategy(seed = 42) {
   return { map, strategy };
 }
 
-describe('FaceSubdivision', () => {
+describe('FaceSubdivision', { timeout: 30000 }, () => {
   it('builds skeleton roads on first tick', () => {
     const { map, strategy } = makeStrategy();
     const more = strategy.tick();

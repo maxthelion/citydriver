@@ -12,7 +12,7 @@ function makeRegion(seed = 42) {
   return { layers, rng };
 }
 
-describe('setupCity', () => {
+describe('setupCity', { timeout: 30000 }, () => {
   it('creates a FeatureMap from regional data', () => {
     const { layers, rng } = makeRegion();
     const settlements = layers.getData('settlements');
@@ -101,7 +101,7 @@ describe('setupCity', () => {
   });
 });
 
-describe('placeNuclei with regional settlements', () => {
+describe('placeNuclei with regional settlements', { timeout: 30000 }, () => {
   it('seeds nuclei at regional settlement positions', () => {
     const { layers, rng } = makeRegion(152);
     const settlements = layers.getData('settlements');

@@ -5,7 +5,7 @@
  */
 
 // Grid geometry
-export const CITY_CELL_SIZE = 20;      // meters per city grid cell
+export const CITY_CELL_SIZE = 5;       // meters per city grid cell
 export const CITY_RADIUS = 15;         // regional cells from settlement center
 
 // River stamping — FeatureMap is always at city resolution, so no

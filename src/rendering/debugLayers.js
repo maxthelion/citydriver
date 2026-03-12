@@ -394,6 +394,259 @@ export function renderRoadSources(ctx, map) {
 }
 
 /**
+ * City blocks — enclosed faces from the planar graph, each filled with a distinct color.
+ */
+export function renderCityBlocks(ctx, map) {
+  const { width, height } = map;
+
+  // Dark background
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      if (map.waterMask.get(gx, gz) > 0) {
+        ctx.fillStyle = '#1a3355';
+      } else {
+        ctx.fillStyle = '#1a1a1a';
+      }
+      ctx.fillRect(gx, gz, 1, 1);
+    }
+  }
+
+  const graph = map.graph;
+  if (!graph) return;
+
+  const faces = graph.faces();
+  const hueStep = 137.508;
+  const ox = map.originX, oz = map.originZ, cs = map.cellSize;
+
+  for (let fi = 0; fi < faces.length; fi++) {
+    const face = faces[fi];
+    if (face.length < 3) continue;
+
+    // Convert node IDs to grid coordinates
+    const pts = face.map(nid => {
+      const node = graph.nodes.get(nid);
+      if (!node) return null;
+      return {
+        gx: (node.x - ox) / cs,
+        gz: (node.z - oz) / cs,
+      };
+    }).filter(Boolean);
+
+    if (pts.length < 3) continue;
+
+    // Skip the outer (unbounded) face — it will have very large area
+    let area = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      area += (a.gx * b.gz - b.gx * a.gz);
+    }
+    area = Math.abs(area) / 2;
+    if (area > width * height * 0.5) continue; // skip outer face
+    if (area < 4) continue; // skip degenerate faces
+
+    const hue = (fi * hueStep) % 360;
+    ctx.fillStyle = `hsla(${hue}, 70%, 50%, 0.6)`;
+    ctx.strokeStyle = `hsla(${hue}, 70%, 40%, 0.9)`;
+    ctx.lineWidth = 0.5;
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0].gx, pts[0].gz);
+    for (let i = 1; i < pts.length; i++) {
+      ctx.lineTo(pts[i].gx, pts[i].gz);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Overlay roads on top
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      if (map.roadGrid.get(gx, gz) > 0) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+        ctx.fillRect(gx, gz, 1, 1);
+      }
+    }
+  }
+}
+
+/**
+ * Development zones — flood-filled zones colored by nucleus ownership.
+ */
+export function renderDevZones(ctx, map) {
+  renderTerrain(ctx, map);
+
+  const { width, height } = map;
+
+  // Water
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      if (map.waterMask.get(gx, gz) > 0) {
+        ctx.fillStyle = 'rgba(34, 102, 204, 0.7)';
+        ctx.fillRect(gx, gz, 1, 1);
+      }
+    }
+  }
+
+  // Zones colored by nucleus
+  if (map.developmentZones) {
+    const hueStep = 137.508;
+    const ox = map.originX, oz = map.originZ, cs = map.cellSize;
+    for (let i = 0; i < map.developmentZones.length; i++) {
+      const zone = map.developmentZones[i];
+      const hue = (zone.nucleusIdx * hueStep + 30) % 360;
+      ctx.fillStyle = `hsla(${hue}, 70%, 55%, 0.5)`;
+      for (const c of zone.cells) {
+        ctx.fillRect(c.gx, c.gz, 1, 1);
+      }
+
+      // Draw boundary
+      if (zone.boundary && zone.boundary.length > 2) {
+        ctx.strokeStyle = `hsla(${hue}, 70%, 70%, 0.8)`;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo((zone.boundary[0].x - ox) / cs, (zone.boundary[0].z - oz) / cs);
+        for (let j = 1; j < zone.boundary.length; j++) {
+          ctx.lineTo((zone.boundary[j].x - ox) / cs, (zone.boundary[j].z - oz) / cs);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Roads
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      if (map.roadGrid.get(gx, gz) > 0) {
+        ctx.fillStyle = 'rgba(60, 60, 60, 0.8)';
+        ctx.fillRect(gx, gz, 1, 1);
+      }
+    }
+  }
+
+  // Nuclei
+  if (map.nuclei) {
+    for (const n of map.nuclei) {
+      ctx.fillStyle = '#ff4444';
+      ctx.fillRect(n.gx - 2, n.gz - 2, 5, 5);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(n.gx - 2, n.gz - 2, 5, 5);
+    }
+  }
+}
+
+/**
+ * Zone priority — zones colored by development order (first = bright, last = dim).
+ */
+export function renderZonePriority(ctx, map) {
+  renderTerrain(ctx, map);
+
+  const { width, height } = map;
+
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      if (map.waterMask.get(gx, gz) > 0) {
+        ctx.fillStyle = 'rgba(34, 102, 204, 0.7)';
+        ctx.fillRect(gx, gz, 1, 1);
+      }
+    }
+  }
+
+  if (map.developmentZones && map.developmentZones.length > 0) {
+    const total = map.developmentZones.length;
+    for (let i = 0; i < total; i++) {
+      const zone = map.developmentZones[i];
+      const brightness = 1 - (i / total) * 0.7;
+      const r = Math.round(255 * brightness);
+      const g = Math.round(200 * brightness);
+      const b = Math.round(50);
+      ctx.fillStyle = `rgba(${r},${g},${b},0.6)`;
+      for (const c of zone.cells) {
+        ctx.fillRect(c.gx, c.gz, 1, 1);
+      }
+    }
+  }
+}
+
+/**
+ * Street orientation — zones with arrows showing ribbon direction.
+ */
+export function renderStreetOrientation(ctx, map) {
+  renderDevZones(ctx, map);
+
+  if (map.developmentZones && map.nuclei) {
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1;
+    for (const zone of map.developmentZones) {
+      const n = map.nuclei[zone.nucleusIdx];
+      if (!n) continue;
+
+      // Compute ribbon direction (same logic as computeRibbonOrientation)
+      let dirX, dirZ;
+      if (zone.avgSlope > 0.1 && (zone.slopeDir.x !== 0 || zone.slopeDir.z !== 0)) {
+        dirX = -zone.slopeDir.z;
+        dirZ = zone.slopeDir.x;
+        const len = Math.sqrt(dirX * dirX + dirZ * dirZ);
+        dirX /= len; dirZ /= len;
+      } else {
+        const bx = n.gx - zone.centroidGx;
+        const bz = n.gz - zone.centroidGz;
+        const len = Math.sqrt(bx * bx + bz * bz) || 1;
+        dirX = bx / len; dirZ = bz / len;
+      }
+
+      const cx = zone.centroidGx;
+      const cz = zone.centroidGz;
+      const arrowLen = 15;
+      ctx.beginPath();
+      ctx.moveTo(cx - dirX * arrowLen, cz - dirZ * arrowLen);
+      ctx.lineTo(cx + dirX * arrowLen, cz + dirZ * arrowLen);
+      ctx.stroke();
+
+      const headLen = 4;
+      const ax = cx + dirX * arrowLen;
+      const az = cz + dirZ * arrowLen;
+      ctx.beginPath();
+      ctx.moveTo(ax, az);
+      ctx.lineTo(
+        ax - dirX * headLen + dirZ * headLen * 0.5,
+        az - dirZ * headLen - dirX * headLen * 0.5,
+      );
+      ctx.moveTo(ax, az);
+      ctx.lineTo(
+        ax - dirX * headLen - dirZ * headLen * 0.5,
+        az - dirZ * headLen + dirX * headLen * 0.5,
+      );
+      ctx.stroke();
+    }
+  }
+}
+
+/**
+ * Generic coverage layer heatmap renderer.
+ * Reads from map._coverage[layerName].
+ */
+function renderCoverageLayer(ctx, map, layerName, color) {
+  const { width, height } = map;
+  const layer = map._coverage && map._coverage[layerName];
+  if (!layer) return;
+
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      const v = layer[gz * width + gx];
+      const r = Math.round(color[0] * v * 255);
+      const g = Math.round(color[1] * v * 255);
+      const b = Math.round(color[2] * v * 255);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(gx, gz, 1, 1);
+    }
+  }
+}
+
+/**
  * Available layer definitions for the debug viewer.
  */
 export const LAYERS = [
@@ -412,4 +665,13 @@ export const LAYERS = [
   { name: 'Road Sources', render: renderRoadSources },
   { name: 'Road Popularity', render: renderRoadPopularity },
   { name: 'Water Depth', render: renderWaterDepth },
+  { name: 'Development Zones', render: renderDevZones },
+  { name: 'Zone Priority', render: renderZonePriority },
+  { name: 'Street Orientation', render: renderStreetOrientation },
+  { name: 'City Blocks', render: renderCityBlocks },
+  { name: 'Coverage: Water', render: (ctx, map) => renderCoverageLayer(ctx, map, 'water', [0.2, 0.4, 1.0]) },
+  { name: 'Coverage: Road', render: (ctx, map) => renderCoverageLayer(ctx, map, 'road', [0.8, 0.8, 0.7]) },
+  { name: 'Coverage: Development', render: (ctx, map) => renderCoverageLayer(ctx, map, 'development', [1.0, 0.7, 0.3]) },
+  { name: 'Coverage: Forest', render: (ctx, map) => renderCoverageLayer(ctx, map, 'forest', [0.1, 0.7, 0.1]) },
+  { name: 'Coverage: Land Cover', render: (ctx, map) => renderCoverageLayer(ctx, map, 'landCover', [0.7, 0.6, 0.3]) },
 ];

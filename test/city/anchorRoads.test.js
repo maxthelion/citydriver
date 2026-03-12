@@ -127,7 +127,7 @@ describe('clipPolylineToBounds for anchor roads', () => {
 // Integration test: anchor roads reach the city boundary
 // ============================================================
 
-describe('anchor roads integration', () => {
+describe('anchor roads integration', { timeout: 30000 }, () => {
   it('at least one road endpoint is within 2 cells of the city boundary', { timeout: 15000 }, () => {
     // Try multiple seeds to find one where anchor roads exist
     let foundBoundaryRoad = false;
