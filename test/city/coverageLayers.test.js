@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { separableBoxBlur, applyHashNoise, enforcePriority } from '../../src/city/coverageLayers.js';
+import { separableBoxBlur, applyHashNoise, enforcePriority, stampWater, stampRoad, stampDevelopment, stampForest, stampLandCover } from '../../src/city/coverageLayers.js';
+import { Grid2D } from '../../src/core/Grid2D.js';
 
 describe('separableBoxBlur', () => {
   it('preserves total energy (sum of values)', () => {
@@ -118,5 +119,79 @@ describe('enforcePriority', () => {
     enforcePriority(layers, w, h);
     expect(layers[0].data[0]).toBeCloseTo(0.3);
     expect(layers[1].data[0]).toBeCloseTo(0.3);
+  });
+});
+
+describe('stamp functions', () => {
+  function makeMap(w, h) {
+    return {
+      width: w, height: h, cellSize: 5,
+      originX: 0, originZ: 0,
+      waterMask: new Grid2D(w, h, { type: 'uint8' }),
+      roadGrid: new Grid2D(w, h, { type: 'uint8' }),
+      developmentZones: [],
+      regionalLayers: {
+        getGrid: () => new Grid2D(4, 4, { type: 'uint8' }),
+        getData: () => ({ cellSize: 50, width: 4, height: 4 }),
+      },
+    };
+  }
+
+  it('stampWater marks water cells as 1.0', () => {
+    const map = makeMap(10, 10);
+    map.waterMask.set(3, 3, 1);
+    map.waterMask.set(4, 3, 1);
+    const out = stampWater(map);
+    expect(out[3 * 10 + 3]).toBe(1.0);
+    expect(out[3 * 10 + 4]).toBe(1.0);
+    expect(out[0]).toBe(0.0);
+  });
+
+  it('stampRoad marks road cells and 2-cell buffer', () => {
+    const map = makeMap(10, 10);
+    map.roadGrid.set(5, 5, 1);
+    const out = stampRoad(map);
+    expect(out[5 * 10 + 5]).toBe(1.0);
+    expect(out[5 * 10 + 6]).toBe(1.0);
+    expect(out[6 * 10 + 5]).toBe(1.0);
+    expect(out[0]).toBe(0.0);
+  });
+
+  it('stampDevelopment marks zone cells and settlement cells', () => {
+    const map = makeMap(10, 10);
+    map.developmentZones = [{ cells: [{ gx: 2, gz: 2 }, { gx: 3, gz: 2 }] }];
+    const out = stampDevelopment(map);
+    expect(out[2 * 10 + 2]).toBe(1.0);
+    expect(out[2 * 10 + 3]).toBe(1.0);
+    expect(out[0]).toBe(0.0);
+  });
+
+  it('stampForest marks forest as 1.0 and woodland as 0.6', () => {
+    const map = makeMap(10, 10);
+    const landCover = new Grid2D(4, 4, { type: 'uint8' });
+    landCover.set(0, 0, 2);
+    landCover.set(1, 0, 6);
+    map.regionalLayers = {
+      getGrid: () => landCover,
+      getData: () => ({ cellSize: 50, width: 4, height: 4 }),
+    };
+    const out = stampForest(map);
+    expect(out[0]).toBe(1.0);
+    const farIdx = 9 * 10 + 9;
+    expect(out[farIdx]).toBe(0.0);
+  });
+
+  it('stampLandCover populates dominantCover with correct cover type', () => {
+    const map = makeMap(10, 10);
+    const landCover = new Grid2D(4, 4, { type: 'uint8' });
+    landCover.set(0, 0, 3);
+    landCover.set(1, 0, 8);
+    map.regionalLayers = {
+      getGrid: () => landCover,
+      getData: () => ({ cellSize: 50, width: 4, height: 4 }),
+    };
+    const { data, dominantCover } = stampLandCover(map);
+    expect(data[0]).toBe(1.0);
+    expect(dominantCover[0]).toBe(3);
   });
 });

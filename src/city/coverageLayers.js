@@ -63,6 +63,137 @@ export function applyHashNoise(grid, w, h, baseAmplitude, seed) {
 }
 
 /**
+ * Stamp water mask onto a float grid. Returns Float32Array.
+ */
+export function stampWater(map) {
+  const { width: w, height: h } = map;
+  const out = new Float32Array(w * h);
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      if (map.waterMask.get(gx, gz) > 0) out[gz * w + gx] = 1.0;
+    }
+  }
+  return out;
+}
+
+/**
+ * Stamp road grid with 2-cell buffer. Returns Float32Array.
+ */
+export function stampRoad(map) {
+  const { width: w, height: h } = map;
+  const out = new Float32Array(w * h);
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      if (map.roadGrid.get(gx, gz) === 0) continue;
+      for (let dz = -2; dz <= 2; dz++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const nx = gx + dx, nz = gz + dz;
+          if (nx >= 0 && nz >= 0 && nx < w && nz < h) {
+            out[nz * w + nx] = 1.0;
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Stamp development zones + regional settlement cells. Returns Float32Array.
+ * Includes road cells + 2-cell buffer (matches old _buildDevelopedProximity behavior).
+ */
+export function stampDevelopment(map) {
+  const { width: w, height: h, cellSize: cs } = map;
+  const out = new Float32Array(w * h);
+
+  if (map.developmentZones) {
+    for (const zone of map.developmentZones) {
+      for (const c of zone.cells) out[c.gz * w + c.gx] = 1.0;
+    }
+  }
+
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      if (map.roadGrid.get(gx, gz) === 0) continue;
+      for (let dz = -2; dz <= 2; dz++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const nx = gx + dx, nz = gz + dz;
+          if (nx >= 0 && nz >= 0 && nx < w && nz < h) {
+            out[nz * w + nx] = 1.0;
+          }
+        }
+      }
+    }
+  }
+
+  const regionalLandCover = map.regionalLayers.getGrid('landCover');
+  const rcs = map.regionalLayers.getData('params').cellSize;
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      if (out[gz * w + gx] > 0) continue;
+      const wx = map.originX + gx * cs;
+      const wz = map.originZ + gz * cs;
+      const rx = Math.min(Math.round(wx / rcs), regionalLandCover.width - 1);
+      const rz = Math.min(Math.round(wz / rcs), regionalLandCover.height - 1);
+      if (regionalLandCover.get(rx, rz) === 5) out[gz * w + gx] = 1.0;
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Stamp forest cells (landCover=2 or 6) from regional grid. Returns Float32Array.
+ * Uses nearest-neighbor lookup (blur handles smoothing).
+ */
+export function stampForest(map) {
+  const { width: w, height: h, cellSize: cs } = map;
+  const out = new Float32Array(w * h);
+  const regionalLandCover = map.regionalLayers.getGrid('landCover');
+  const rcs = map.regionalLayers.getData('params').cellSize;
+
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      const wx = map.originX + gx * cs;
+      const wz = map.originZ + gz * cs;
+      const rx = Math.min(Math.round(wx / rcs), regionalLandCover.width - 1);
+      const rz = Math.min(Math.round(wz / rcs), regionalLandCover.height - 1);
+      const cover = regionalLandCover.get(rx, rz);
+      if (cover === 2) out[gz * w + gx] = 1.0;
+      else if (cover === 6) out[gz * w + gx] = 0.6;
+    }
+  }
+  return out;
+}
+
+/**
+ * Stamp remaining land cover types (farmland=1, moorland=3, marsh=4, bare rock=7, scrub=8).
+ * Returns an object { data: Float32Array, dominantCover: Uint8Array }.
+ */
+export function stampLandCover(map) {
+  const { width: w, height: h, cellSize: cs } = map;
+  const data = new Float32Array(w * h);
+  const dominantCover = new Uint8Array(w * h);
+  const regionalLandCover = map.regionalLayers.getGrid('landCover');
+  const rcs = map.regionalLayers.getData('params').cellSize;
+
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      const wx = map.originX + gx * cs;
+      const wz = map.originZ + gz * cs;
+      const rx = Math.min(Math.round(wx / rcs), regionalLandCover.width - 1);
+      const rz = Math.min(Math.round(wz / rcs), regionalLandCover.height - 1);
+      const cover = regionalLandCover.get(rx, rz);
+      if (cover === 1 || cover === 3 || cover === 4 || cover === 7 || cover === 8) {
+        data[gz * w + gx] = 1.0;
+        dominantCover[gz * w + gx] = cover;
+      }
+    }
+  }
+  return { data, dominantCover };
+}
+
+/**
  * Enforce priority suppression across layers.
  * Layers are in priority order (index 0 = highest).
  * Each layer object must have a `.data` Float32Array.
