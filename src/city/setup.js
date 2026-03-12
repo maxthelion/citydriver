@@ -192,11 +192,11 @@ export function setupCity(layers, settlement, rng) {
 // Nucleus placement
 // ============================================================
 
-// Placement tuning constants
-const NUCLEUS_MIN_SPACING = 15;          // min grid cells between nuclei
-const NUCLEUS_SUPPRESSION_RADIUS = 40;   // radius of value suppression after placement
+// Placement tuning constants (meters)
+const NUCLEUS_MIN_SPACING_M = 300;
+const NUCLEUS_SUPPRESSION_RADIUS_M = 800;
 const NUCLEUS_SUPPRESSION_CORE = 0.3;    // fraction of radius with flat suppression
-const NUCLEUS_WATERFRONT_DIST = 6;       // cells from water to count as waterfront
+const NUCLEUS_WATERFRONT_DIST_M = 120;
 const NUCLEUS_WATERFRONT_RATIO = 0.5;    // max fraction of nuclei that can be waterfront
 const NUCLEUS_FLAT_BONUS = 0.6;          // score bonus for flat terrain (slope < threshold)
 const NUCLEUS_FLAT_SLOPE_MAX = 0.1;      // slope threshold for flat bonus
@@ -216,6 +216,11 @@ function nucleusCap(tier) {
 function placeNuclei(map, tier, rng) {
   const cap = nucleusCap(tier);
   const nuclei = [];
+
+  // Convert meter constants to cells at runtime
+  const minSpacing = Math.round(NUCLEUS_MIN_SPACING_M / map.cellSize);
+  const suppressionRadius = Math.round(NUCLEUS_SUPPRESSION_RADIUS_M / map.cellSize);
+  const waterfrontDist = Math.round(NUCLEUS_WATERFRONT_DIST_M / map.cellSize);
 
   // Center nucleus at settlement location (nudge to nearest buildable cell if on water)
   let centerGx = Math.round((map.settlement.gx * (map.regionalLayers.getData('params').cellSize) - map.originX) / map.cellSize);
@@ -279,8 +284,8 @@ function placeNuclei(map, tier, rng) {
   // Count center nucleus if it's waterfront, and apply initial suppression
   if (nuclei.length > 0) {
     const cn = nuclei[0];
-    if (waterDist[cn.gz * map.width + cn.gx] < NUCLEUS_WATERFRONT_DIST) waterfrontCount++;
-    _addSuppression(suppression, map.width, map.height, cn.gx, cn.gz, NUCLEUS_SUPPRESSION_RADIUS);
+    if (waterDist[cn.gz * map.width + cn.gx] < waterfrontDist) waterfrontCount++;
+    _addSuppression(suppression, map.width, map.height, cn.gx, cn.gz, suppressionRadius);
   }
 
   // Seed nuclei at regional settlement positions (before greedy land-value loop)
@@ -323,7 +328,7 @@ function placeNuclei(map, tier, rng) {
     // Skip if too close to existing nuclei
     let tooClose = false;
     for (const n of nuclei) {
-      if (distance2D(gx, gz, n.gx, n.gz) < NUCLEUS_MIN_SPACING) {
+      if (distance2D(gx, gz, n.gx, n.gz) < minSpacing) {
         tooClose = true;
         break;
       }
@@ -332,7 +337,7 @@ function placeNuclei(map, tier, rng) {
 
     const rsTier = rs.tier || 3;
 
-    if (waterDist[gz * map.width + gx] < NUCLEUS_WATERFRONT_DIST) waterfrontCount++;
+    if (waterDist[gz * map.width + gx] < waterfrontDist) waterfrontCount++;
 
     nuclei.push({
       gx,
@@ -342,7 +347,7 @@ function placeNuclei(map, tier, rng) {
       index: nuclei.length,
     });
 
-    _addSuppression(suppression, map.width, map.height, gx, gz, NUCLEUS_SUPPRESSION_RADIUS);
+    _addSuppression(suppression, map.width, map.height, gx, gz, suppressionRadius);
   }
 
   // Greedy placement: score = value * buildability, with spacing enforcement
@@ -353,18 +358,18 @@ function placeNuclei(map, tier, rng) {
     const waterfrontFull = waterfrontCount >= maxWaterfront;
 
     for (const c of buildableCells) {
-      if (waterfrontFull && waterDist[c.gz * map.width + c.gx] < NUCLEUS_WATERFRONT_DIST) continue;
+      if (waterfrontFull && waterDist[c.gz * map.width + c.gx] < waterfrontDist) continue;
 
       let minDist = Infinity;
       for (const n of nuclei) {
         const d = distance2D(c.gx, c.gz, n.gx, n.gz);
         if (d < minDist) minDist = d;
       }
-      if (minDist < NUCLEUS_MIN_SPACING) continue;
+      if (minDist < minSpacing) continue;
 
       const b = map.buildability.get(c.gx, c.gz);
       const v = Math.max(0, map.landValue.get(c.gx, c.gz) - suppression[c.gz * map.width + c.gx]);
-      const spacingBonus = Math.min(1, minDist / (NUCLEUS_MIN_SPACING * 2));
+      const spacingBonus = Math.min(1, minDist / (minSpacing * 2));
       const s = map.slope ? map.slope.get(c.gx, c.gz) : 0;
       const flatBonus = s < NUCLEUS_FLAT_SLOPE_MAX
         ? NUCLEUS_FLAT_BONUS * (1 - s / NUCLEUS_FLAT_SLOPE_MAX) : 0;
@@ -379,7 +384,7 @@ function placeNuclei(map, tier, rng) {
 
     if (!bestCell) break;
 
-    const isWaterfront = waterDist[bestCell.gz * map.width + bestCell.gx] < NUCLEUS_WATERFRONT_DIST;
+    const isWaterfront = waterDist[bestCell.gz * map.width + bestCell.gx] < waterfrontDist;
     if (isWaterfront) waterfrontCount++;
 
     const nucleusTier = maxRegionalTier + 1 + Math.floor(nuclei.length / 4);
@@ -391,7 +396,7 @@ function placeNuclei(map, tier, rng) {
       index: nuclei.length,
     });
 
-    _addSuppression(suppression, map.width, map.height, bestCell.gx, bestCell.gz, NUCLEUS_SUPPRESSION_RADIUS);
+    _addSuppression(suppression, map.width, map.height, bestCell.gx, bestCell.gz, suppressionRadius);
   }
 
   return nuclei;
