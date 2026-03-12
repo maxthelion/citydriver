@@ -58,11 +58,12 @@ function stampQuad(corners, bitmap, cs, ox, oz) {
   }
 }
 
-/** Build a road bitmap by stamping road polylines at their full width. */
-function buildRoadBitmap(map) {
+/** Build a road bitmap from filtered roads. */
+function buildFilteredRoadBitmap(map, filterFn) {
   const { width, height, cellSize: cs, originX: ox, originZ: oz } = map;
   const bitmap = new Grid2D(width, height, { type: 'uint8' });
   for (const road of map.roads) {
+    if (!filterFn(road)) continue;
     const polyline = road.polyline;
     if (!polyline || polyline.length < 2) continue;
     const halfW = (road.width || 6) / 2;
@@ -93,6 +94,10 @@ function buildRoadBitmap(map) {
     }
   }
   return bitmap;
+}
+
+function buildRoadBitmap(map) {
+  return buildFilteredRoadBitmap(map, () => true);
 }
 
 /** Build a plot bitmap by stamping every placed plot's full footprint. */
@@ -144,6 +149,24 @@ describe('plot placement bitmap verification', { timeout: 60000 }, () => {
       }
     }
     expect(roadCells).toBe(0);
+  });
+
+  it('ribbon street bitmap does not intersect skeleton road bitmap', () => {
+    const { map } = getShared();
+    const skeletonBitmap = buildFilteredRoadBitmap(map, r => r.source !== 'land-first');
+    const ribbonBitmap = buildFilteredRoadBitmap(map, r => r.source === 'land-first' && r.hierarchy === 'local');
+
+    const overlap = bitmapIntersection(ribbonBitmap, skeletonBitmap);
+
+    let skeletonCells = 0, ribbonCells = 0;
+    for (let gz = 0; gz < map.height; gz++) {
+      for (let gx = 0; gx < map.width; gx++) {
+        if (skeletonBitmap.get(gx, gz) > 0) skeletonCells++;
+        if (ribbonBitmap.get(gx, gz) > 0) ribbonCells++;
+      }
+    }
+    console.log(`  Skeleton cells: ${skeletonCells}, Ribbon cells: ${ribbonCells}, Overlap: ${overlap}`);
+    expect(overlap).toBe(0);
   });
 
   it('plot bitmap does not intersect road bitmap', () => {
