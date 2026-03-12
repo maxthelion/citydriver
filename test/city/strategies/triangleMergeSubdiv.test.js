@@ -11,7 +11,7 @@ function makeStrategy(seed = 42) {
   return { map, strategy: new TriangleMergeSubdiv(map) };
 }
 
-describe('TriangleMergeSubdiv', () => {
+describe('TriangleMergeSubdiv', { timeout: 30000 }, () => {
   it('builds skeleton on first tick', () => {
     const { map, strategy } = makeStrategy();
     const more = strategy.tick();

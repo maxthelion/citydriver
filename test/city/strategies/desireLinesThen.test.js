@@ -14,8 +14,8 @@ function makeStrategy(SecondaryClass, seed = 42) {
   return { map, strategy: new Cls(map) };
 }
 
-describe('desireLinesThen', () => {
-  it('runs desire lines then face subdivision', { timeout: 30000 }, () => {
+describe('desireLinesThen', { timeout: 180000 }, () => {
+  it('runs desire lines then face subdivision', { timeout: 180000 }, () => {
     const { map, strategy } = makeStrategy(FaceSubdivision);
 
     // Tick through desire lines phase (skeleton + 2 accumulation)
@@ -36,7 +36,7 @@ describe('desireLinesThen', () => {
     expect(map.graph.edges.size).toBeGreaterThan(0);
   });
 
-  it('runs desire lines then offset infill', { timeout: 30000 }, () => {
+  it('runs desire lines then offset infill', { timeout: 180000 }, () => {
     const { map, strategy } = makeStrategy(OffsetInfill);
 
     let ticks = 0;

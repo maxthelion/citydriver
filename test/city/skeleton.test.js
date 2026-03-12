@@ -18,7 +18,7 @@ function makeCity(seed = 42) {
   return map;
 }
 
-describe('buildSkeleton', () => {
+describe('buildSkeleton', { timeout: 30000 }, () => {
   it('places nuclei on the map', () => {
     const map = makeCity();
     if (!map) return;

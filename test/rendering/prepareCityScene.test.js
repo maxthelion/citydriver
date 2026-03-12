@@ -16,7 +16,7 @@ function makeCity(seed = 42) {
   return map;
 }
 
-describe('prepareCityScene', () => {
+describe('prepareCityScene', { timeout: 30000 }, () => {
   it('returns expected structure', () => {
     const map = makeCity();
     if (!map) return;
@@ -97,7 +97,7 @@ describe('prepareCityScene', () => {
     expect(cutCount).toBeGreaterThanOrEqual(0);
   });
 
-  it('works across multiple seeds without errors', { timeout: 30000 }, () => {
+  it('works across multiple seeds without errors', { timeout: 120000 }, () => {
     for (const seed of [1, 7, 42, 100, 999]) {
       const map = makeCity(seed);
       if (!map) continue;

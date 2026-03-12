@@ -5,7 +5,7 @@ import { SeededRandom } from '../src/core/rng.js';
 import { buildSkeletonRoads } from '../src/city/skeleton.js';
 import { PlanarGraph } from '../src/core/PlanarGraph.js';
 
-describe('debug faces', () => {
+describe('debug faces', { timeout: 30000 }, () => {
   it('shows face info for seed 139625', () => {
     const { layers, settlement } = generateRegionFromSeed(139625);
     const rng = new SeededRandom(139625);

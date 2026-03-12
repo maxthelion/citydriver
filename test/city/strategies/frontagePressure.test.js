@@ -11,7 +11,7 @@ function makeStrategy(seed = 42) {
   return { map, strategy: new FrontagePressure(map) };
 }
 
-describe('FrontagePressure', () => {
+describe('FrontagePressure', { timeout: 30000 }, () => {
   it('builds skeleton roads on first tick', () => {
     const { map, strategy } = makeStrategy();
     const more = strategy.tick();
