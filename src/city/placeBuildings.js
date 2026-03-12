@@ -351,6 +351,10 @@ export function placeTerracedRows(map, _seed) {
   for (const zone of zones) {
     if (!zone._streets) continue;
     const plotWidth = plotWidthForDensity(zone.distFromNucleus);
+    // Cap plot depth to half the street spacing minus road width, preventing overlap
+    const spacing = zone._spacing || 30;
+    const roadHalfW = 3;
+    const plotDepth = Math.min(PLOT_TOTAL_DEPTH, (spacing / 2) - roadHalfW - 1);
 
     for (const street of zone._streets) {
       if (street.length < 2) continue;
@@ -406,6 +410,22 @@ export function placeTerracedRows(map, _seed) {
           const gx = lx / cs;
           const gz = lz / cs;
           if (gx < 1 || gz < 1 || gx >= map.width - 1 || gz >= map.height - 1) continue;
+
+          // Check buildability at front and back of plot
+          if (map.buildability.sample(gx, gz) < 0.2) continue;
+          if (map.waterMask.get(Math.floor(gx), Math.floor(gz))) continue;
+          if (map.roadGrid && map.roadGrid.get(Math.floor(gx), Math.floor(gz)) > 0) continue;
+
+          // Also check back of plot
+          const backX = frontX + perpX * plotDepth;
+          const backZ = frontZ + perpZ * plotDepth;
+          const blx = backX - ox, blz = backZ - oz;
+          const bgx = blx / cs, bgz = blz / cs;
+          if (bgx >= 1 && bgz >= 1 && bgx < map.width - 1 && bgz < map.height - 1) {
+            if (map.waterMask.get(Math.floor(bgx), Math.floor(bgz))) continue;
+            if (map.roadGrid && map.roadGrid.get(Math.floor(bgx), Math.floor(bgz)) > 0) continue;
+          }
+
           const terrainY = map.elevation.sample(gx, gz);
 
           dummy.position.set(lx, terrainY, lz);

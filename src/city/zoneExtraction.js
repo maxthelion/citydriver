@@ -258,15 +258,18 @@ export function extractDevelopmentZones(map) {
     // Step 3: Morphological close
     const closed = morphClose(mask, morphRadius);
 
-    // Remove cells that were added by dilation but fail slope check
-    if (map.slope) {
-      for (let gz = 0; gz < height; gz++) {
-        for (let gx = 0; gx < width; gx++) {
-          if (closed.get(gx, gz) > 0 && mask.get(gx, gz) === 0) {
-            if (map.slope.get(gx, gz) >= ZONE_SLOPE_MAX) {
-              closed.set(gx, gz, 0);
-            }
-          }
+    // Remove cells that were added by dilation but are unbuildable.
+    // This ensures rivers and roads split zones into separate parcels.
+    for (let gz = 0; gz < height; gz++) {
+      for (let gx = 0; gx < width; gx++) {
+        if (closed.get(gx, gz) === 0) continue;
+        // Water cells must never be in a zone
+        if (map.waterMask.get(gx, gz) > 0) { closed.set(gx, gz, 0); continue; }
+        // Road cells split zones (roads are barriers)
+        if (map.roadGrid && map.roadGrid.get(gx, gz) > 0) { closed.set(gx, gz, 0); continue; }
+        // Cells added by dilation that fail slope check
+        if (mask.get(gx, gz) === 0 && map.slope && map.slope.get(gx, gz) >= ZONE_SLOPE_MAX) {
+          closed.set(gx, gz, 0);
         }
       }
     }
