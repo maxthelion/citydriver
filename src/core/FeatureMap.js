@@ -816,7 +816,10 @@ export class FeatureMap {
         }
         const proximity = 1.0 / (1.0 + minDist / LV_PROXIMITY_FALLOFF_M);
 
-        let base = localFlatness * LV_FLATNESS_WEIGHT + proximity * LV_PROXIMITY_WEIGHT;
+        // Reduce flatness weight near nucleus — steep land near center is still prime
+        const adjustedFlatnessW = LV_FLATNESS_WEIGHT * (1 - proximity * 0.3);
+        const adjustedProximityW = 1 - adjustedFlatnessW;
+        let base = localFlatness * adjustedFlatnessW + proximity * adjustedProximityW;
 
         // Water bonus: buildable land near water gets a small additive bonus
         let waterBonus = 0;

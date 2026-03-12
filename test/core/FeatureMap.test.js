@@ -176,14 +176,31 @@ describe('revised land value', () => {
     expect(center).toBeGreaterThan(far);
   });
 
-  it('steep ground has low value regardless of location', () => {
+  it('steep ground far from nucleus has low value', () => {
     const map = new FeatureMap(60, 60, 5);
     const elevation = new Grid2D(60, 60, { cellSize: 5, fill: 100 });
     const slope = new Grid2D(60, 60, { cellSize: 5, fill: 0.35 });
     map.setTerrain(elevation, slope);
     map.nuclei = [{ gx: 30, gz: 30, type: 'market' }];
     map.computeLandValue();
-    expect(map.landValue.get(30, 30)).toBeLessThan(0.5);
+    // Far corner is ~140m from nucleus; proximity ≈ 0.59, flatness = 0.125
+    // adjustedFlatnessW ≈ 0.42, base ≈ 0.125*0.42 + 0.59*0.58 ≈ 0.39 — well below 0.5
+    expect(map.landValue.get(55, 55)).toBeLessThan(0.5);
+  });
+
+  it('sloped cell near nucleus scores higher than sloped cell far away', () => {
+    // Both cells have identical slope=0.2; difference must come from proximity boosting
+    // near-nucleus flatness weight so the proximity term dominates centrally.
+    const map = new FeatureMap(120, 120, 5);
+    const elevation = new Grid2D(120, 120, { cellSize: 5, fill: 100 });
+    const slope = new Grid2D(120, 120, { cellSize: 5, fill: 0.2 });
+    map.setTerrain(elevation, slope);
+    map.nuclei = [{ gx: 60, gz: 60, type: 'market' }];
+    map.computeLandValue();
+    // Cell 2 steps from nucleus (~10m away) vs cell 65 steps away (~325m away)
+    const nearNucleus = map.landValue.get(62, 60);
+    const farFromNucleus = map.landValue.get(5, 5);
+    expect(nearNucleus).toBeGreaterThan(farFromNucleus);
   });
 
   it('water proximity adds bonus to nearby land', () => {
