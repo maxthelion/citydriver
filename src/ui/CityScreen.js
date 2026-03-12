@@ -84,6 +84,7 @@ export class CityScreen {
 
     // Unified coverage layers — continuous float grids for organic rendering boundaries
     this._coverage = computeCoverageLayers(this._map, this._seed);
+    this._map._coverage = this._coverage;
 
     // Meshes (tracked for layer toggle)
     this._meshLayers = {};

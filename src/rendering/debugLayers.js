@@ -626,6 +626,27 @@ export function renderStreetOrientation(ctx, map) {
 }
 
 /**
+ * Generic coverage layer heatmap renderer.
+ * Reads from map._coverage[layerName].
+ */
+function renderCoverageLayer(ctx, map, layerName, color) {
+  const { width, height } = map;
+  const layer = map._coverage && map._coverage[layerName];
+  if (!layer) return;
+
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      const v = layer[gz * width + gx];
+      const r = Math.round(color[0] * v * 255);
+      const g = Math.round(color[1] * v * 255);
+      const b = Math.round(color[2] * v * 255);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(gx, gz, 1, 1);
+    }
+  }
+}
+
+/**
  * Available layer definitions for the debug viewer.
  */
 export const LAYERS = [
@@ -648,4 +669,9 @@ export const LAYERS = [
   { name: 'Zone Priority', render: renderZonePriority },
   { name: 'Street Orientation', render: renderStreetOrientation },
   { name: 'City Blocks', render: renderCityBlocks },
+  { name: 'Coverage: Water', render: (ctx, map) => renderCoverageLayer(ctx, map, 'water', [0.2, 0.4, 1.0]) },
+  { name: 'Coverage: Road', render: (ctx, map) => renderCoverageLayer(ctx, map, 'road', [0.8, 0.8, 0.7]) },
+  { name: 'Coverage: Development', render: (ctx, map) => renderCoverageLayer(ctx, map, 'development', [1.0, 0.7, 0.3]) },
+  { name: 'Coverage: Forest', render: (ctx, map) => renderCoverageLayer(ctx, map, 'forest', [0.1, 0.7, 0.1]) },
+  { name: 'Coverage: Land Cover', render: (ctx, map) => renderCoverageLayer(ctx, map, 'landCover', [0.7, 0.6, 0.3]) },
 ];
