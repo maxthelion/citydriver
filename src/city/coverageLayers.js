@@ -210,3 +210,40 @@ export function enforcePriority(layers, w, h) {
     }
   }
 }
+
+/** Layer definitions: name, stamp function, blur radius, noise amplitude, seed offset. */
+const LAYER_DEFS = [
+  { name: 'water',       stamp: stampWater,       blur: 6, noise: 0.15, seed: 1 },
+  { name: 'road',        stamp: stampRoad,        blur: 3, noise: 0.10, seed: 2 },
+  { name: 'development', stamp: stampDevelopment, blur: 8, noise: 0.15, seed: 3 },
+  { name: 'forest',      stamp: stampForest,      blur: 4, noise: 0.20, seed: 4 },
+];
+
+/**
+ * Compute all coverage layers for the given city map.
+ * Returns { water, road, development, forest, landCover, dominantCover }.
+ */
+export function computeCoverageLayers(map, seed = 42) {
+  const { width: w, height: h } = map;
+
+  const ordered = [];
+  const result = {};
+  for (const def of LAYER_DEFS) {
+    let data = def.stamp(map);
+    data = separableBoxBlur(data, w, h, def.blur);
+    data = applyHashNoise(data, w, h, def.noise, seed + def.seed);
+    ordered.push({ data });
+    result[def.name] = data;
+  }
+
+  const lc = stampLandCover(map);
+  lc.data = separableBoxBlur(lc.data, w, h, 4);
+  lc.data = applyHashNoise(lc.data, w, h, 0.15, seed + 5);
+  ordered.push({ data: lc.data });
+  result.landCover = lc.data;
+  result.dominantCover = lc.dominantCover;
+
+  enforcePriority(ordered, w, h);
+
+  return result;
+}

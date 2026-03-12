@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { separableBoxBlur, applyHashNoise, enforcePriority, stampWater, stampRoad, stampDevelopment, stampForest, stampLandCover } from '../../src/city/coverageLayers.js';
+import { separableBoxBlur, applyHashNoise, enforcePriority, stampWater, stampRoad, stampDevelopment, stampForest, stampLandCover, computeCoverageLayers } from '../../src/city/coverageLayers.js';
 import { Grid2D } from '../../src/core/Grid2D.js';
 
 describe('separableBoxBlur', () => {
@@ -193,5 +193,57 @@ describe('stamp functions', () => {
     const { data, dominantCover } = stampLandCover(map);
     expect(data[0]).toBe(1.0);
     expect(dominantCover[0]).toBe(3);
+  });
+});
+
+describe('computeCoverageLayers', () => {
+  function makeMap(w, h) {
+    const landCover = new Grid2D(4, 4, { type: 'uint8' });
+    return {
+      width: w, height: h, cellSize: 5,
+      originX: 0, originZ: 0,
+      waterMask: new Grid2D(w, h, { type: 'uint8' }),
+      roadGrid: new Grid2D(w, h, { type: 'uint8' }),
+      developmentZones: [],
+      regionalLayers: {
+        getGrid: () => landCover,
+        getData: () => ({ cellSize: 50, width: 4, height: 4 }),
+      },
+    };
+  }
+
+  it('returns all expected layer names', () => {
+    const map = makeMap(20, 20);
+    const layers = computeCoverageLayers(map);
+    expect(layers.water).toBeInstanceOf(Float32Array);
+    expect(layers.road).toBeInstanceOf(Float32Array);
+    expect(layers.development).toBeInstanceOf(Float32Array);
+    expect(layers.forest).toBeInstanceOf(Float32Array);
+    expect(layers.landCover).toBeInstanceOf(Float32Array);
+    expect(layers.dominantCover).toBeInstanceOf(Uint8Array);
+  });
+
+  it('all layers have correct size', () => {
+    const map = makeMap(20, 20);
+    const layers = computeCoverageLayers(map);
+    const n = 20 * 20;
+    expect(layers.water.length).toBe(n);
+    expect(layers.road.length).toBe(n);
+    expect(layers.development.length).toBe(n);
+    expect(layers.forest.length).toBe(n);
+    expect(layers.landCover.length).toBe(n);
+  });
+
+  it('layers sum to <= 1.0 at every cell after priority suppression', () => {
+    const map = makeMap(20, 20);
+    for (let i = 0; i < 5; i++) map.waterMask.set(i, 5, 1);
+    const landCover = map.regionalLayers.getGrid('landCover');
+    for (let x = 0; x < 4; x++) for (let z = 0; z < 4; z++) landCover.set(x, z, 2);
+    const layers = computeCoverageLayers(map);
+    for (let i = 0; i < 20 * 20; i++) {
+      const sum = layers.water[i] + layers.road[i] + layers.development[i]
+        + layers.forest[i] + layers.landCover[i];
+      expect(sum).toBeLessThanOrEqual(1.01);
+    }
   });
 });
