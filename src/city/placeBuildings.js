@@ -312,6 +312,91 @@ function plotWidthForDensity(distFromNucleus) {
  * @param {number} _seed
  * @returns {THREE.Group}
  */
+/**
+ * Get the 4 world-space corners of a plot rectangle.
+ * The plot's local frame: front edge at origin, extends plotDepth in the perp direction.
+ * Along-road axis = (adx, adz), perp axis = (perpX, perpZ).
+ */
+function _plotCorners(frontX, frontZ, adx, adz, perpX, perpZ, plotWidth, plotDepth) {
+  const hw = plotWidth / 2;
+  return [
+    { x: frontX - adx * hw,               z: frontZ - adz * hw },
+    { x: frontX + adx * hw,               z: frontZ + adz * hw },
+    { x: frontX + adx * hw + perpX * plotDepth, z: frontZ + adz * hw + perpZ * plotDepth },
+    { x: frontX - adx * hw + perpX * plotDepth, z: frontZ - adz * hw + perpZ * plotDepth },
+  ];
+}
+
+/**
+ * Check whether a rotated rectangle collides with an occupancy grid.
+ * Rasterises the rectangle's axis-aligned bounding box and tests each cell
+ * inside the rotated rect against the grid.
+ * Returns true if ANY cell is occupied.
+ */
+function _rectCollides(corners, occupancy, cs, ox, oz) {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const c of corners) {
+    if (c.x < minX) minX = c.x;
+    if (c.x > maxX) maxX = c.x;
+    if (c.z < minZ) minZ = c.z;
+    if (c.z > maxZ) maxZ = c.z;
+  }
+  const gx0 = Math.max(0, Math.floor((minX - ox) / cs));
+  const gx1 = Math.min(occupancy.width - 1, Math.ceil((maxX - ox) / cs));
+  const gz0 = Math.max(0, Math.floor((minZ - oz) / cs));
+  const gz1 = Math.min(occupancy.height - 1, Math.ceil((maxZ - oz) / cs));
+
+  for (let gz = gz0; gz <= gz1; gz++) {
+    for (let gx = gx0; gx <= gx1; gx++) {
+      const wx = ox + gx * cs;
+      const wz = oz + gz * cs;
+      if (_pointInQuad(wx, wz, corners) && occupancy.get(gx, gz) > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Stamp a rotated rectangle onto the occupancy grid (mark cells as occupied).
+ */
+function _stampRect(corners, occupancy, cs, ox, oz) {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const c of corners) {
+    if (c.x < minX) minX = c.x;
+    if (c.x > maxX) maxX = c.x;
+    if (c.z < minZ) minZ = c.z;
+    if (c.z > maxZ) maxZ = c.z;
+  }
+  const gx0 = Math.max(0, Math.floor((minX - ox) / cs));
+  const gx1 = Math.min(occupancy.width - 1, Math.ceil((maxX - ox) / cs));
+  const gz0 = Math.max(0, Math.floor((minZ - oz) / cs));
+  const gz1 = Math.min(occupancy.height - 1, Math.ceil((maxZ - oz) / cs));
+
+  for (let gz = gz0; gz <= gz1; gz++) {
+    for (let gx = gx0; gx <= gx1; gx++) {
+      const wx = ox + gx * cs;
+      const wz = oz + gz * cs;
+      if (_pointInQuad(wx, wz, corners)) {
+        occupancy.set(gx, gz, 1);
+      }
+    }
+  }
+}
+
+/** Point-in-convex-quad using cross-product winding test. */
+function _pointInQuad(px, pz, corners) {
+  // Check that point is on the same side of all 4 edges
+  for (let i = 0; i < 4; i++) {
+    const a = corners[i];
+    const b = corners[(i + 1) % 4];
+    const cross = (b.x - a.x) * (pz - a.z) - (b.z - a.z) * (px - a.x);
+    if (cross < 0) return false;
+  }
+  return true;
+}
+
 export function placeTerracedRows(map, _seed) {
   const group = new THREE.Group();
   const ox = map.originX, oz = map.originZ;
@@ -322,12 +407,24 @@ export function placeTerracedRows(map, _seed) {
 
   const templateGeo = _buildPlotTemplate();
 
-  // First pass: count total plots across all zones
+  // Build occupancy grid: water + unbuildable + skeleton/collector roads = occupied.
+  // Ribbon (local land-first) roads are excluded — plots are designed to line them.
+  const { Grid2D } = _getGrid2D(map);
+  const occupancy = new Grid2D(map.width, map.height, { type: 'uint8' });
+  for (let gz = 0; gz < map.height; gz++) {
+    for (let gx = 0; gx < map.width; gx++) {
+      if (map.waterMask.get(gx, gz) > 0) { occupancy.set(gx, gz, 1); continue; }
+      if (map.buildability.get(gx, gz) < 0.15) { occupancy.set(gx, gz, 1); continue; }
+    }
+  }
+  // Stamp non-ribbon roads onto occupancy (skeleton, collector, bridges)
+  _stampRoadsOntoOccupancy(map, occupancy);
+
+  // First pass: count max possible plots for InstancedMesh allocation
   let totalPlots = 0;
   for (const zone of zones) {
     if (!zone._streets) continue;
     const plotWidth = plotWidthForDensity(zone.distFromNucleus);
-
     for (const street of zone._streets) {
       if (street.length < 2) continue;
       let streetLen = 0;
@@ -337,7 +434,7 @@ export function placeTerracedRows(map, _seed) {
         streetLen += Math.sqrt(dx * dx + dz * dz);
       }
       if (streetLen < plotWidth * 2) continue;
-      totalPlots += Math.floor(streetLen / plotWidth) * 2; // both sides
+      totalPlots += Math.floor(streetLen / plotWidth) * 2;
     }
   }
 
@@ -351,7 +448,6 @@ export function placeTerracedRows(map, _seed) {
   for (const zone of zones) {
     if (!zone._streets) continue;
     const plotWidth = plotWidthForDensity(zone.distFromNucleus);
-    // Cap plot depth to half the street spacing minus road width, preventing overlap
     const spacing = zone._spacing || 30;
     const roadHalfW = 3;
     const plotDepth = Math.min(PLOT_TOTAL_DEPTH, (spacing / 2) - roadHalfW - 1);
@@ -393,7 +489,10 @@ export function placeTerracedRows(map, _seed) {
         const px = ax + sdx * t;
         const pz = az + sdz * t;
 
-        // Place on both sides of the street
+        // Along-road unit vector
+        const adx = sdx / segLen;
+        const adz = sdz / segLen;
+
         for (const side of [-1, 1]) {
           const perpX = (-sdz / segLen) * side;
           const perpZ = (sdx / segLen) * side;
@@ -405,27 +504,20 @@ export function placeTerracedRows(map, _seed) {
           const frontX = px + perpX * frontSetback;
           const frontZ = pz + perpZ * frontSetback;
 
+          // Check full plot rectangle against occupancy grid
+          const corners = _plotCorners(
+            frontX, frontZ, adx, adz, perpX, perpZ, plotWidth, plotDepth
+          );
+          if (_rectCollides(corners, occupancy, cs, ox, oz)) continue;
+
+          // Plot is clear — stamp it into occupancy and place instance
+          _stampRect(corners, occupancy, cs, ox, oz);
+
           const lx = frontX - ox;
           const lz = frontZ - oz;
           const gx = lx / cs;
           const gz = lz / cs;
           if (gx < 1 || gz < 1 || gx >= map.width - 1 || gz >= map.height - 1) continue;
-
-          // Check buildability at front and back of plot
-          if (map.buildability.sample(gx, gz) < 0.2) continue;
-          if (map.waterMask.get(Math.floor(gx), Math.floor(gz))) continue;
-          if (map.roadGrid && map.roadGrid.get(Math.floor(gx), Math.floor(gz)) > 0) continue;
-
-          // Also check back of plot
-          const backX = frontX + perpX * plotDepth;
-          const backZ = frontZ + perpZ * plotDepth;
-          const blx = backX - ox, blz = backZ - oz;
-          const bgx = blx / cs, bgz = blz / cs;
-          if (bgx >= 1 && bgz >= 1 && bgx < map.width - 1 && bgz < map.height - 1) {
-            if (map.waterMask.get(Math.floor(bgx), Math.floor(bgz))) continue;
-            if (map.roadGrid && map.roadGrid.get(Math.floor(bgx), Math.floor(bgz)) > 0) continue;
-          }
-
           const terrainY = map.elevation.sample(gx, gz);
 
           dummy.position.set(lx, terrainY, lz);
@@ -442,4 +534,59 @@ export function placeTerracedRows(map, _seed) {
   mesh.instanceMatrix.needsUpdate = true;
   group.add(mesh);
   return group;
+}
+
+/** Extract Grid2D constructor from the map's existing grids. */
+function _getGrid2D(map) {
+  return { Grid2D: map.waterMask.constructor };
+}
+
+/**
+ * Stamp non-ribbon roads onto the occupancy grid.
+ * Includes skeleton roads, collector connections, and bridges — anything
+ * that isn't a local land-first ribbon street (source='land-first', hierarchy='local').
+ */
+function _stampRoadsOntoOccupancy(map, occupancy) {
+  const cs = map.cellSize;
+  const ox = map.originX, oz = map.originZ;
+  const w = map.width, h = map.height;
+
+  for (const road of map.roads) {
+    // Skip local ribbon roads — plots are designed to line them
+    if (road.source === 'land-first' && road.hierarchy === 'local') continue;
+
+    const polyline = road.polyline;
+    if (!polyline || polyline.length < 2) continue;
+
+    const halfWidth = (road.width || 6) / 2 + 2; // +2m buffer
+
+    for (let i = 0; i < polyline.length - 1; i++) {
+      const ax = polyline[i].x, az = polyline[i].z;
+      const bx = polyline[i + 1].x, bz = polyline[i + 1].z;
+      const dx = bx - ax, dz = bz - az;
+      const segLen = Math.sqrt(dx * dx + dz * dz);
+      if (segLen < 0.01) continue;
+
+      const steps = Math.ceil(segLen / (cs * 0.5));
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const px = ax + dx * t, pz = az + dz * t;
+        const cellRadius = Math.ceil(halfWidth / cs);
+        const cgx = Math.round((px - ox) / cs);
+        const cgz = Math.round((pz - oz) / cs);
+
+        for (let ddz = -cellRadius; ddz <= cellRadius; ddz++) {
+          for (let ddx = -cellRadius; ddx <= cellRadius; ddx++) {
+            const gx = cgx + ddx, gz = cgz + ddz;
+            if (gx < 0 || gx >= w || gz < 0 || gz >= h) continue;
+            const cellX = ox + gx * cs, cellZ = oz + gz * cs;
+            const distSq = (cellX - px) ** 2 + (cellZ - pz) ** 2;
+            if (distSq <= halfWidth * halfWidth) {
+              occupancy.set(gx, gz, 1);
+            }
+          }
+        }
+      }
+    }
+  }
 }
