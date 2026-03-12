@@ -5,6 +5,7 @@ import { SeededRandom } from '../../src/core/rng.js';
 import { LandFirstDevelopment } from '../../src/city/strategies/landFirstDevelopment.js';
 import { computePlotPlacements } from '../../src/city/placeBuildings.js';
 import { Grid2D } from '../../src/core/Grid2D.js';
+import { plotWidthForPressure } from '../../src/city/developmentPressure.js';
 
 // Shared completed map
 let shared;
@@ -238,5 +239,14 @@ describe('plot placement bitmap verification', { timeout: 60000 }, () => {
 
     console.log(`  Plot-plot overlap cells: ${overlapCells}`);
     expect(overlapCells).toBe(0);
+  });
+});
+
+describe('pressure-based plot placement', () => {
+  it('high-pressure zones produce narrower plots than low-pressure zones', () => {
+    const highW = plotWidthForPressure(0.9, 0.5);
+    const lowW = plotWidthForPressure(0.2, 0.5);
+    expect(highW).toBeLessThan(7);
+    expect(lowW).toBeGreaterThan(10);
   });
 });

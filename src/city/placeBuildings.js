@@ -18,6 +18,7 @@ import {
   addFrontDoor, addPorch, addWindows, addWindowSills,
   addExtension, addGroundLevel,
 } from '../buildings/generate.js';
+import { plotWidthForPressure, shouldBeApartment, apartmentDimensions } from './developmentPressure.js';
 
 const PLOT_INTERVAL = 20;   // meters between plot centers along road
 const ROAD_SETBACK = 14;    // meters from road centerline to house front
@@ -294,15 +295,6 @@ function mergeBufferGeometries(geometries) {
 }
 
 /**
- * Determine plot width based on distance from nucleus.
- */
-function plotWidthForDensity(distFromNucleus) {
-  if (distFromNucleus < 100) return 5;   // terraced
-  if (distFromNucleus < 300) return 8;   // semi-detached
-  return 12;                              // detached
-}
-
-/**
  * Place instanced house+fence boxes along ribbon streets from development zones.
  *
  * Reads zone._streets (parallel street polylines) from map.developmentZones.
@@ -432,7 +424,7 @@ export function computePlotPlacements(map) {
 
   for (const zone of zones) {
     if (!zone._streets) continue;
-    const plotWidth = plotWidthForDensity(zone.distFromNucleus);
+    const pressure = zone.pressure ?? 0.5;
     const spacing = zone._spacing || 30;
     const roadHalfW = 3;
     const plotDepth = Math.min(PLOT_TOTAL_DEPTH, (spacing / 2) - roadHalfW - 1);
@@ -440,20 +432,41 @@ export function computePlotPlacements(map) {
     for (const street of zone._streets) {
       if (street.length < 2) continue;
 
+      // Compute total street length
       let streetLen = 0;
       for (let i = 1; i < street.length; i++) {
         const dx = street[i].x - street[i - 1].x;
         const dz = street[i].z - street[i - 1].z;
         streetLen += Math.sqrt(dx * dx + dz * dz);
       }
-      if (streetLen < plotWidth * 2) continue;
+      if (streetLen < 10) continue;
 
-      const houseCount = Math.floor(streetLen / plotWidth);
+      // Walk along street placing variable-width plots
+      let consumed = 0;
       let segIdx = 0, segStart = 0;
+      let plotIdx = 0;
 
-      for (let h = 0; h < houseCount; h++) {
-        const targetDist = (h + 0.5) * plotWidth;
+      while (consumed < streetLen - 2) {
+        // Per-plot width with variation
+        const hashVal = ((plotIdx * 2654435761 + (zone.nucleusIdx || 0) * 2246822519) >>> 0) / 0xffffffff;
+        let pw = plotWidthForPressure(pressure, hashVal);
 
+        // Apartment aggregation (separate hash to avoid correlation)
+        let isApartment = false;
+        let pd = plotDepth;
+        const aptHash = ((plotIdx * 1911520717 + (zone.nucleusIdx || 0) * 374761393) >>> 0) / 0xffffffff;
+        if (shouldBeApartment(pressure, plotIdx, aptHash)) {
+          const apt = apartmentDimensions();
+          pw = apt.plotWidth[0] + aptHash * (apt.plotWidth[1] - apt.plotWidth[0]);
+          pd = Math.min(apt.plotDepth[0] + aptHash * (apt.plotDepth[1] - apt.plotDepth[0]),
+                         (spacing / 2) - roadHalfW - 1);
+          isApartment = true;
+        }
+
+        const targetDist = consumed + pw / 2;
+        if (targetDist > streetLen) break;
+
+        // Advance along street segments to target distance
         while (segIdx < street.length - 2) {
           const dx = street[segIdx + 1].x - street[segIdx].x;
           const dz = street[segIdx + 1].z - street[segIdx].z;
@@ -468,13 +481,12 @@ export function computePlotPlacements(map) {
         const bx = street[segIdx + 1].x, bz = street[segIdx + 1].z;
         const sdx = bx - ax, sdz = bz - az;
         const segLen = Math.sqrt(sdx * sdx + sdz * sdz);
-        if (segLen < 0.01) continue;
+        if (segLen < 0.01) { consumed += pw; plotIdx++; continue; }
 
         const t = (targetDist - segStart) / segLen;
         const px = ax + sdx * t;
         const pz = az + sdz * t;
 
-        // Along-road unit vector
         const adx = sdx / segLen;
         const adz = sdz / segLen;
 
@@ -489,21 +501,21 @@ export function computePlotPlacements(map) {
           const frontX = px + perpX * frontSetback;
           const frontZ = pz + perpZ * frontSetback;
 
-          // Check full plot rectangle against occupancy grid
           const corners = _plotCorners(
-            frontX, frontZ, adx, adz, perpX, perpZ, plotWidth, plotDepth
+            frontX, frontZ, adx, adz, perpX, perpZ, pw, pd
           );
           if (_rectCollides(corners, occupancy, cs, ox, oz)) continue;
 
-          // Bounds check
           const lx = frontX - ox, lz = frontZ - oz;
           const gx = lx / cs, gz = lz / cs;
           if (gx < 1 || gz < 1 || gx >= map.width - 1 || gz >= map.height - 1) continue;
 
-          // Plot is clear — stamp it into occupancy
           _stampRect(corners, occupancy, cs, ox, oz);
-          plots.push({ frontX, frontZ, angle, corners, plotWidth, plotDepth });
+          plots.push({ frontX, frontZ, angle, corners, plotWidth: pw, plotDepth: pd, isApartment });
         }
+
+        consumed += pw;
+        plotIdx++;
       }
     }
   }
