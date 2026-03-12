@@ -674,4 +674,16 @@ export const LAYERS = [
   { name: 'Coverage: Development', render: (ctx, map) => renderCoverageLayer(ctx, map, 'development', [1.0, 0.7, 0.3]) },
   { name: 'Coverage: Forest', render: (ctx, map) => renderCoverageLayer(ctx, map, 'forest', [0.1, 0.7, 0.1]) },
   { name: 'Coverage: Land Cover', render: (ctx, map) => renderCoverageLayer(ctx, map, 'landCover', [0.7, 0.6, 0.3]) },
+  { name: 'Development Pressure', render: (ctx, map) => {
+    if (!map.developmentZones) return;
+    for (const zone of map.developmentZones) {
+      const pressure = zone.pressure ?? 0;
+      const r = Math.round(pressure * 255);
+      const b = Math.round((1 - pressure) * 255);
+      ctx.fillStyle = `rgb(${r},0,${b})`;
+      for (const c of zone.cells) {
+        ctx.fillRect(c.gx, c.gz, 1, 1);
+      }
+    }
+  }},
 ];
