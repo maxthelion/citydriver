@@ -385,16 +385,18 @@ function _stampRect(corners, occupancy, cs, ox, oz) {
   }
 }
 
-/** Point-in-convex-quad using cross-product winding test. */
+/** Point-in-convex-quad — works for both CW and CCW winding. */
 function _pointInQuad(px, pz, corners) {
-  // Check that point is on the same side of all 4 edges
+  let pos = 0, neg = 0;
   for (let i = 0; i < 4; i++) {
     const a = corners[i];
     const b = corners[(i + 1) % 4];
     const cross = (b.x - a.x) * (pz - a.z) - (b.z - a.z) * (px - a.x);
-    if (cross < 0) return false;
+    if (cross > 0) pos++;
+    else if (cross < 0) neg++;
   }
-  return true;
+  // All same sign = inside (works for CW or CCW)
+  return pos === 0 || neg === 0;
 }
 
 /**

@@ -255,13 +255,15 @@ describe('plot placement quality', { timeout: 60000 }, () => {
   });
 });
 
-/** Point-in-convex-quad (same logic as placeBuildings.js) */
+/** Point-in-convex-quad — works for both CW and CCW winding. */
 function _pointInQuad(px, pz, corners) {
+  let pos = 0, neg = 0;
   for (let i = 0; i < 4; i++) {
     const a = corners[i];
     const b = corners[(i + 1) % 4];
     const cross = (b.x - a.x) * (pz - a.z) - (b.z - a.z) * (px - a.x);
-    if (cross < 0) return false;
+    if (cross > 0) pos++;
+    else if (cross < 0) neg++;
   }
-  return true;
+  return pos === 0 || neg === 0;
 }
