@@ -397,15 +397,23 @@ function _pointInQuad(px, pz, corners) {
   return true;
 }
 
-export function placeTerracedRows(map, _seed) {
-  const group = new THREE.Group();
+/**
+ * Compute plot placements using occupancy bitmap collision.
+ * Pure function — no THREE.js dependency. Returns array of placed plots.
+ *
+ * Each plot: { frontX, frontZ, angle, corners, plotWidth, plotDepth }
+ * (frontX/frontZ are in world coords)
+ *
+ * @param {import('../core/FeatureMap.js').FeatureMap} map
+ * @returns {{ plots: Array, occupancy: Grid2D }}
+ */
+export function computePlotPlacements(map) {
   const ox = map.originX, oz = map.originZ;
   const cs = map.cellSize;
   const zones = map.developmentZones;
+  const plots = [];
 
-  if (!zones || zones.length === 0) return group;
-
-  const templateGeo = _buildPlotTemplate();
+  if (!zones || zones.length === 0) return { plots, occupancy: null };
 
   // Build occupancy grid: water + unbuildable + skeleton/collector roads = occupied.
   // Ribbon (local land-first) roads are excluded — plots are designed to line them.
@@ -419,31 +427,6 @@ export function placeTerracedRows(map, _seed) {
   }
   // Stamp non-ribbon roads onto occupancy (skeleton, collector, bridges)
   _stampRoadsOntoOccupancy(map, occupancy);
-
-  // First pass: count max possible plots for InstancedMesh allocation
-  let totalPlots = 0;
-  for (const zone of zones) {
-    if (!zone._streets) continue;
-    const plotWidth = plotWidthForDensity(zone.distFromNucleus);
-    for (const street of zone._streets) {
-      if (street.length < 2) continue;
-      let streetLen = 0;
-      for (let i = 1; i < street.length; i++) {
-        const dx = street[i].x - street[i - 1].x;
-        const dz = street[i].z - street[i - 1].z;
-        streetLen += Math.sqrt(dx * dx + dz * dz);
-      }
-      if (streetLen < plotWidth * 2) continue;
-      totalPlots += Math.floor(streetLen / plotWidth) * 2;
-    }
-  }
-
-  if (totalPlots === 0) return group;
-
-  const mat = new THREE.MeshLambertMaterial({ color: 0xd4c4a8 });
-  const mesh = new THREE.InstancedMesh(templateGeo, mat, totalPlots);
-  const dummy = new THREE.Object3D();
-  let instanceIdx = 0;
 
   for (const zone of zones) {
     if (!zone._streets) continue;
@@ -510,27 +493,48 @@ export function placeTerracedRows(map, _seed) {
           );
           if (_rectCollides(corners, occupancy, cs, ox, oz)) continue;
 
-          // Plot is clear — stamp it into occupancy and place instance
-          _stampRect(corners, occupancy, cs, ox, oz);
-
-          const lx = frontX - ox;
-          const lz = frontZ - oz;
-          const gx = lx / cs;
-          const gz = lz / cs;
+          // Bounds check
+          const lx = frontX - ox, lz = frontZ - oz;
+          const gx = lx / cs, gz = lz / cs;
           if (gx < 1 || gz < 1 || gx >= map.width - 1 || gz >= map.height - 1) continue;
-          const terrainY = map.elevation.sample(gx, gz);
 
-          dummy.position.set(lx, terrainY, lz);
-          dummy.rotation.set(0, angle, 0);
-          dummy.updateMatrix();
-          mesh.setMatrixAt(instanceIdx, dummy.matrix);
-          instanceIdx++;
+          // Plot is clear — stamp it into occupancy
+          _stampRect(corners, occupancy, cs, ox, oz);
+          plots.push({ frontX, frontZ, angle, corners, plotWidth, plotDepth });
         }
       }
     }
   }
 
-  mesh.count = instanceIdx;
+  return { plots, occupancy };
+}
+
+export function placeTerracedRows(map, _seed) {
+  const group = new THREE.Group();
+  const { plots } = computePlotPlacements(map);
+
+  if (plots.length === 0) return group;
+
+  const templateGeo = _buildPlotTemplate();
+  const mat = new THREE.MeshLambertMaterial({ color: 0xd4c4a8 });
+  const mesh = new THREE.InstancedMesh(templateGeo, mat, plots.length);
+  const dummy = new THREE.Object3D();
+  const ox = map.originX, oz = map.originZ;
+  const cs = map.cellSize;
+
+  for (let i = 0; i < plots.length; i++) {
+    const { frontX, frontZ, angle } = plots[i];
+    const lx = frontX - ox, lz = frontZ - oz;
+    const gx = lx / cs, gz = lz / cs;
+    const terrainY = map.elevation.sample(gx, gz);
+
+    dummy.position.set(lx, terrainY, lz);
+    dummy.rotation.set(0, angle, 0);
+    dummy.updateMatrix();
+    mesh.setMatrixAt(i, dummy.matrix);
+  }
+
+  mesh.count = plots.length;
   mesh.instanceMatrix.needsUpdate = true;
   group.add(mesh);
   return group;
