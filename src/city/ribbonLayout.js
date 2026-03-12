@@ -1,4 +1,5 @@
 import { chaikinSmooth } from '../core/math.js';
+import { ribbonSpacingForPressure } from './developmentPressure.js';
 
 export const CONTOUR_SLOPE_THRESHOLD = 0.1;
 
@@ -41,12 +42,10 @@ export function computeRibbonOrientation(zone, nucleus, _cellSize) {
 }
 
 /**
- * Compute ribbon spacing based on distance from nucleus.
+ * Compute ribbon spacing based on development pressure.
  */
-function ribbonSpacing(distFromNucleus) {
-  if (distFromNucleus < 100) return 30;
-  if (distFromNucleus < 300) return 40;
-  return 50;
+function ribbonSpacing(pressure) {
+  return ribbonSpacingForPressure(pressure);
 }
 
 /**
@@ -120,7 +119,7 @@ export function layoutRibbonStreets(zone, direction, cellSize, originX, originZ)
   const boundary = zone.boundary;
   if (!boundary || boundary.length < 3) return { spine: [], parallel: [], cross: [], spacing: 30 };
 
-  const spacing = ribbonSpacing(zone.distFromNucleus);
+  const spacing = ribbonSpacing(zone.pressure ?? 0.5);
   const { dx, dz } = direction;
   const px = -dz, pz = dx;
 

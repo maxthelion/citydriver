@@ -40,6 +40,7 @@ describe('layoutRibbonStreets', () => {
       boundary,
       centroidGx: 20, centroidGz: 15,
       distFromNucleus: 50,
+      pressure: 0.8,
     }, { dx: 1, dz: 0 }, 5, 0, 0);
 
     expect(streets.parallel.length).toBeGreaterThan(1);
@@ -53,6 +54,7 @@ describe('layoutRibbonStreets', () => {
       boundary,
       centroidGx: 20, centroidGz: 15,
       distFromNucleus: 50,
+      pressure: 0.8,
     }, { dx: 1, dz: 0 }, 5, 0, 0);
 
     expect(streets.cross.length).toBeGreaterThan(0);
@@ -63,26 +65,29 @@ describe('layoutRibbonStreets', () => {
       boundary,
       centroidGx: 20, centroidGz: 15,
       distFromNucleus: 50,
+      pressure: 0.8,
     }, { dx: 1, dz: 0 }, 5, 0, 0);
 
     expect(streets.spine).toBeDefined();
     expect(streets.spine.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('uses tighter spacing near nucleus', () => {
-    const nearStreets = layoutRibbonStreets({
+  it('uses tighter spacing for high-pressure zones', () => {
+    const denseStreets = layoutRibbonStreets({
       boundary,
       centroidGx: 20, centroidGz: 15,
       distFromNucleus: 50,
+      pressure: 0.8,
     }, { dx: 0, dz: 1 }, 5, 0, 0);
 
-    const farStreets = layoutRibbonStreets({
+    const wideStreets = layoutRibbonStreets({
       boundary,
       centroidGx: 20, centroidGz: 15,
       distFromNucleus: 400,
+      pressure: 0.15,
     }, { dx: 0, dz: 1 }, 5, 0, 0);
 
-    expect(nearStreets.parallel.length).toBeGreaterThan(farStreets.parallel.length);
+    expect(denseStreets.parallel.length).toBeGreaterThan(wideStreets.parallel.length);
   });
 });
 

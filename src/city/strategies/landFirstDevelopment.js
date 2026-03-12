@@ -1,4 +1,5 @@
 import { buildSkeletonRoads } from '../skeleton.js';
+import { computePressure } from '../developmentPressure.js';
 import { extractDevelopmentZones } from '../zoneExtraction.js';
 import {
   computeRibbonOrientation, layoutRibbonStreets, adjustStreetToContour,
@@ -60,6 +61,7 @@ export class LandFirstDevelopment {
     const map = this.map;
 
     for (const zone of this._zones) {
+      zone.pressure = computePressure(zone.avgLandValue || 0, zone.distFromNucleus);
       const nucleus = map.nuclei[zone.nucleusIdx];
       const direction = computeRibbonOrientation(zone, nucleus, map.cellSize);
 
