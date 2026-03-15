@@ -42,7 +42,7 @@ const ARCHETYPES = {
     reservationOrder: ['civic', 'openSpace', 'industrial', 'commercial'],
     placement: {
       commercial: { centrality: 0.8, roadFrontage: 0.6 },
-      industrial: { edgeness: 0.9, waterfrontness: -0.3 },
+      industrial: { downwindness: 0.7, edgeness: 0.5 },
       civic:      { centrality: 1.0 },
       openSpace:  { centrality: 0.7 },
     },
@@ -61,7 +61,7 @@ const ARCHETYPES = {
     reservationOrder: ['industrial', 'commercial', 'openSpace', 'civic'],
     placement: {
       commercial: { waterfrontness: 0.7, roadFrontage: 0.4 },
-      industrial: { waterfrontness: 0.6, edgeness: 0.5 },
+      industrial: { waterfrontness: 0.6, downwindness: 0.4, edgeness: 0.3 },
       civic:      { centrality: 0.8, waterfrontness: 0.3 },
       openSpace:  { waterfrontness: 0.9 },  // waterfront promenade
     },
@@ -80,7 +80,7 @@ const ARCHETYPES = {
     reservationOrder: ['civic', 'commercial', 'industrial', 'openSpace'],
     placement: {
       commercial: { centrality: 0.9, roadFrontage: 0.5 },
-      industrial: { edgeness: 1.0 },
+      industrial: { edgeness: 0.7, downwindness: 0.5 },
       civic:      { centrality: 1.0 },
       openSpace:  { centrality: 0.6 },
     },
@@ -99,7 +99,7 @@ const ARCHETYPES = {
     reservationOrder: ['industrial', 'civic', 'commercial', 'openSpace'],
     placement: {
       commercial: { centrality: 0.5, roadFrontage: 0.7 },
-      industrial: { waterfrontness: 0.4, centrality: 0.3, edgeness: 0.3 },
+      industrial: { waterfrontness: 0.4, downwindness: 0.3, centrality: 0.3 },
       civic:      { centrality: 0.6 },
       openSpace:  { edgeness: 0.8 },
     },
@@ -118,7 +118,7 @@ const ARCHETYPES = {
     reservationOrder: ['civic', 'openSpace', 'commercial', 'industrial'],
     placement: {
       commercial: { centrality: 0.5, roadFrontage: 0.6 },
-      industrial: { edgeness: 1.0 },
+      industrial: { downwindness: 0.8, edgeness: 0.5 },
       civic:      { centrality: 1.0 },
       openSpace:  { centrality: 0.6, waterfrontness: 0.3 },
     },
@@ -145,7 +145,7 @@ Key design choices:
 
 ## Spatial Layers
 
-Four new float32 Grid2D layers, computed by a new pipeline step
+Five new float32 Grid2D layers, computed by a new pipeline step
 `computeSpatialLayers(map)` that runs after `extractZones` and before
 `reserveLandUse`.
 
@@ -198,7 +198,21 @@ roadFrontage = normalise(raw) * terrainSuitability
 Uses the existing `roadGrid` layer. A box blur or distance transform
 gives cells near roads higher values. Normalised to 0-1.
 
-All four layers are set via `map.setLayer()` and available to the
+### downwindness
+
+How downwind a cell is from the city centre, given prevailing wind.
+
+```
+dot = (cellPos - centrePos) · windDirection
+downwindness = normalise(dot, 0-1) * terrainSuitability
+```
+
+Wind direction comes from `map.prevailingWindAngle` (radians, 0 = +x).
+If not set, derived from seed (or defaults to prevailing westerlies).
+Used primarily for industrial placement — noxious industries were
+historically pushed downwind of the residential core.
+
+All five layers are set via `map.setLayer()` and available to the
 reservation logic and debug renderers.
 
 ---

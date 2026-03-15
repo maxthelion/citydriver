@@ -4,7 +4,7 @@
 
 **Goal:** Implement archetype-driven land reservation so cities have distinct character — commercial streets, industrial zones, parks, civic centres — shaped by geography.
 
-**Architecture:** Define 5 archetype data objects. Compute 4 spatial layers (centrality, waterfrontness, edgeness, roadFrontage) from existing map data. Fill the `reserveLandUse` pipeline stub with reservation logic that scores cells against archetype preferences and grows contiguous zones via radial or directional BFS. Score settlements against archetypes for automatic selection.
+**Architecture:** Define 5 archetype data objects. Compute 5 spatial layers (centrality, waterfrontness, edgeness, roadFrontage, downwindness) from existing map data. Fill the `reserveLandUse` pipeline stub with reservation logic that scores cells against archetype preferences and grows contiguous zones via radial or directional BFS. Score settlements against archetypes for automatic selection.
 
 **Tech Stack:** JavaScript/ES6 modules, Vitest, Grid2D, FeatureMap layer bag
 
@@ -79,9 +79,18 @@ Expected: FAIL — cannot resolve module
 
 - [ ] **Step 3: Implement archetypes.js**
 
-Create `src/city/archetypes.js` with all 5 archetype objects exactly as
-specified in the design doc (see `docs/superpowers/specs/2026-03-15-city-archetypes-design.md`,
-"Archetype Data" section). Add:
+Create `src/city/archetypes.js` with all 5 archetype objects as specified
+in the design doc, but with `downwindness` added to industrial placement
+weights. Key changes from design doc:
+
+- `marketTown.placement.industrial`: `{ downwindness: 0.7, edgeness: 0.5 }`
+  (was `{ edgeness: 0.9, waterfrontness: -0.3 }`)
+- `portCity.placement.industrial`: `{ waterfrontness: 0.6, downwindness: 0.4, edgeness: 0.3 }`
+- `gridTown.placement.industrial`: `{ edgeness: 0.7, downwindness: 0.5 }`
+- `industrialTown.placement.industrial`: `{ waterfrontness: 0.4, downwindness: 0.3, centrality: 0.3 }`
+- `civicCentre.placement.industrial`: `{ downwindness: 0.8, edgeness: 0.5 }`
+
+Add:
 
 ```js
 export const ARCHETYPES = { marketTown, portCity, gridTown, industrialTown, civicCentre };
@@ -186,6 +195,30 @@ describe('computeSpatialLayers', () => {
     expect(map.getLayer('roadFrontage').get(20, 0)).toBeLessThan(0.1);
   });
 
+  it('sets downwindness layer', () => {
+    const map = makeTestMap();
+    map.prevailingWindAngle = 0; // wind blows in +x direction
+    computeSpatialLayers(map);
+    expect(map.hasLayer('downwindness')).toBe(true);
+    // Cell at high x (downwind) should score higher than cell at low x
+    const downwind = map.getLayer('downwindness').get(55, 30);
+    const upwind = map.getLayer('downwindness').get(5, 30);
+    expect(downwind).toBeGreaterThan(upwind);
+  });
+
+  it('downwindness defaults to seed-derived angle when not set', () => {
+    const map = makeTestMap();
+    computeSpatialLayers(map);
+    expect(map.hasLayer('downwindness')).toBe(true);
+    // Should still produce a gradient (not all zeros)
+    let hasNonZero = false;
+    const grid = map.getLayer('downwindness');
+    for (let gz = 0; gz < 60; gz += 10)
+      for (let gx = 0; gx < 60; gx += 10)
+        if (grid.get(gx, gz) > 0.01) hasNonZero = true;
+    expect(hasNonZero).toBe(true);
+  });
+
   it('returns map for chaining', () => {
     const map = makeTestMap();
     expect(computeSpatialLayers(map)).toBe(map);
@@ -206,7 +239,7 @@ Create `src/city/pipeline/computeSpatialLayers.js`:
 /**
  * Pipeline step: compute spatial layers for archetype reservation.
  * Reads: terrainSuitability, waterDist, waterMask, roadGrid, nuclei
- * Writes: centrality, waterfrontness, edgeness, roadFrontage (layers)
+ * Writes: centrality, waterfrontness, edgeness, roadFrontage, downwindness (layers)
  */
 
 import { Grid2D } from '../../core/Grid2D.js';
@@ -294,6 +327,35 @@ export function computeSpatialLayers(map) {
   }
   map.setLayer('roadFrontage', roadFrontage);
 
+  // --- Downwindness ---
+  // Prevailing wind direction: angle in radians, 0 = +x, pi/2 = +z
+  // Derive from map property or seed. Default to prevailing westerlies (~pi, from west).
+  const windAngle = map.prevailingWindAngle ?? (map.rng ? map.rng.next() * Math.PI * 2 : Math.PI);
+  const windDirX = Math.cos(windAngle);
+  const windDirZ = Math.sin(windAngle);
+  const cx = width / 2, cz = height / 2;
+
+  const downwindness = new Grid2D(width, height, opts);
+  let minDot = Infinity, maxDot = -Infinity;
+  // First pass: compute raw dot products
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      const dot = (gx - cx) * windDirX + (gz - cz) * windDirZ;
+      downwindness.set(gx, gz, dot);
+      if (dot < minDot) minDot = dot;
+      if (dot > maxDot) maxDot = dot;
+    }
+  }
+  // Second pass: normalise to 0-1 and mask by terrain
+  const dotRange = maxDot - minDot || 1;
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      const norm = (downwindness.get(gx, gz) - minDot) / dotRange;
+      downwindness.set(gx, gz, norm * terrain.get(gx, gz));
+    }
+  }
+  map.setLayer('downwindness', downwindness);
+
   return map;
 }
 ```
@@ -352,7 +414,7 @@ git commit -m "feat: wire computeSpatialLayers into pipeline as tick 4"
 **Files:**
 - Modify: `src/rendering/debugLayers.js`
 
-- [ ] **Step 1: Add 4 heatmap renderers**
+- [ ] **Step 1: Add 5 heatmap renderers**
 
 Add before the closing `];` of the LAYERS array in `debugLayers.js`:
 
@@ -361,6 +423,7 @@ Add before the closing `];` of the LAYERS array in `debugLayers.js`:
 { name: 'Waterfrontness', render: renderNamedHeatLayer('waterfrontness') },
 { name: 'Edgeness', render: renderNamedHeatLayer('edgeness') },
 { name: 'Road Frontage', render: renderNamedHeatLayer('roadFrontage') },
+{ name: 'Downwindness', render: renderNamedHeatLayer('downwindness') },
 ```
 
 Add a generic named-layer heatmap renderer factory:
