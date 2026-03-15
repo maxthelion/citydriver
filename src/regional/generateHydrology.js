@@ -117,8 +117,8 @@ export function generateHydrology(params, elevation, permeability, rng, options 
   // Find confluences using adjusted accumulation
   const confluences = findConfluences(adjustedAccumulation, flowDirs, filledElev, riverThreshold);
 
-  // Smooth river paths: add sinusoidal meanders on gentle terrain
-  smoothRiverPaths(rivers, elevation, width, height);
+  // Smooth river paths: geology-aware meandering on gentle terrain
+  smoothRiverPaths(rivers, elevation, width, height, erosionResistance);
 
   // --- Floodplain carving ---
   // For large rivers (high accumulation), flatten terrain alongside the river.

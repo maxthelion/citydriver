@@ -405,7 +405,20 @@ export function findConfluences(accumulation, directions, elevation, threshold =
  * @param {number} width - Grid width
  * @param {number} height - Grid height
  */
-export function smoothRiverPaths(rivers, elevation, width, height) {
+/**
+ * Smooth river paths with improved meandering.
+ *
+ * Meander amplitude = halfWidth × 3 (in cells), wavelength = halfWidth × 12.
+ * Geology-modulated: soft rock amplifies ×1.5, hard rock dampens ×0.3.
+ * Transition from straight to meandering over slope 0.03-0.08.
+ *
+ * @param {Array} rivers - Segment tree roots
+ * @param {Grid2D} elevation
+ * @param {number} width
+ * @param {number} height
+ * @param {Grid2D} [erosionResistance] - Optional rock hardness grid (0-1)
+ */
+export function smoothRiverPaths(rivers, elevation, width, height, erosionResistance) {
   const occupied = new Set();
 
   function cellKey(gx, gz) { return gz * width + gx; }
@@ -424,10 +437,13 @@ export function smoothRiverPaths(rivers, elevation, width, height) {
       return;
     }
 
-    // Wavelength scales with accumulation (bigger rivers = wider meanders)
+    // Meander amplitude and wavelength scale with river width
     const maxAcc = cells[cells.length - 1].accumulation;
-    const wavelength = Math.max(6, Math.min(20, Math.sqrt(maxAcc) / 3));
-    const maxDisp = 1.5;
+    const halfWidth = Math.max(2, Math.min(40, Math.sqrt(maxAcc) / 5));
+    // In cells (cellSize=1 at grid level)
+    const baseAmplitude = halfWidth * 3 / 50; // approximate cell conversion
+    const wavelength = Math.max(6, halfWidth * 12 / 50);
+    const maxDisp = Math.max(1.5, Math.min(8, baseAmplitude));
 
     for (let i = 1; i < cells.length - 1; i++) {
       const prev = cells[i - 1];
@@ -439,8 +455,17 @@ export function smoothRiverPaths(rivers, elevation, width, height) {
       const dist = Math.sqrt((next.gx - prev.gx) ** 2 + (next.gz - prev.gz) ** 2) || 1;
       const slope = elevDiff / dist;
 
-      // Skip steep terrain (gorge behavior)
-      if (slope > 0.15) continue;
+      // Transition: no meanders above 0.08, full meanders below 0.03
+      if (slope > 0.08) continue;
+      const slopeFactor = slope < 0.03 ? 1.0 : 1.0 - (slope - 0.03) / 0.05;
+
+      // Geology modulation
+      let geoMod = 1.0;
+      if (erosionResistance) {
+        const resist = erosionResistance.get(curr.gx, curr.gz);
+        if (resist > 0.6) geoMod = 0.3;       // hard rock: dampen
+        else if (resist < 0.3) geoMod = 1.5;   // soft rock: amplify
+      }
 
       // Flow direction vector
       const dx = next.gx - prev.gx;
@@ -453,7 +478,7 @@ export function smoothRiverPaths(rivers, elevation, width, height) {
 
       // Sinusoidal displacement
       const phase = (i / wavelength) * Math.PI * 2;
-      const displacement = Math.sin(phase) * maxDisp * (1 - slope / 0.15);
+      const displacement = Math.sin(phase) * maxDisp * slopeFactor * geoMod;
 
       const newGx = Math.round(curr.gx + perpX * displacement);
       const newGz = Math.round(curr.gz + perpZ * displacement);
