@@ -13,6 +13,7 @@ import { PerlinNoise } from '../core/noise.js';
 import { inheritRivers } from '../core/inheritRivers.js';
 import { distance2D } from '../core/math.js';
 import { CITY_CELL_SIZE, CITY_RADIUS } from './constants.js';
+import { computeTerrainSuitability } from '../core/terrainSuitability.js';
 
 /**
  * Create a FeatureMap from regional layers centered on a settlement.
@@ -162,6 +163,22 @@ export function setupCity(layers, settlement, rng) {
   map.regionalLayers = layers;
   map.rng = rng;
 
+  // Set named layers for the pipeline
+  map.setLayer('elevation', map.elevation);
+  map.setLayer('slope', map.slope);
+  map.setLayer('waterMask', map.waterMask);
+  if (map.waterType) map.setLayer('waterType', map.waterType);
+  if (map.waterDist) map.setLayer('waterDist', map.waterDist);
+  if (map.waterDepth) map.setLayer('waterDepth', map.waterDepth);
+
+  // Compute terrain suitability (pure terrain assessment, never mutated)
+  const { suitability, waterDist: tWaterDist } = computeTerrainSuitability(
+    map.elevation, map.slope, map.waterMask
+  );
+  map.setLayer('terrainSuitability', suitability);
+  // Use the waterDist from terrainSuitability if not already set
+  if (!map.hasLayer('waterDist')) map.setLayer('waterDist', tWaterDist);
+
   // Import regional settlements that fall within city bounds
   const allSettlements = layers.getData('settlements');
   if (allSettlements) {
@@ -180,6 +197,7 @@ export function setupCity(layers, settlement, rng) {
 
   // Compute initial land value from terrain features
   map.computeLandValue();
+  map.setLayer('landValue', map.landValue);
 
   // Place nuclei (shared across all growth strategies)
   const tier = settlement.tier || 3;
