@@ -7,10 +7,17 @@
  */
 
 import { setupCity } from '../city/setup.js';
-import { buildSkeleton } from '../city/skeleton.js';
+import { LandFirstDevelopment } from '../city/strategies/landFirstDevelopment.js';
+import { ARCHETYPES } from '../city/archetypes.js';
+import { scoreSettlement } from '../city/archetypeScoring.js';
 import { LAYERS } from '../rendering/debugLayers.js';
 import { renderMap, drawRivers, drawRoads, drawSettlements } from '../rendering/mapRenderer.js';
 import { SeededRandom } from '../core/rng.js';
+
+const TICK_LABELS = [
+  'setup', 'skeleton', 'land value', 'zones',
+  'spatial layers', 'reservations', 'ribbons', 'connections',
+];
 
 const GRID_DIVISIONS = 6; // city split into 6x6 cells
 const DETAIL_SCALE = 4;   // detail view renders at 4x grid resolution
@@ -79,6 +86,38 @@ export class DebugScreen {
     seedRow.appendChild(seedLabel);
     seedRow.appendChild(this.seedInput);
     panel.appendChild(seedRow);
+
+    // Archetype selector
+    const archRow = document.createElement('div');
+    archRow.style.cssText = 'display:flex; gap:6px; align-items:center; flex-wrap:wrap;';
+    const archLabel = document.createElement('span');
+    archLabel.textContent = 'Archetype:';
+    archLabel.style.cssText = 'font-size:12px;';
+    this.archSelect = document.createElement('select');
+    this.archSelect.style.cssText = 'flex:1; background:#2a2a3e; color:#eee; border:1px solid #555; padding:4px; font-family:monospace; font-size:11px;';
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = '(none)';
+    this.archSelect.appendChild(noneOpt);
+    const autoOpt = document.createElement('option');
+    autoOpt.value = 'auto';
+    autoOpt.textContent = 'Auto (best fit)';
+    this.archSelect.appendChild(autoOpt);
+    for (const [id, arch] of Object.entries(ARCHETYPES)) {
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = arch.name;
+      this.archSelect.appendChild(opt);
+    }
+    this.archSelect.value = 'auto';
+    archRow.appendChild(archLabel);
+    archRow.appendChild(this.archSelect);
+    panel.appendChild(archRow);
+
+    // Archetype scores display
+    this.archScoresDiv = document.createElement('div');
+    this.archScoresDiv.style.cssText = 'font-size:10px; color:#888; line-height:1.4; max-height:100px; overflow-y:auto;';
+    panel.appendChild(this.archScoresDiv);
 
     // Tick controls
     const tickRow = document.createElement('div');
@@ -163,9 +202,34 @@ export class DebugScreen {
     }
   }
 
+  _getArchetype() {
+    const val = this.archSelect.value;
+    if (!val) return null;
+    if (val === 'auto') {
+      const scores = scoreSettlement(this.map);
+      this._showScores(scores);
+      return scores[0].archetype;
+    }
+    return ARCHETYPES[val] || null;
+  }
+
+  _showScores(scores) {
+    if (!scores) { this.archScoresDiv.textContent = ''; return; }
+    this.archScoresDiv.innerHTML = scores.map(s =>
+      `<div style="color:${s.score > 0.5 ? '#8c8' : s.score > 0.2 ? '#cc8' : '#c88'}">`
+      + `${s.archetype.name}: ${s.score.toFixed(2)}`
+      + `<br><span style="color:#666; margin-left:8px">${s.factors.join(', ')}</span></div>`
+    ).join('');
+  }
+
   _generate() {
     const rng = new SeededRandom(this.seed);
     this.map = setupCity(this.layers, this.settlement, rng.fork('city'));
+
+    // Create strategy with archetype
+    const archetype = this._getArchetype();
+    this._strategy = new LandFirstDevelopment(this.map, { archetype });
+
     this.currentTick = 0;
     this._selectedCell = null;
     this.tickLabel.textContent = 'Tick: 0 (setup)';
@@ -184,15 +248,16 @@ export class DebugScreen {
   }
 
   _nextTick() {
-    if (!this.map) return;
+    if (!this.map || !this._strategy) return;
 
+    const more = this._strategy.tick();
     this.currentTick++;
 
-    if (this.currentTick === 1) {
-      buildSkeleton(this.map);
-      this.tickLabel.textContent = 'Tick: 1 (skeleton)';
-    } else {
-      this.tickLabel.textContent = `Tick: ${this.currentTick} (no growth yet)`;
+    const label = TICK_LABELS[this.currentTick] || 'done';
+    this.tickLabel.textContent = `Tick: ${this.currentTick} (${label})`;
+
+    if (!more) {
+      this.tickLabel.textContent += ' — complete';
     }
 
     this._updateInfo();

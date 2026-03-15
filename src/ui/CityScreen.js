@@ -7,6 +7,8 @@
 import * as THREE from 'three';
 import { setupCity } from '../city/setup.js';
 import { LandFirstDevelopment } from '../city/strategies/landFirstDevelopment.js';
+import { ARCHETYPES } from '../city/archetypes.js';
+import { scoreSettlement } from '../city/archetypeScoring.js';
 import { prepareCityScene } from '../rendering/prepareCityScene.js';
 import { getRoadMaterial, getRiverMaterial } from '../rendering/materials.js';
 import { FlyCamera } from './FlyCamera.js';
@@ -43,7 +45,16 @@ export class CityScreen {
 
     // Run city pipeline with land-first development strategy
     const map = setupCity(layers, settlement, rng);
-    const strategy = new LandFirstDevelopment(map);
+
+    // Auto-select best-fit archetype from geography
+    const scores = scoreSettlement(map);
+    const bestArchetype = scores[0].archetype;
+    console.log(`City archetype: ${bestArchetype.name} (score ${scores[0].score.toFixed(2)})`);
+    for (const s of scores) {
+      console.log(`  ${s.archetype.name}: ${s.score.toFixed(2)} — ${s.factors.join(', ')}`);
+    }
+
+    const strategy = new LandFirstDevelopment(map, { archetype: bestArchetype });
     while (strategy.tick()) { /* run all ticks */ }
 
     // Smooth road polylines in-place (2 Chaikin iterations).
