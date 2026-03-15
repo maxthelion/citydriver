@@ -11,6 +11,7 @@ import { clamp } from '../core/math.js';
 import { PerlinNoise } from '../core/noise.js';
 import { fillSinks, flowDirections, flowAccumulation, extractStreams, findConfluences, smoothRiverPaths } from '../core/flowAccumulation.js';
 import { segmentsToVectorPaths, paintPathsOntoWaterMask, riverHalfWidth, channelProfile } from '../core/riverGeometry.js';
+import { computeValleyDepthField, computeFloodplainField, applyTerrainFields } from './carveValleys.js';
 
 /**
  * Generate hydrology layers.
@@ -27,7 +28,7 @@ import { segmentsToVectorPaths, paintPathsOntoWaterMask, riverHalfWidth, channel
  * @param {import('../core/rng.js').SeededRandom} rng
  * @returns {{ rivers: Array, confluences: Array, flowDirs: Int8Array, accumulation: Float32Array, waterMask: Grid2D }}
  */
-export function generateHydrology(params, elevation, permeability, rng) {
+export function generateHydrology(params, elevation, permeability, rng, options = {}) {
   const {
     width,
     height,
@@ -36,6 +37,7 @@ export function generateHydrology(params, elevation, permeability, rng) {
     riverThreshold = 80,
     riverMajorThreshold = 800,
   } = params;
+  const { erosionResistance, riverCorridors } = options;
 
   // Work on a clone so we don't destroy the original elevation
   const filledElev = elevation.clone();
@@ -81,6 +83,29 @@ export function generateHydrology(params, elevation, permeability, rng) {
     }
   }
 
+  // Inject corridor entry accumulation — major rivers arriving from beyond the map
+  if (riverCorridors && riverCorridors.length > 0) {
+    for (const corridor of riverCorridors) {
+      const entry = corridor.polyline[0];
+      if (entry.gx >= 0 && entry.gx < width && entry.gz >= 0 && entry.gz < height) {
+        const idx = entry.gz * width + entry.gx;
+        adjustedAccumulation[idx] += corridor.entryAccumulation;
+        // Propagate downstream along flow directions
+        let gx = entry.gx, gz = entry.gz;
+        for (let step = 0; step < width * 2; step++) {
+          const dir = flowDirs[gz * width + gx];
+          if (dir < 0) break;
+          const DX = [1, 1, 0, -1, -1, -1, 0, 1];
+          const DZ = [0, 1, 1, 1, 0, -1, -1, -1];
+          const nx = gx + DX[dir], nz = gz + DZ[dir];
+          if (nx < 0 || nx >= width || nz < 0 || nz >= height) break;
+          adjustedAccumulation[nz * width + nx] += corridor.entryAccumulation;
+          gx = nx; gz = nz;
+        }
+      }
+    }
+  }
+
   // Extract stream network using adjusted accumulation
   const thresholds = {
     stream: riverThreshold,
@@ -118,6 +143,18 @@ export function generateHydrology(params, elevation, permeability, rng) {
   const riverPaths = segmentsToVectorPaths(rivers, cellSize, {
     smoothIterations: 2,
   });
+
+  // --- Valley carving (compositional layer approach) ---
+  // Produce depth/floodplain fields, then apply to elevation.
+  if (erosionResistance) {
+    const valleyDepthField = computeValleyDepthField(
+      riverPaths, elevation, erosionResistance, cellSize
+    );
+    const { floodplainField, floodplainTarget } = computeFloodplainField(
+      riverPaths, elevation, waterMask, erosionResistance, cellSize, seaLevel
+    );
+    applyTerrainFields(elevation, valleyDepthField, floodplainField, floodplainTarget, seaLevel);
+  }
 
   // Paint waterMask from vector paths (smoother than raw grid cells)
   paintPathsOntoWaterMask(waterMask, riverPaths, cellSize, width, height);

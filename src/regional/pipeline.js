@@ -96,12 +96,13 @@ export function generateRegion(params, rng) {
     layers.setData('coastlineFeatures', coastResult.coastlineFeatures);
   }
 
-  // A3. Hydrology
+  // A3. Hydrology (with corridor accumulation and valley carving)
   const hydrology = generateHydrology(
     { width, height, cellSize, seaLevel },
     terrain.elevation,
     geology.permeability,
     rng,
+    { erosionResistance: geology.erosionResistance, riverCorridors: corridors },
   );
 
   layers.setData('rivers', hydrology.rivers);

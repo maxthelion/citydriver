@@ -40,7 +40,7 @@ export function chaikinSmooth(points, iterations = 3) {
  * Compute river half-width in world units from accumulation.
  */
 export function riverHalfWidth(accumulation) {
-  return Math.max(1.5, Math.min(25, Math.sqrt(accumulation) / 8));
+  return Math.max(2, Math.min(40, Math.sqrt(accumulation) / 5));
 }
 
 /**
@@ -61,6 +61,42 @@ export function channelProfile(nd) {
   if (nd < 0.6) return 1.0;
   if (nd < 1.0) return 1.0 - (nd - 0.6) / 0.4 * 0.7;
   if (nd < 1.5) return 0.3 * (1.0 - (nd - 1.0) / 0.5);
+  return 0;
+}
+
+/**
+ * Valley half-width in meters from accumulation.
+ * Much wider than the river itself — the carved valley around it.
+ */
+export function valleyHalfWidth(accumulation) {
+  return Math.max(30, Math.min(500, Math.sqrt(accumulation) * 1.5));
+}
+
+/**
+ * Valley depth in meters from accumulation.
+ */
+export function valleyDepth(accumulation) {
+  return Math.max(1, Math.min(15, Math.sqrt(accumulation) / 20));
+}
+
+/**
+ * Valley cross-section profile.
+ * nd = normalised distance from centreline (0 = centre, 1 = edge)
+ * Returns 0-1 depth fraction.
+ */
+export function valleyProfile(nd) {
+  if (nd < 0.3) return 1.0;
+  if (nd < 0.8) return 1.0 - 0.7 * ((nd - 0.3) / 0.5);
+  if (nd < 1.0) return 0.3 - 0.3 * ((nd - 0.8) / 0.2);
+  return 0;
+}
+
+/**
+ * Gorge cross-section profile — narrow, steep walls.
+ */
+export function gorgeProfile(nd) {
+  if (nd < 0.5) return 1.0;
+  if (nd < 0.7) return 1.0 - ((nd - 0.5) / 0.2);
   return 0;
 }
 
