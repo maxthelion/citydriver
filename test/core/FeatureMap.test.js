@@ -279,3 +279,16 @@ describe('FeatureMap.clone', () => {
     expect(map.nuclei.length).toBe(1);
   });
 });
+
+describe('layer bag', () => {
+  it('stores and retrieves named layers', () => {
+    const map = makeMap();
+    const grid = new Grid2D(50, 50, { type: 'float32' });
+    grid.set(10, 10, 0.5);
+    map.setLayer('testLayer', grid);
+
+    expect(map.hasLayer('testLayer')).toBe(true);
+    expect(map.getLayer('testLayer').get(10, 10)).toBe(0.5);
+    expect(map.hasLayer('nonexistent')).toBe(false);
+  });
+});

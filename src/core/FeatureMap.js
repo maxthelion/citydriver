@@ -82,9 +82,16 @@ export class FeatureMap {
     this.landValue = new Grid2D(width, height, { ...gridOpts, type: 'float32' });
     this.waterType = null; // set by classifyWater
 
+    // Named layers (Grid2D instances, set by pipeline steps)
+    this.layers = new Map();
+
     // Nucleus data
     this.nuclei = [];
   }
+
+  setLayer(name, grid) { this.layers.set(name, grid); }
+  getLayer(name) { return this.layers.get(name); }
+  hasLayer(name) { return this.layers.has(name); }
 
   /**
    * Set terrain grids and compute initial buildability from terrain alone.
