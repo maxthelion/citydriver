@@ -8,12 +8,24 @@
  * Compute development pressure for a zone.
  * @param {number} avgLandValue - Mean land value across zone cells (0–1)
  * @param {number} distFromNucleus - Distance from zone centroid to nearest nucleus (meters)
+ * @param {object} [opts]
+ * @param {number} [opts.avgSlope=0] - Mean slope across zone (0–1)
+ * @param {number} [opts.nucleusTier=1] - Tier of the owning nucleus (1 = city center)
  * @returns {number} Pressure in [0, 1]
  */
-export function computePressure(avgLandValue, distFromNucleus) {
+export function computePressure(avgLandValue, distFromNucleus, { avgSlope = 0, nucleusTier = 1 } = {}) {
+  // Land value component (60% weight)
   const lvComponent = Math.min(1, Math.max(0, avgLandValue * 1.5)) * 0.6;
-  const proxComponent = Math.min(1, Math.max(0, 1 - distFromNucleus / 400)) * 0.4;
-  return Math.min(1, Math.max(0, lvComponent + proxComponent));
+
+  // Proximity component — satellite nuclei (higher tier) get a weaker pull
+  const tierFactor = nucleusTier <= 1 ? 1.0 : nucleusTier <= 2 ? 0.5 : 0.3;
+  const proxWeight = 0.4 * tierFactor;
+  const proxComponent = Math.min(1, Math.max(0, 1 - distFromNucleus / 400)) * proxWeight;
+
+  // Slope penalty — steep terrain strongly suppresses pressure
+  const slopePenalty = Math.min(1, avgSlope / 0.25) * 0.5;
+
+  return Math.min(1, Math.max(0, lvComponent + proxComponent - slopePenalty));
 }
 
 const TYPOLOGIES = [

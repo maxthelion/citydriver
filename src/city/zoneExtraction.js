@@ -2,8 +2,8 @@ import { Grid2D } from '../core/Grid2D.js';
 import { ZONE_SLOPE_BASE, ZONE_SLOPE_LV_BONUS } from './constants.js';
 
 // Zone extraction thresholds
-const ZONE_LV_THRESHOLD = 0.3;
-const ZONE_BUILD_THRESHOLD = 0.2;
+const ZONE_LV_THRESHOLD = 0.15;
+const ZONE_BUILD_THRESHOLD = 0.15;
 const ZONE_MORPH_RADIUS_M = 10;     // 2 cells at 5m
 const ZONE_MIN_SIZE = 30;            // cells (~750m² at 5m)
 

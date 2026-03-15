@@ -61,8 +61,11 @@ export class LandFirstDevelopment {
     const map = this.map;
 
     for (const zone of this._zones) {
-      zone.pressure = computePressure(zone.avgLandValue || 0, zone.distFromNucleus);
       const nucleus = map.nuclei[zone.nucleusIdx];
+      zone.pressure = computePressure(zone.avgLandValue || 0, zone.distFromNucleus, {
+        avgSlope: zone.avgSlope || 0,
+        nucleusTier: nucleus ? nucleus.tier : 1,
+      });
       const direction = computeRibbonOrientation(zone, nucleus, map.cellSize);
 
       const streets = layoutRibbonStreets(

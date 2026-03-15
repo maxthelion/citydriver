@@ -219,38 +219,57 @@ const FENCE_HEIGHT = 1.2;  // meters
 const FENCE_THICKNESS = 0.1;
 
 /**
- * Build a single plot template (house + fence) as a merged BufferGeometry.
- * This gets instanced for every plot.
+ * Build a single house template as a BufferGeometry (no fences — those are
+ * drawn per-plot from actual plot corners).
  */
-function _buildPlotTemplate() {
-  const geos = [];
-
-  // House box (centered at origin, bottom at y=0)
+function _buildHouseTemplate() {
   const houseGeo = new THREE.BoxGeometry(PLOT_WIDTH * 0.9, HOUSE_HEIGHT, HOUSE_DEPTH);
   houseGeo.translate(0, HOUSE_HEIGHT / 2, FRONT_GARDEN + HOUSE_DEPTH / 2);
-  geos.push(houseGeo);
+  return houseGeo;
+}
 
-  // Front fence
-  const frontFence = new THREE.BoxGeometry(PLOT_WIDTH, FENCE_HEIGHT, FENCE_THICKNESS);
-  frontFence.translate(0, FENCE_HEIGHT / 2, 0);
-  geos.push(frontFence);
+/**
+ * Build fence line segments from world-space plot corners.
+ * Each plot contributes 4 edges (closed rectangle) as a fence wall.
+ * Returns a THREE.Mesh with merged thin-box geometry.
+ */
+function _buildFences(plots, map) {
+  const ox = map.originX, oz = map.originZ;
+  const cs = map.cellSize;
+  const geos = [];
 
-  // Back fence
-  const backFence = new THREE.BoxGeometry(PLOT_WIDTH, FENCE_HEIGHT, FENCE_THICKNESS);
-  backFence.translate(0, FENCE_HEIGHT / 2, PLOT_TOTAL_DEPTH);
-  geos.push(backFence);
+  for (const plot of plots) {
+    const c = plot.corners;
+    if (!c || c.length < 4) continue;
 
-  // Left side fence
-  const leftFence = new THREE.BoxGeometry(FENCE_THICKNESS, FENCE_HEIGHT, PLOT_TOTAL_DEPTH);
-  leftFence.translate(-PLOT_WIDTH / 2, FENCE_HEIGHT / 2, PLOT_TOTAL_DEPTH / 2);
-  geos.push(leftFence);
+    // Sample terrain at plot centroid for fence base height
+    const cx = (c[0].x + c[2].x) / 2;
+    const cz = (c[0].z + c[2].z) / 2;
+    const gx = (cx - ox) / cs, gz = (cz - oz) / cs;
+    const baseY = map.elevation.sample(gx, gz);
 
-  // Right side fence
-  const rightFence = new THREE.BoxGeometry(FENCE_THICKNESS, FENCE_HEIGHT, PLOT_TOTAL_DEPTH);
-  rightFence.translate(PLOT_WIDTH / 2, FENCE_HEIGHT / 2, PLOT_TOTAL_DEPTH / 2);
-  geos.push(rightFence);
+    // Build 4 fence walls as thin boxes along each edge
+    for (let i = 0; i < 4; i++) {
+      const a = c[i], b = c[(i + 1) % 4];
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const len = Math.sqrt(dx * dx + dz * dz);
+      if (len < 0.01) continue;
 
-  return mergeBufferGeometries(geos);
+      const midX = (a.x + b.x) / 2 - ox;
+      const midZ = (a.z + b.z) / 2 - oz;
+      const angle = Math.atan2(dx, dz);
+
+      const wall = new THREE.BoxGeometry(FENCE_THICKNESS, FENCE_HEIGHT, len);
+      wall.rotateY(angle);
+      wall.translate(midX, baseY + FENCE_HEIGHT / 2, midZ);
+      geos.push(wall);
+    }
+  }
+
+  if (geos.length === 0) return null;
+  const merged = mergeBufferGeometries(geos);
+  const mat = new THREE.MeshLambertMaterial({ color: 0x8b7355 });
+  return new THREE.Mesh(merged, mat);
 }
 
 /**
@@ -529,9 +548,10 @@ export function placeTerracedRows(map, _seed) {
 
   if (plots.length === 0) return group;
 
-  const templateGeo = _buildPlotTemplate();
-  const mat = new THREE.MeshLambertMaterial({ color: 0xd4c4a8 });
-  const mesh = new THREE.InstancedMesh(templateGeo, mat, plots.length);
+  // Houses — instanced (all same geometry, positioned per-plot)
+  const houseGeo = _buildHouseTemplate();
+  const houseMat = new THREE.MeshLambertMaterial({ color: 0xd4c4a8 });
+  const houseMesh = new THREE.InstancedMesh(houseGeo, houseMat, plots.length);
   const dummy = new THREE.Object3D();
   const ox = map.originX, oz = map.originZ;
   const cs = map.cellSize;
@@ -545,12 +565,17 @@ export function placeTerracedRows(map, _seed) {
     dummy.position.set(lx, terrainY, lz);
     dummy.rotation.set(0, angle, 0);
     dummy.updateMatrix();
-    mesh.setMatrixAt(i, dummy.matrix);
+    houseMesh.setMatrixAt(i, dummy.matrix);
   }
 
-  mesh.count = plots.length;
-  mesh.instanceMatrix.needsUpdate = true;
-  group.add(mesh);
+  houseMesh.count = plots.length;
+  houseMesh.instanceMatrix.needsUpdate = true;
+  group.add(houseMesh);
+
+  // Fences — merged geometry from actual plot corners
+  const fences = _buildFences(plots, map);
+  if (fences) group.add(fences);
+
   return group;
 }
 

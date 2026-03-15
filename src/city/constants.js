@@ -19,5 +19,5 @@ export const RIVER_STAMP_FRACTION = 0.4;
 export const STAMP_STEP_FRACTION = 0.5;
 
 // Adaptive slope threshold for zone extraction
-export const ZONE_SLOPE_BASE = 0.15;       // minimum slope threshold
-export const ZONE_SLOPE_LV_BONUS = 0.15;   // additional tolerance from land value
+export const ZONE_SLOPE_BASE = 0.30;       // minimum slope threshold (permissive — pressure penalises slope)
+export const ZONE_SLOPE_LV_BONUS = 0.20;   // additional tolerance from land value
