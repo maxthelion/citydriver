@@ -688,7 +688,29 @@ export const LAYERS = [
   }},
   { name: 'Reservations', render: renderReservations },
   { name: 'Terrain Suitability', render: renderTerrainSuitability },
+  { name: 'Centrality', render: renderNamedHeatLayer('centrality') },
+  { name: 'Waterfrontness', render: renderNamedHeatLayer('waterfrontness') },
+  { name: 'Edgeness', render: renderNamedHeatLayer('edgeness') },
+  { name: 'Road Frontage', render: renderNamedHeatLayer('roadFrontage') },
+  { name: 'Downwindness', render: renderNamedHeatLayer('downwindness') },
 ];
+
+function renderNamedHeatLayer(layerName) {
+  return function(ctx, map) {
+    const grid = map.hasLayer ? map.getLayer(layerName) : null;
+    if (!grid) return;
+    const { width, height } = map;
+    for (let gz = 0; gz < height; gz++) {
+      for (let gx = 0; gx < width; gx++) {
+        const v = grid.get(gx, gz);
+        if (v > 0.01) {
+          ctx.fillStyle = heatColor(v);
+          ctx.fillRect(gx, gz, 1, 1);
+        }
+      }
+    }
+  };
+}
 
 /**
  * Reservation zones by use type.
