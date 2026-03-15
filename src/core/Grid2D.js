@@ -190,4 +190,71 @@ export class Grid2D {
     this.data.fill(value);
     return this;
   }
+
+  // --- Static composition utilities ---
+
+  /**
+   * Create a new grid where each cell is fn(a.get(gx,gz), b.get(gx,gz)).
+   */
+  static combine(a, b, fn) {
+    return a.map((va, gx, gz) => fn(va, b.get(gx, gz)));
+  }
+
+  /**
+   * Threshold: returns 1.0 where value >= thresh, else 0.
+   */
+  static threshold(grid, thresh) {
+    return grid.map(v => v >= thresh ? 1.0 : 0);
+  }
+
+  /**
+   * Stamp cells along a polyline within a radius.
+   * Mutates grid in place — sets cells within radius of polyline to value.
+   *
+   * @param {Grid2D} grid - Grid to stamp onto
+   * @param {Array<{x, z}>} polyline - World-coordinate polyline
+   * @param {number} radius - World-unit radius around the line
+   * @param {number} value - Value to set on stamped cells
+   */
+  static stampPolyline(grid, polyline, radius, value) {
+    if (!polyline || polyline.length < 2) return;
+
+    const cs = grid.cellSize;
+    const ox = grid.originX;
+    const oz = grid.originZ;
+    const stepSize = cs * 0.5;
+
+    for (let i = 0; i < polyline.length - 1; i++) {
+      const ax = polyline[i].x, az = polyline[i].z;
+      const bx = polyline[i + 1].x, bz = polyline[i + 1].z;
+      const dx = bx - ax, dz = bz - az;
+      const segLen = Math.sqrt(dx * dx + dz * dz);
+      if (segLen < 0.01) continue;
+
+      const steps = Math.ceil(segLen / stepSize);
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const px = ax + dx * t;
+        const pz = az + dz * t;
+
+        const effectiveRadius = Math.max(radius, cs * 0.75);
+        const cellRadius = Math.ceil(effectiveRadius / cs);
+        const cgx = Math.round((px - ox) / cs);
+        const cgz = Math.round((pz - oz) / cs);
+
+        for (let ddz = -cellRadius; ddz <= cellRadius; ddz++) {
+          for (let ddx = -cellRadius; ddx <= cellRadius; ddx++) {
+            const gx = cgx + ddx, gz = cgz + ddz;
+            if (gx < 0 || gx >= grid.width || gz < 0 || gz >= grid.height) continue;
+            const cellX = ox + gx * cs;
+            const cellZ = oz + gz * cs;
+            const distSq = (cellX - px) ** 2 + (cellZ - pz) ** 2;
+            if (distSq <= effectiveRadius * effectiveRadius) {
+              grid.set(gx, gz, value);
+            }
+          }
+        }
+      }
+    }
+  }
 }

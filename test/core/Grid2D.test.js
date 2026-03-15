@@ -143,3 +143,44 @@ describe('Grid2D', () => {
     expect(c.get(3, 4)).toBe(99);
   });
 });
+
+describe('composition utilities', () => {
+  it('combine merges two grids cell-by-cell', () => {
+    const a = new Grid2D(3, 3, { fill: 0.5 });
+    const b = new Grid2D(3, 3, { fill: 0.3 });
+    const result = Grid2D.combine(a, b, (va, vb) => va + vb);
+    expect(result.get(1, 1)).toBeCloseTo(0.8);
+    expect(result.width).toBe(3);
+  });
+
+  it('threshold converts to binary', () => {
+    const g = new Grid2D(3, 3);
+    g.set(0, 0, 0.1);
+    g.set(1, 0, 0.5);
+    g.set(2, 0, 0.9);
+    const result = Grid2D.threshold(g, 0.5);
+    expect(result.get(0, 0)).toBe(0);
+    expect(result.get(1, 0)).toBe(1.0);
+    expect(result.get(2, 0)).toBe(1.0);
+  });
+});
+
+describe('stampPolyline', () => {
+  it('stamps cells along a polyline within radius', () => {
+    const grid = new Grid2D(20, 20, { type: 'uint8', cellSize: 10 });
+    const polyline = [{ x: 0, z: 100 }, { x: 200, z: 100 }];
+    Grid2D.stampPolyline(grid, polyline, 5, 1);
+
+    // Cell at (10, 10) is at world (100, 100) — on the line
+    expect(grid.get(10, 10)).toBe(1);
+    // Cell at (10, 0) is at world (100, 0) — far from line
+    expect(grid.get(10, 0)).toBe(0);
+  });
+
+  it('does not stamp out-of-bounds cells', () => {
+    const grid = new Grid2D(10, 10, { type: 'uint8', cellSize: 10 });
+    const polyline = [{ x: -50, z: 50 }, { x: 150, z: 50 }];
+    Grid2D.stampPolyline(grid, polyline, 5, 1);
+    expect(grid.get(5, 5)).toBe(1);
+  });
+});
