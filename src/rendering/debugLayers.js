@@ -686,4 +686,46 @@ export const LAYERS = [
       }
     }
   }},
+  { name: 'Reservations', render: renderReservations },
+  { name: 'Terrain Suitability', render: renderTerrainSuitability },
 ];
+
+/**
+ * Reservation zones by use type.
+ */
+function renderReservations(ctx, map) {
+  const grid = map.hasLayer ? map.getLayer('reservationGrid') : null;
+  if (!grid) return;
+  const { width, height } = map;
+  const colors = {
+    1: 'rgba(255, 165, 0, 0.6)',   // commercial — orange
+    2: 'rgba(128, 128, 128, 0.6)', // industrial — gray
+    3: 'rgba(0, 100, 255, 0.6)',   // civic — blue
+    4: 'rgba(0, 200, 0, 0.6)',     // open space — green
+  };
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      const v = grid.get(gx, gz);
+      if (v > 0 && colors[v]) {
+        ctx.fillStyle = colors[v];
+        ctx.fillRect(gx, gz, 1, 1);
+      }
+    }
+  }
+}
+
+/**
+ * Terrain suitability layer (pure terrain, no feature masking).
+ */
+function renderTerrainSuitability(ctx, map) {
+  const grid = map.hasLayer ? map.getLayer('terrainSuitability') : null;
+  if (!grid) return;
+  const { width, height } = map;
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      const v = grid.get(gx, gz);
+      ctx.fillStyle = heatColor(v);
+      ctx.fillRect(gx, gz, 1, 1);
+    }
+  }
+}
