@@ -11,6 +11,7 @@ import { LayerStack } from '../core/LayerStack.js';
 import { generateTectonics } from './generateTectonics.js';
 import { generateGeology } from './generateGeology.js';
 import { generateTerrain } from './generateTerrain.js';
+import { planRiverCorridors } from './planRiverCorridors.js';
 import { generateHydrology } from './generateHydrology.js';
 import { generateCoastline } from './generateCoastline.js';
 import { generateLandCover } from './generateLandCover.js';
@@ -51,6 +52,14 @@ export function generateRegion(params, rng) {
   }, rng);
   layers.setData('tectonics', tectonics);
 
+  // A0b. River corridor planning (before geology and terrain)
+  const { corridors, corridorDist, corridorInfluence } = planRiverCorridors(
+    { width, height, cellSize }, tectonics, rng,
+  );
+  layers.setData('riverCorridors', corridors);
+  layers.setGrid('corridorDist', corridorDist);
+  layers.setGrid('corridorInfluence', corridorInfluence);
+
   // A1. Geology (driven by tectonic context)
   const geology = generateGeology({
     width, height, cellSize,
@@ -66,9 +75,9 @@ export function generateRegion(params, rng) {
   layers.setGrid('soilFertility', geology.soilFertility);
   layers.setGrid('springLine', geology.springLine);
 
-  // A2. Terrain (driven by tectonic context)
+  // A2. Terrain (driven by tectonic context, corridors suppress ridges)
   const terrain = generateTerrain(
-    { width, height, cellSize, seaLevel, tectonics },
+    { width, height, cellSize, seaLevel, tectonics, corridorInfluence },
     geology,
     rng,
   );

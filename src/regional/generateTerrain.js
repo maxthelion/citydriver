@@ -131,6 +131,7 @@ export function generateTerrain(params, geology, rng) {
     cellSize = 50,
     seaLevel = 0,
     tectonics,
+    corridorInfluence,
   } = params;
 
   const terrainRng = rng.fork('terrain');
@@ -294,8 +295,21 @@ export function generateTerrain(params, geology, rng) {
       const ridgeCentered = ridgeHeight - detailRidgeAmp * DETAIL_RIDGE_CENTER_FRAC;
       const terrainShape = largeTerrain + ridgeBlend * ridgeCentered;
 
+      // River corridor suppression: reduce mountain height along planned corridors
+      // so major rivers have natural gaps through mountain ranges.
+      let mountainContrib = mountainCentered;
+      if (corridorInfluence) {
+        const ci = corridorInfluence.get(gx, gz);
+        if (ci > 0) {
+          mountainContrib *= (1 - ci);
+          // Also depress base elevation along corridor
+          // (ensures flow routing follows the corridor even in flat areas)
+        }
+      }
+
       // Combine: tilt + base + mountains + detail
-      let h = tilt + baseHeight + mountainCentered + terrainShape + medDetail + smallDetail;
+      const corridorDepress = corridorInfluence ? corridorInfluence.get(gx, gz) * 15 : 0;
+      let h = tilt + baseHeight + mountainContrib + terrainShape + medDetail + smallDetail - corridorDepress;
 
       // Coastal falloff from coast field
       // cf < 0 = ocean; ramp elevation down from coastline into ocean
