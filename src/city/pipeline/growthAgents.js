@@ -139,6 +139,7 @@ export function spreadFromSeed(seed, budget, resGrid, zoneGrid, resType, behavio
 
 /**
  * Find seed locations for a growth agent.
+ * Strategies: roadFrontage, edge, scattered, terrain, fill, arterial, desirable.
  *
  * @param {string} strategy - seed strategy name
  * @param {Array<{gx,gz}>} eligible - eligible cells
