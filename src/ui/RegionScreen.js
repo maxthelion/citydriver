@@ -30,6 +30,7 @@ export class RegionScreen {
       this.onCompareArchetypes = callbacks.onCompareArchetypes || null;
       this.onBuildings = callbacks.onBuildings || null;
       this.onTerraced = callbacks.onTerraced || null;
+      this.onRailways = callbacks.onRailways || null;
     }
     this._layers = null;
     this._seed = initialSeed ?? Math.floor(Math.random() * 999999);
@@ -154,6 +155,16 @@ export class RegionScreen {
       });
       this._terracedBtn.style.background = '#543';
       btnRow.appendChild(this._terracedBtn);
+    }
+
+    if (this.onRailways) {
+      this._railwaysBtn = this._makeBtn('Railways', () => {
+        if (this._layers && this.onRailways) {
+          this.onRailways(this._layers, this._seed);
+        }
+      });
+      this._railwaysBtn.style.background = '#345';
+      btnRow.appendChild(this._railwaysBtn);
     }
 
     rightPanel.appendChild(btnRow);
