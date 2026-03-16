@@ -432,60 +432,217 @@ git commit -m "feat: carve river mouths below sea level near coast"
 
 ---
 
-### Task 4: Widen building flood margin
+### Task 4: Extract flood zone into a precomputed grid
+
+Replace the inline flood margin logic in `computeTerrainSuitability` with a precomputed `floodZone` grid that follows the same pattern as `waterMask` — computed once, stored in layers, passed as input.
 
 **Files:**
-- Modify: `src/core/terrainSuitability.js:78-79`
+- Modify: `src/core/terrainSuitability.js` — add `computeFloodZone()`, update `computeTerrainSuitability()` signature
+- Modify: `src/city/setup.js:179-181` — compute flood zone and pass it
+- Modify: `src/regional/pipeline.js` — compute flood zone after plunge pass (for settlement placement)
 - Test: `test/core/terrainSuitability.test.js`
 
-- [ ] **Step 1: Write failing test for wider flood margin**
+- [ ] **Step 1: Write failing test for `computeFloodZone`**
 
 Add to `test/core/terrainSuitability.test.js`:
 
 ```javascript
-it('returns 0 for low-lying land within 5 cells of water', () => {
-  const elevation = new Grid2D(50, 50, { cellSize: 10, fill: 2.5 }); // 2.5m above sea level
-  const slope = new Grid2D(50, 50, { cellSize: 10, fill: 0.02 });
-  const waterMask = new Grid2D(50, 50, { type: 'uint8', cellSize: 10 });
+import { computeFloodZone, computeTerrainSuitability } from '../../src/core/terrainSuitability.js';
 
-  // Place water at cell (20, 25)
-  waterMask.set(20, 25, 1);
+describe('computeFloodZone', () => {
+  it('marks low-lying land near water as flood zone', () => {
+    const elevation = new Grid2D(50, 50, { cellSize: 10, fill: 2.5 });
+    const waterMask = new Grid2D(50, 50, { type: 'uint8', cellSize: 10 });
+    waterMask.set(20, 25, 1);
 
-  const { suitability } = computeTerrainSuitability(elevation, slope, waterMask);
-  // Cell 3 cells from water at 2.5m elevation should be unbuildable
-  expect(suitability.get(23, 25)).toBe(0);
+    const floodZone = computeFloodZone(elevation, waterMask, 0);
+    // 3 cells from water at 2.5m (< 3.0m threshold) = flood zone
+    expect(floodZone.get(23, 25)).toBe(1);
+  });
+
+  it('does not mark high land near water', () => {
+    const elevation = new Grid2D(50, 50, { cellSize: 10, fill: 10 });
+    const waterMask = new Grid2D(50, 50, { type: 'uint8', cellSize: 10 });
+    waterMask.set(20, 25, 1);
+
+    const floodZone = computeFloodZone(elevation, waterMask, 0);
+    // 10m elevation > 3.0m threshold = not flood zone
+    expect(floodZone.get(23, 25)).toBe(0);
+  });
+
+  it('does not mark low land far from water', () => {
+    const elevation = new Grid2D(50, 50, { cellSize: 10, fill: 2.5 });
+    const waterMask = new Grid2D(50, 50, { type: 'uint8', cellSize: 10 });
+    waterMask.set(20, 25, 1);
+
+    const floodZone = computeFloodZone(elevation, waterMask, 0);
+    // 15 cells from water = beyond flood distance
+    expect(floodZone.get(35, 25)).toBe(0);
+  });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run test/core/terrainSuitability.test.js --reporter=verbose`
-Expected: FAIL — suitability > 0 (old margin is only 2 cells, 2m)
+Expected: FAIL — `computeFloodZone` not exported
 
-- [ ] **Step 3: Update flood margin constants**
+- [ ] **Step 3: Implement `computeFloodZone`**
 
-In `src/core/terrainSuitability.js`, change lines 78-79:
+In `src/core/terrainSuitability.js`, add the new function and update constants:
+
+```javascript
+const FLOOD_MARGIN_M = 3.0;  // land below seaLevel + this is in the flood zone
+const FLOOD_MARGIN_DIST = 5; // cells within this distance of water AND below flood level
+
+/**
+ * Compute a flood zone grid: 1 = flood zone (unbuildable), 0 = safe.
+ * Cells are in the flood zone if they are below seaLevel + FLOOD_MARGIN_M
+ * AND within FLOOD_MARGIN_DIST cells of water.
+ *
+ * @param {Grid2D} elevation
+ * @param {Grid2D} waterMask
+ * @param {number} seaLevel
+ * @returns {Grid2D} floodZone — uint8 grid, 1 = flood zone
+ */
+export function computeFloodZone(elevation, waterMask, seaLevel = 0) {
+  const { width, height } = elevation;
+  const cellSize = elevation.cellSize;
+  const cutoffCells = FLOOD_MARGIN_DIST;
+
+  const waterDist = computeWaterDistance(waterMask, cutoffCells);
+  const floodZone = new Grid2D(width, height, {
+    type: 'uint8',
+    cellSize,
+    originX: elevation.originX,
+    originZ: elevation.originZ,
+  });
+
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      const elev = elevation.get(gx, gz);
+      const wdist = waterDist.get(gx, gz);
+      if (elev < seaLevel + FLOOD_MARGIN_M && wdist <= FLOOD_MARGIN_DIST) {
+        floodZone.set(gx, gz, 1);
+      }
+    }
+  }
+
+  return floodZone;
+}
+```
+
+- [ ] **Step 4: Run flood zone tests**
+
+Run: `npx vitest run test/core/terrainSuitability.test.js --reporter=verbose`
+Expected: New `computeFloodZone` tests PASS
+
+- [ ] **Step 5: Update `computeTerrainSuitability` to accept `floodZone` grid**
+
+Change the signature and remove inline flood logic:
+
+```javascript
+// OLD signature:
+export function computeTerrainSuitability(elevation, slope, waterMask, seaLevel = 0) {
+
+// NEW signature:
+export function computeTerrainSuitability(elevation, slope, waterMask, seaLevel = 0, floodZone = null) {
+```
+
+Remove the inline flood margin check (lines 107-110):
+
+```javascript
+// REMOVE these lines:
+      // Flood margin: low-lying land near water is unbuildable
+      const elev = elevation.get(gx, gz);
+      const wdist = waterDist.get(gx, gz);
+      if (elev < seaLevel + FLOOD_MARGIN_M && wdist <= FLOOD_MARGIN_DIST) continue; // stays 0
+```
+
+Replace with:
+
+```javascript
+      // Flood zone: precomputed grid marks low-lying coastal land as unbuildable
+      if (floodZone && floodZone.get(gx, gz) > 0) continue; // stays 0
+```
+
+- [ ] **Step 6: Write test for suitability using floodZone grid**
+
+Add to `test/core/terrainSuitability.test.js`:
+
+```javascript
+it('returns 0 for cells in flood zone', () => {
+  const elevation = new Grid2D(50, 50, { cellSize: 10, fill: 2.5 });
+  const slope = new Grid2D(50, 50, { cellSize: 10, fill: 0.02 });
+  const waterMask = new Grid2D(50, 50, { type: 'uint8', cellSize: 10 });
+  waterMask.set(20, 25, 1);
+
+  const floodZone = computeFloodZone(elevation, waterMask, 0);
+  const { suitability } = computeTerrainSuitability(elevation, slope, waterMask, 0, floodZone);
+  // Cell in flood zone should be unbuildable
+  expect(suitability.get(23, 25)).toBe(0);
+});
+```
+
+- [ ] **Step 7: Run all terrainSuitability tests**
+
+Run: `npx vitest run test/core/terrainSuitability.test.js --reporter=verbose`
+Expected: ALL PASS (existing tests still pass because `floodZone = null` falls back to no-op)
+
+- [ ] **Step 8: Wire flood zone into city setup**
+
+In `src/city/setup.js`, update the call at line 179:
 
 ```javascript
 // OLD:
-const FLOOD_MARGIN_M = 2.0;
-const FLOOD_MARGIN_DIST = 2;
+  const { suitability, waterDist: tWaterDist } = computeTerrainSuitability(
+    map.elevation, map.slope, map.waterMask, seaLevel
+  );
 
 // NEW:
-const FLOOD_MARGIN_M = 3.0;
-const FLOOD_MARGIN_DIST = 5;
+  const floodZone = computeFloodZone(map.elevation, map.waterMask, seaLevel);
+  map.setLayer('floodZone', floodZone);
+  const { suitability, waterDist: tWaterDist } = computeTerrainSuitability(
+    map.elevation, map.slope, map.waterMask, seaLevel, floodZone
+  );
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+Add import at top of `src/city/setup.js`:
 
-Run: `npx vitest run test/core/terrainSuitability.test.js --reporter=verbose`
-Expected: ALL PASS (note: check existing tests still pass with wider margin)
+```javascript
+import { computeTerrainSuitability, computeFloodZone } from '../core/terrainSuitability.js';
+```
 
-- [ ] **Step 5: Commit**
+(Replace the existing import of just `computeTerrainSuitability`.)
+
+- [ ] **Step 9: Wire flood zone into regional pipeline for settlement placement**
+
+In `src/regional/pipeline.js`, after the sea floor plunge pass, compute and store the flood zone:
+
+```javascript
+import { computeFloodZone } from '../core/terrainSuitability.js';
+```
+
+After the plunge pass line, add:
+
+```javascript
+  // Flood zone: precomputed grid for settlement/building exclusion
+  const floodZone = computeFloodZone(terrain.elevation, hydrology.waterMask, seaLevel);
+  layers.setGrid('floodZone', floodZone);
+```
+
+Note: The regional pipeline doesn't currently call `computeTerrainSuitability` — it passes `waterMask` to settlement generators which do their own checks. The `floodZone` grid is stored in layers so consumers can use it if needed. The main consumer is the city-level `setup.js` which already passes it (Step 8).
+
+- [ ] **Step 10: Run full test suite**
+
+Run: `npx vitest run --reporter=verbose`
+Expected: ALL PASS
+
+- [ ] **Step 11: Commit**
 
 ```bash
-git add src/core/terrainSuitability.js test/core/terrainSuitability.test.js
-git commit -m "feat: widen building flood margin to 3m elevation, 5-cell distance"
+git add src/core/terrainSuitability.js src/city/setup.js src/regional/pipeline.js test/core/terrainSuitability.test.js
+git commit -m "feat: extract flood zone into precomputed grid for building exclusion"
 ```
 
 ---
