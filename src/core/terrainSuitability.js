@@ -75,10 +75,46 @@ export function computeWaterDistance(waterMask, cutoffCells) {
  * @param {Grid2D} waterMask
  * @returns {{ suitability: Grid2D, waterDist: Grid2D }}
  */
-const FLOOD_MARGIN_M = 2.0; // land below seaLevel + this is unbuildable
-const FLOOD_MARGIN_DIST = 2; // cells within this distance of water AND below flood level → unbuildable
+const FLOOD_MARGIN_M = 3.0;  // land below seaLevel + this is in the flood zone
+const FLOOD_MARGIN_DIST = 5; // cells within this distance of water AND below flood level
 
-export function computeTerrainSuitability(elevation, slope, waterMask, seaLevel = 0) {
+/**
+ * Compute a flood zone grid: 1 = flood zone (unbuildable), 0 = safe.
+ * Cells are in the flood zone if they are below seaLevel + FLOOD_MARGIN_M
+ * AND within FLOOD_MARGIN_DIST cells of water.
+ *
+ * @param {Grid2D} elevation
+ * @param {Grid2D} waterMask
+ * @param {number} seaLevel
+ * @returns {Grid2D} floodZone — uint8 grid, 1 = flood zone
+ */
+export function computeFloodZone(elevation, waterMask, seaLevel = 0) {
+  const { width, height } = elevation;
+  const cellSize = elevation.cellSize;
+  const cutoffCells = FLOOD_MARGIN_DIST;
+
+  const waterDist = computeWaterDistance(waterMask, cutoffCells);
+  const floodZone = new Grid2D(width, height, {
+    type: 'uint8',
+    cellSize,
+    originX: elevation.originX,
+    originZ: elevation.originZ,
+  });
+
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      const elev = elevation.get(gx, gz);
+      const wdist = waterDist.get(gx, gz);
+      if (elev < seaLevel + FLOOD_MARGIN_M && wdist <= FLOOD_MARGIN_DIST) {
+        floodZone.set(gx, gz, 1);
+      }
+    }
+  }
+
+  return floodZone;
+}
+
+export function computeTerrainSuitability(elevation, slope, waterMask, seaLevel = 0, floodZone = null) {
   const width = elevation.width;
   const height = elevation.height;
   const cellSize = elevation.cellSize;
@@ -104,11 +140,10 @@ export function computeTerrainSuitability(elevation, slope, waterMask, seaLevel 
 
       if (waterMask.get(gx, gz) > 0) continue; // stays 0
 
-      // Flood margin: low-lying land near water is unbuildable
-      const elev = elevation.get(gx, gz);
-      const wdist = waterDist.get(gx, gz);
-      if (elev < seaLevel + FLOOD_MARGIN_M && wdist <= FLOOD_MARGIN_DIST) continue; // stays 0
+      // Flood zone: precomputed grid marks low-lying coastal land as unbuildable
+      if (floodZone && floodZone.get(gx, gz) > 0) continue; // stays 0
 
+      const wdist = waterDist.get(gx, gz);
       let score = slopeScore(slope.get(gx, gz));
 
       // Edge taper

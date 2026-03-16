@@ -19,6 +19,7 @@ import { generateSettlements } from './generateSettlements.js';
 import { generateFarms } from './generateFarms.js';
 import { generateRoads } from './generateRoads.js';
 import { applySeaFloorPlunge } from './seaFloorPlunge.js';
+import { computeFloodZone } from '../core/terrainSuitability.js';
 import { generateMarketTowns } from './generateMarketTowns.js';
 import { growSettlements } from './growSettlements.js';
 
@@ -212,6 +213,10 @@ export function generateRegion(params, rng) {
   applySeaFloorPlunge(
     terrain.elevation, hydrology.waterMask, geology.erosionResistance, cellSize, seaLevel
   );
+
+  // Flood zone: precomputed grid for settlement/building exclusion
+  const floodZone = computeFloodZone(terrain.elevation, hydrology.waterMask, seaLevel);
+  layers.setGrid('floodZone', floodZone);
 
   return layers;
 }

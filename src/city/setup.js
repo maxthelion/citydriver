@@ -13,7 +13,7 @@ import { PerlinNoise } from '../core/noise.js';
 import { inheritRivers } from '../core/inheritRivers.js';
 import { distance2D } from '../core/math.js';
 import { CITY_CELL_SIZE, CITY_RADIUS } from './constants.js';
-import { computeTerrainSuitability } from '../core/terrainSuitability.js';
+import { computeTerrainSuitability, computeFloodZone } from '../core/terrainSuitability.js';
 
 /**
  * Create a FeatureMap from regional layers centered on a settlement.
@@ -176,8 +176,10 @@ export function setupCity(layers, settlement, rng) {
   if (map.waterDepth) map.setLayer('waterDepth', map.waterDepth);
 
   // Compute terrain suitability (pure terrain assessment, never mutated)
+  const floodZone = computeFloodZone(map.elevation, map.waterMask, seaLevel);
+  map.setLayer('floodZone', floodZone);
   const { suitability, waterDist: tWaterDist } = computeTerrainSuitability(
-    map.elevation, map.slope, map.waterMask, seaLevel
+    map.elevation, map.slope, map.waterMask, seaLevel, floodZone
   );
   map.setLayer('terrainSuitability', suitability);
   // Use the waterDist from terrainSuitability if not already set
