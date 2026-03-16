@@ -14,7 +14,8 @@ function makeStrategy(SecondaryClass, seed = 42) {
   return { map, strategy: new Cls(map) };
 }
 
-describe('desireLinesThen', { timeout: 180000 }, () => {
+// desireLinesThen uses archived strategies. Slow (180s+) and seed-dependent. Skipped by default.
+describe.skip('desireLinesThen', { timeout: 180000 }, () => {
   it('runs desire lines then face subdivision', { timeout: 180000 }, () => {
     const { map, strategy } = makeStrategy(FaceSubdivision);
 

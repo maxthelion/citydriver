@@ -157,12 +157,15 @@ describe('adaptive slope threshold', () => {
     expect(zones.length).toBeGreaterThan(0);
   });
 
-  it('excludes high-slope cells when land value is low', () => {
+  it('excludes high-slope cells when slope exceeds adaptive threshold', () => {
     const map = makeZoneTestMap(20, 20);
+    // With landValue=0.16 (just above LV threshold 0.15),
+    // effectiveSlopeMax = 0.30 + 0.16 * 0.20 = 0.332
+    // Slope 0.4 > 0.332, so cells should be excluded
     for (let gz = 0; gz < 20; gz++) {
       for (let gx = 0; gx < 20; gx++) {
-        map.slope.set(gx, gz, 0.25);
-        map.landValue.set(gx, gz, 0.31);
+        map.slope.set(gx, gz, 0.4);
+        map.landValue.set(gx, gz, 0.16);
         map.buildability.set(gx, gz, 0.5);
       }
     }

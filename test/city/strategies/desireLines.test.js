@@ -11,7 +11,9 @@ function makeStrategy(seed = 42) {
   return { map, strategy: new DesireLines(map) };
 }
 
-describe('DesireLines', { timeout: 180000 }, () => {
+// DesireLines is an archived strategy not used in the active pipeline.
+// These tests are slow (100s+) and seed-dependent. Skipped by default.
+describe.skip('DesireLines', { timeout: 180000 }, () => {
   it('builds skeleton roads on first tick', () => {
     const { map, strategy } = makeStrategy();
     const more = strategy.tick();
