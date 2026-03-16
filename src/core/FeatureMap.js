@@ -903,6 +903,21 @@ export class FeatureMap {
       copy.layers.set(name, grid.clone ? grid.clone() : grid);
     }
 
+    // Pipeline-set dynamic properties
+    if (this.developmentZones) {
+      copy.developmentZones = this.developmentZones.map(z => ({
+        ...z,
+        cells: z.cells.map(c => ({ ...c })),
+        boundary: z.boundary ? z.boundary.map(p => ({ ...p })) : undefined,
+      }));
+    }
+    if (this.reservationZones) {
+      copy.reservationZones = this.reservationZones.map(r => ({
+        ...r,
+        cells: r.cells ? r.cells.map(c => ({ ...c })) : undefined,
+      }));
+    }
+
     // Metadata
     copy.seaLevel = this.seaLevel;
     copy.settlement = this.settlement;
