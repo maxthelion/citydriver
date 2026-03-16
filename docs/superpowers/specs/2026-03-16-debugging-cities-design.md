@@ -21,13 +21,13 @@ Two changes:
 
 | Param | Values | Default |
 |-------|--------|---------|
-| `archetype` | `marketTown`, `portCity`, `gridTown`, `industrialTown`, `civicCentre` | omitted = auto (best fit) |
-| `tick` | `0`-`7` | `0` |
+| `archetype` | `marketTown`, `portCity`, `gridTown`, `industrialTown`, `civicCentre`, `auto`, `none` | omitted = `auto` (best fit) |
+| `tick` | `0`-`7` — where 0 = setup only (no pipeline ticks), 7 = all pipeline ticks complete | `0` |
 | `lens` | kebab-case layer slug (e.g. `land-value`, `reservations`, `development-zones`) | `composite` |
 
 Existing params (`seed`, `gx`, `gz`, `col`, `row`) unchanged.
 
-When the user changes archetype dropdown, tick buttons, or layer buttons, `history.replaceState` updates the URL. On load, URL params seed the UI state.
+When the user changes archetype dropdown, tick buttons, or layer buttons, `history.replaceState` updates the URL. On load, URL params seed the UI state — if `tick=5` is in the URL, the pipeline auto-advances through ticks 1-5 on load (new behaviour; currently the user must click through manually).
 
 ### Compare-archetypes screen (`mode=compare-archetypes`)
 
@@ -55,10 +55,10 @@ CSS grid of equally-sized 2D canvases. Each panel labelled with archetype name. 
 
 ### Per-panel rendering
 
-- Each panel runs `setupCity()` with the same regional data but a different archetype
-- Pipeline ticks advance to the selected tick number
+- Run `setupCity()` once, then clone the resulting FeatureMap for each archetype (setup is archetype-independent)
+- Each panel creates its own `LandFirstDevelopment` with a different archetype and advances to the selected tick
 - The selected debug layer is rendered to that panel's canvas using existing `debugLayers.js` render functions
-- Panels share the same underlying regional data and seed — only the archetype differs
+- All panels share the same seed and RNG fork — only the archetype-driven pipeline ticks produce different results
 
 ### Navigation
 
@@ -68,7 +68,14 @@ CSS grid of equally-sized 2D canvases. Each panel labelled with archetype name. 
 
 ## Layer Slug Mapping
 
-A lookup from kebab-case URL slugs to LAYERS array entries. Derived by lowercasing and hyphenating the layer display name (e.g. `Land Value` → `land-value`). Used by both debug and compare screens.
+A lookup from kebab-case URL slugs to LAYERS array entries. Derived by lowercasing, stripping special characters (parentheses, colons), and hyphenating the layer display name. Examples:
+
+- `Land Value` → `land-value`
+- `Path Cost (growth)` → `path-cost-growth`
+- `Path Cost (nucleus)` → `path-cost-nucleus`
+- `Coverage: Water` → `coverage-water`
+
+Used by both debug and compare screens.
 
 ## Debug Screen Changes
 
@@ -78,18 +85,21 @@ A lookup from kebab-case URL slugs to LAYERS array entries. Derived by lowercasi
 
 ## Pipeline Execution (Compare Screen)
 
-- For each selected archetype, run `setupCity()` + ticks independently on cloned regional layers
+- Run `setupCity()` once to produce a base FeatureMap, then clone it for each archetype
+- Each clone gets its own `LandFirstDevelopment` instance with the target archetype
 - N independent FeatureMaps in memory (manageable for up to 5)
 - Tick changes re-run the pipeline from scratch (optimise with caching later if needed)
+- The existing `CompareScreen.js` uses this same clone-and-tick pattern and serves as a reference implementation
 
 ## Entry Points
 
-- Add `compare-archetypes` case to the mode switch in `main.js`
+- Add `compare-archetypes` case to all three mode-routing blocks in `main.js` (`enterSubScreen`, `popstate` handler, initial URL deep-link)
 - Add navigation helper to build compare URLs
 
 ## Files Changed
 
-- `src/ui/DebugScreen.js` — read/write URL params for archetype, tick, lens
+- `src/ui/DebugScreen.js` — read/write URL params for archetype, tick, lens; auto-advance to tick on load
 - `src/ui/CompareArchetypesScreen.js` — new file
-- `src/main.js` — add `compare-archetypes` mode, navigation helpers
-- `src/rendering/debugLayers.js` — extract layer slug mapping (may already be sufficient as-is)
+- `src/ui/RegionScreen.js` — add "Compare archetypes" navigation button/callback
+- `src/main.js` — add `compare-archetypes` to all three mode-routing blocks, navigation helpers
+- `src/rendering/debugLayers.js` — add layer slug mapping with special character handling
