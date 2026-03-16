@@ -919,6 +919,21 @@ export class FeatureMap {
       }));
     }
 
+    // Growth state
+    if (this.growthState) {
+      copy.growthState = {
+        tick: this.growthState.tick,
+        totalZoneCells: this.growthState.totalZoneCells,
+        nucleusRadii: new Map(this.growthState.nucleusRadii),
+        claimedCounts: new Map(this.growthState.claimedCounts),
+        activeSeeds: new Map(
+          [...this.growthState.activeSeeds].map(([k, seeds]) =>
+            [k, seeds.map(s => ({ ...s }))]
+          )
+        ),
+      };
+    }
+
     // Metadata
     copy.seaLevel = this.seaLevel;
     copy.settlement = this.settlement;
