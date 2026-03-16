@@ -210,6 +210,11 @@ export class CompareArchetypesScreen {
   }
 
   async _generate() {
+    // Ticks 1-4 are archetype-independent (skeleton, land value, zones, spatial layers).
+    // Only tick 5+ (reservations, ribbons, connections) uses the archetype.
+    // So we run shared ticks on the base map once, then clone for archetype-specific ticks.
+    const FIRST_ARCHETYPE_TICK = 5;
+
     this._generationId = (this._generationId || 0) + 1;
     const id = this._generationId;
 
@@ -220,20 +225,31 @@ export class CompareArchetypesScreen {
     const rng = new SeededRandom(this.seed);
     const baseMap = setupCity(this.layers, this.settlement, rng.fork('city'));
 
+    // Run shared (archetype-independent) ticks on the base map
+    const sharedTicks = Math.min(this.currentTick, FIRST_ARCHETYPE_TICK - 1);
+    const sharedStrategy = new LandFirstDevelopment(baseMap, {});
+    for (let t = 0; t < sharedTicks; t++) {
+      const stepLabel = TICK_LABELS[t + 1] || '?';
+      this._showProgress(`Shared: ${stepLabel}...`);
+      await yieldFrame();
+      if (this._disposed || id !== this._generationId) return;
+      sharedStrategy.tick();
+    }
+
+    // Clone and run archetype-specific ticks
     for (const key of this.selectedArchetypes) {
       if (this._disposed || id !== this._generationId) return;
 
-      const tickLabel = this.currentTick > 0
-        ? ` → tick ${this.currentTick} (${TICK_LABELS[this.currentTick] || '?'})`
-        : '';
-      this._showProgress(`${ARCHETYPES[key].name}${tickLabel}...`);
+      this._showProgress(`${ARCHETYPES[key].name}...`);
       await yieldFrame();
       if (this._disposed || id !== this._generationId) return;
 
       const map = baseMap.clone();
       const strategy = new LandFirstDevelopment(map, { archetype: ARCHETYPES[key] });
+      // Fast-forward the strategy's internal tick counter past shared ticks
+      strategy._tick = sharedTicks;
 
-      for (let t = 0; t < this.currentTick; t++) {
+      for (let t = sharedTicks; t < this.currentTick; t++) {
         strategy.tick();
       }
 
