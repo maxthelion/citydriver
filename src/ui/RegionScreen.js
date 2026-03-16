@@ -27,6 +27,7 @@ export class RegionScreen {
       this.onEnter = callbacks.onEnter;
       this.onDebug = callbacks.onDebug || null;
       this.onCompare = callbacks.onCompare || null;
+      this.onCompareArchetypes = callbacks.onCompareArchetypes || null;
       this.onBuildings = callbacks.onBuildings || null;
       this.onTerraced = callbacks.onTerraced || null;
     }
@@ -122,6 +123,17 @@ export class RegionScreen {
       this._compareBtn.style.opacity = '0.5';
       this._compareBtn.style.background = '#353';
       btnRow.appendChild(this._compareBtn);
+    }
+
+    if (this.onCompareArchetypes) {
+      this._compareArchetypesBtn = this._makeBtn('Compare Archetypes', () => {
+        if (this._layers && this._selectedSettlement && this.onCompareArchetypes) {
+          this.onCompareArchetypes(this._layers, this._selectedSettlement, this._seed);
+        }
+      });
+      this._compareArchetypesBtn.style.opacity = '0.5';
+      this._compareArchetypesBtn.style.background = '#353';
+      btnRow.appendChild(this._compareArchetypesBtn);
     }
 
     if (this.onBuildings) {
@@ -298,6 +310,10 @@ export class RegionScreen {
     if (this._compareBtn) {
       this._compareBtn.style.opacity = settlement ? '1' : '0.5';
       this._compareBtn.disabled = !settlement;
+    }
+    if (this._compareArchetypesBtn) {
+      this._compareArchetypesBtn.style.opacity = settlement ? '1' : '0.5';
+      this._compareArchetypesBtn.disabled = !settlement;
     }
 
     if (settlement) {

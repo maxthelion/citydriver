@@ -183,6 +183,22 @@ export class DebugScreen {
     this.infoDiv.style.cssText = 'font-size:11px; color:#888; margin-top:auto; padding-top:12px; border-top:1px solid #333; line-height:1.5;';
     panel.appendChild(this.infoDiv);
 
+    // Compare Archetypes button
+    const compareBtn = document.createElement('button');
+    compareBtn.textContent = 'Compare Archetypes';
+    compareBtn.style.cssText = 'background:#446; color:#eee; border:1px solid #668; padding:6px 12px; cursor:pointer; font-family:monospace; margin-top:8px;';
+    compareBtn.onclick = () => {
+      const url = new URL(location.href);
+      url.searchParams.set('mode', 'compare-archetypes');
+      url.searchParams.delete('archetype');
+      url.searchParams.delete('col');
+      url.searchParams.delete('row');
+      url.searchParams.set('tick', this.currentTick);
+      url.searchParams.set('lens', layerSlug(LAYERS[this.currentLayerIndex].name));
+      location.href = url.toString();
+    };
+    panel.appendChild(compareBtn);
+
     // Back button
     const backBtn = document.createElement('button');
     backBtn.textContent = 'Back to Region';

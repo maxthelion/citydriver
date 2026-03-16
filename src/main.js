@@ -2,6 +2,7 @@ import { RegionScreen } from './ui/RegionScreen.js';
 import { CityScreen } from './ui/CityScreen.js';
 import { DebugScreen } from './ui/DebugScreen.js';
 import { CompareScreen } from './ui/CompareScreen.js';
+import { CompareArchetypesScreen } from './ui/CompareArchetypesScreen.js';
 import { BuildingStyleScreen } from './ui/BuildingStyleScreen.js';
 import { TerracedRowScreen } from './ui/TerracedRowScreen.js';
 import { generateRegionFromSeed } from './ui/regionHelper.js';
@@ -12,6 +13,7 @@ let regionScreen = null;
 let cityScreen = null;
 let debugScreen = null;
 let compareScreen = null;
+let compareArchetypesScreen = null;
 let buildingScreen = null;
 let terracedScreen = null;
 
@@ -20,6 +22,7 @@ function disposeAll() {
   if (cityScreen) { cityScreen.dispose(); cityScreen = null; }
   if (debugScreen) { debugScreen.dispose(); debugScreen = null; }
   if (compareScreen) { compareScreen.dispose(); compareScreen = null; }
+  if (compareArchetypesScreen) { compareArchetypesScreen.dispose(); compareArchetypesScreen = null; }
   if (buildingScreen) { buildingScreen.dispose(); buildingScreen = null; }
   if (terracedScreen) { terracedScreen.dispose(); terracedScreen = null; }
   container.innerHTML = '';
@@ -39,6 +42,8 @@ function enterSubScreen(mode, layers, settlement, seed) {
     cityScreen = new CityScreen(container, layers, settlement, rng.fork('city'), seed, goBack);
   } else if (mode === 'compare') {
     compareScreen = new CompareScreen(container, layers, settlement, seed, goBack);
+  } else if (mode === 'compare-archetypes') {
+    compareArchetypesScreen = new CompareArchetypesScreen(container, layers, settlement, seed, goBack);
   } else if (mode === 'buildings') {
     buildingScreen = new BuildingStyleScreen(container, goBack);
   } else if (mode === 'terraced') {
@@ -53,6 +58,7 @@ function showRegion(initialSeed) {
     onEnter(layers, settlement, seed) { enterSubScreen('city', layers, settlement, seed); },
     onDebug(layers, settlement, seed) { enterSubScreen('debug', layers, settlement, seed); },
     onCompare(layers, settlement, seed) { enterSubScreen('compare', layers, settlement, seed); },
+    onCompareArchetypes(layers, settlement, seed) { enterSubScreen('compare-archetypes', layers, settlement, seed); },
     onBuildings() {
       disposeAll();
       history.pushState(null, '', '?mode=buildings');
@@ -93,6 +99,8 @@ window.addEventListener('popstate', () => {
         cityScreen = new CityScreen(container, layers, settlement, rng.fork('city'), seed, goBack);
       } else if (mode === 'compare') {
         compareScreen = new CompareScreen(container, layers, settlement, seed, goBack);
+      } else if (mode === 'compare-archetypes') {
+        compareArchetypesScreen = new CompareArchetypesScreen(container, layers, settlement, seed, goBack);
       } else {
         debugScreen = new DebugScreen(container, layers, settlement, seed, goBack);
       }
@@ -111,21 +119,24 @@ if (urlMode === 'buildings') {
   buildingScreen = new BuildingStyleScreen(container, goBack);
 } else if (urlMode === 'terraced') {
   terracedScreen = new TerracedRowScreen(container, goBack);
-} else if ((urlMode === 'debug' || urlMode === 'city' || urlMode === 'compare') && urlSeed != null) {
+} else if ((urlMode === 'debug' || urlMode === 'city' || urlMode === 'compare' || urlMode === 'compare-archetypes') && urlSeed != null) {
   const gx = parseInt(urlParams.get('gx'));
   const gz = parseInt(urlParams.get('gz'));
 
   const { layers, settlement } = generateRegionFromSeed(urlSeed, gx, gz);
   if (settlement) {
     // Push region state first so browser back goes to region view
+    const fullSearch = location.search;
     history.replaceState(null, '', `?seed=${urlSeed}`);
-    history.pushState(null, '', `?seed=${urlSeed}&mode=${urlMode}&gx=${gx}&gz=${gz}`);
+    history.pushState(null, '', fullSearch);
 
     if (urlMode === 'city') {
       const rng = new SeededRandom(urlSeed);
       cityScreen = new CityScreen(container, layers, settlement, rng.fork('city'), urlSeed, goBack);
     } else if (urlMode === 'compare') {
       compareScreen = new CompareScreen(container, layers, settlement, urlSeed, goBack);
+    } else if (urlMode === 'compare-archetypes') {
+      compareArchetypesScreen = new CompareArchetypesScreen(container, layers, settlement, urlSeed, goBack);
     } else {
       debugScreen = new DebugScreen(container, layers, settlement, urlSeed, goBack);
     }
