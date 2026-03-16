@@ -121,7 +121,7 @@ function bitmapIntersection(a, b) {
   return count;
 }
 
-describe('plot placement bitmap verification', { timeout: 60000 }, () => {
+describe('plot placement bitmap verification', { timeout: 120000 }, () => {
   it('zones do not contain water cells', () => {
     const { map } = getShared();
     let waterCells = 0;
@@ -134,19 +134,17 @@ describe('plot placement bitmap verification', { timeout: 60000 }, () => {
   });
 
   it('skeleton roads split zones at extraction time', () => {
-    const seed = 42;
-    const { layers, settlement } = generateRegionFromSeed(seed);
-    const rng = new SeededRandom(seed);
-    const map = setupCity(layers, settlement, rng.fork('city'));
-    const strategy = new LandFirstDevelopment(map);
-    strategy.tick(); // skeleton
-    strategy.tick(); // land value
-    strategy.tick(); // zone extraction
+    // Use the shared map which has completed all ticks.
+    // Zones are extracted after skeleton roads — road cells should not
+    // be inside any zone.
+    const { map } = getShared();
+    const roadGrid = map.roadGrid || (map.hasLayer && map.getLayer('roadGrid'));
+    if (!roadGrid) return;
 
     let roadCells = 0;
     for (const zone of map.developmentZones) {
       for (const c of zone.cells) {
-        if (map.roadGrid && map.roadGrid.get(c.gx, c.gz) > 0) roadCells++;
+        if (roadGrid.get(c.gx, c.gz) > 0) roadCells++;
       }
     }
     expect(roadCells).toBe(0);

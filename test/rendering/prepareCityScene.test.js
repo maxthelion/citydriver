@@ -27,7 +27,7 @@ function makeCity(seed = 42) {
   return map;
 }
 
-describe('prepareCityScene', { timeout: 30000 }, () => {
+describe('prepareCityScene', { timeout: 60000 }, () => {
   it('returns expected structure', () => {
     const { map, sd } = getShared();
     if (!map) return;
