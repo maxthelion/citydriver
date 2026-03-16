@@ -47,7 +47,7 @@ describe('spreadFromSeed', () => {
     return new Grid2D(w, h, { type: 'uint8', cellSize: 5, originX: 0, originZ: 0 });
   }
 
-  it('blob: grows outward from seed up to budget', () => {
+  it('scored: grows outward from seed up to budget', () => {
     const resGrid = makeGrid(20, 20);
     const zoneGrid = makeGrid(20, 20);
     // Mark all cells as zone-eligible
@@ -57,7 +57,7 @@ describe('spreadFromSeed', () => {
 
     const claimed = spreadFromSeed(
       { gx: 10, gz: 10 }, 12, resGrid, zoneGrid,
-      RESERVATION.INDUSTRIAL, 'blob', {}, {}, 20, 20
+      RESERVATION.INDUSTRIAL, 'scored', {}, {}, 20, 20
     );
     expect(claimed.length).toBe(12);
     // All claimed cells should be marked in resGrid
@@ -91,7 +91,7 @@ describe('spreadFromSeed', () => {
 
     const claimed = spreadFromSeed(
       { gx: 5, gz: 5 }, 5, resGrid, zoneGrid,
-      RESERVATION.INDUSTRIAL, 'blob', {}, {}, 10, 10
+      RESERVATION.INDUSTRIAL, 'scored', {}, {}, 10, 10
     );
     // Should not have overwritten the commercial cells
     expect(resGrid.get(5, 4)).toBe(RESERVATION.COMMERCIAL);
@@ -108,83 +108,70 @@ describe('spreadFromSeed', () => {
 
     const claimed = spreadFromSeed(
       { gx: 5, gz: 5 }, 20, resGrid, zoneGrid,
-      RESERVATION.INDUSTRIAL, 'blob', {}, {}, 10, 10
+      RESERVATION.INDUSTRIAL, 'scored', {}, {}, 10, 10
     );
     expect(claimed.length).toBe(9); // bounded by zone
   });
 });
 
 describe('findSeeds', () => {
-  function makeGrid(w, h) {
-    return new Grid2D(w, h, { type: 'uint8', cellSize: 5, originX: 0, originZ: 0 });
-  }
-
-  it('roadFrontage: returns cells near roads', () => {
-    const resGrid = makeGrid(20, 20);
-    const zoneGrid = makeGrid(20, 20);
-    const roadGrid = new Grid2D(20, 20, { type: 'uint8', cellSize: 5, originX: 0, originZ: 0 });
-    for (let z = 0; z < 20; z++)
-      for (let x = 0; x < 20; x++)
-        zoneGrid.set(x, z, 1);
-    // Road along row 10
-    for (let x = 0; x < 20; x++) roadGrid.set(x, 10, 1);
-
+  it('returns top-scored seeds up to count', () => {
     const eligible = [];
-    for (let z = 0; z < 20; z++)
-      for (let x = 0; x < 20; x++)
-        if (resGrid.get(x, z) === 0 && zoneGrid.get(x, z) > 0)
-          eligible.push({ gx: x, gz: z });
+    for (let z = 0; z < 10; z++)
+      for (let x = 0; x < 10; x++)
+        eligible.push({ gx: x, gz: z });
 
-    const seeds = findSeeds('roadFrontage', eligible, 3, [4, 20],
-      { roadFrontage: 0.8 }, { roadGrid, roadFrontage: roadGrid }, 20, 20, resGrid);
-    expect(seeds.length).toBeLessThanOrEqual(3);
-    // All seeds should be near the road (gz 9, 10, or 11)
+    // centrality layer: high in the centre
+    const layers = {
+      centrality: { get: (x, z) => 1.0 - Math.abs(x - 5) / 10 - Math.abs(z - 5) / 10 },
+    };
+    const seeds = findSeeds(eligible, 3, 0, { centrality: 1.0 }, layers, 10, 10);
+    expect(seeds.length).toBe(3);
+    // Seeds should be near centre (x=5, z=5)
     for (const s of seeds) {
-      expect(Math.abs(s.gz - 10)).toBeLessThanOrEqual(2);
+      expect(Math.abs(s.gx - 5) + Math.abs(s.gz - 5)).toBeLessThanOrEqual(2);
     }
   });
 
-  it('scattered: returns spaced-apart seeds', () => {
-    const resGrid = makeGrid(30, 30);
-    const zoneGrid = makeGrid(30, 30);
-    for (let z = 0; z < 30; z++)
-      for (let x = 0; x < 30; x++)
-        zoneGrid.set(x, z, 1);
-
+  it('respects minSpacing between seeds', () => {
     const eligible = [];
     for (let z = 0; z < 30; z++)
       for (let x = 0; x < 30; x++)
         eligible.push({ gx: x, gz: z });
 
-    const seeds = findSeeds('scattered', eligible, 3, [3, 10],
-      { centrality: 0.5 }, { centrality: { get: () => 0.5 } }, 30, 30, resGrid);
+    const seeds = findSeeds(eligible, 3, 10, { centrality: 0.5 },
+      { centrality: { get: () => 0.5 } }, 30, 30);
     expect(seeds.length).toBe(3);
-    // Check minimum spacing: 3 * footprint[1] = 30 cells apart
-    // On a 30x30 grid this means seeds must be spread out
     for (let i = 0; i < seeds.length; i++) {
       for (let j = i + 1; j < seeds.length; j++) {
         const dx = seeds[i].gx - seeds[j].gx;
         const dz = seeds[i].gz - seeds[j].gz;
         const dist = Math.sqrt(dx * dx + dz * dz);
-        expect(dist).toBeGreaterThan(5); // at least some spacing
+        expect(dist).toBeGreaterThanOrEqual(10);
       }
     }
   });
 
-  it('fill: returns many seeds without spacing constraint', () => {
-    const resGrid = makeGrid(10, 10);
-    const zoneGrid = makeGrid(10, 10);
-    for (let z = 0; z < 10; z++)
-      for (let x = 0; x < 10; x++)
-        zoneGrid.set(x, z, 1);
-
+  it('returns fewer seeds if minSpacing prevents more', () => {
+    // 5x5 grid, minSpacing=4 — can only fit 1-2 seeds comfortably
     const eligible = [];
-    for (let z = 0; z < 10; z++)
-      for (let x = 0; x < 10; x++)
+    for (let z = 0; z < 5; z++)
+      for (let x = 0; x < 5; x++)
         eligible.push({ gx: x, gz: z });
 
-    const seeds = findSeeds('fill', eligible, 5, [2, 15],
-      {}, {}, 10, 10, resGrid);
-    expect(seeds.length).toBe(5);
+    const seeds = findSeeds(eligible, 5, 4, {}, {}, 5, 5);
+    // With spacing=4 on a 5x5 grid, at most ~2 seeds can fit
+    expect(seeds.length).toBeLessThan(5);
+  });
+
+  it('returns empty array for empty eligible list', () => {
+    const seeds = findSeeds([], 5, 0, {}, {}, 10, 10);
+    expect(seeds).toEqual([]);
+  });
+
+  it('returns empty array when count is 0', () => {
+    const eligible = [{ gx: 0, gz: 0 }];
+    const seeds = findSeeds(eligible, 0, 0, {}, {}, 10, 10);
+    expect(seeds).toEqual([]);
   });
 });
