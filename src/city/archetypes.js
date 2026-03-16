@@ -26,6 +26,47 @@ export const ARCHETYPES = {
       civic:      'radial',
       openSpace:  'radial',
     },
+    growth: {
+      radiusStep: 200,
+      maxGrowthTicks: 8,
+      agentPriority: ['civic', 'commercial', 'industrial', 'openSpace',
+                      'residentialQuality', 'residentialFine', 'residentialEstate',
+                      'agriculture'],
+      agents: {
+        commercial: {
+          share: 0.12, seedStrategy: 'roadFrontage', spreadBehaviour: 'linear',
+          footprint: [4, 20], affinity: { centrality: 0.6, roadFrontage: 0.8 }, seedsPerTick: 3,
+        },
+        industrial: {
+          share: 0.08, seedStrategy: 'edge', spreadBehaviour: 'blob',
+          footprint: [30, 100], affinity: { downwindness: 0.6, edgeness: 0.5 }, seedsPerTick: 1,
+        },
+        civic: {
+          share: 0.05, seedStrategy: 'scattered', spreadBehaviour: 'dot',
+          footprint: [3, 10], affinity: { centrality: 0.7, roadFrontage: 0.3 }, seedsPerTick: 2,
+        },
+        openSpace: {
+          share: 0.08, seedStrategy: 'terrain', spreadBehaviour: 'blob',
+          footprint: [10, 50], affinity: { waterfrontness: 0.3, edgeness: 0.4 }, seedsPerTick: 1,
+        },
+        agriculture: {
+          share: 0.15, seedStrategy: 'frontier', spreadBehaviour: 'belt',
+          footprint: [50, 200], affinity: { edgeness: 1.0 }, seedsPerTick: 0,
+        },
+        residentialFine: {
+          share: 0.30, seedStrategy: 'fill', spreadBehaviour: 'organic',
+          footprint: [2, 15], affinity: { centrality: 0.5, roadFrontage: 0.3 }, seedsPerTick: 5,
+        },
+        residentialEstate: {
+          share: 0.10, seedStrategy: 'edge', spreadBehaviour: 'blob',
+          footprint: [20, 80], affinity: { edgeness: 0.7 }, seedsPerTick: 1,
+        },
+        residentialQuality: {
+          share: 0.12, seedStrategy: 'desirable', spreadBehaviour: 'cluster',
+          footprint: [8, 40], affinity: { waterfrontness: 0.4, centrality: -0.2, edgeness: 0.3 }, seedsPerTick: 2,
+        },
+      },
+    },
   },
 
   portCity: {
