@@ -205,8 +205,8 @@ export function runGrowthTick(map, archetype, state) {
 
     // Find new seeds
     const seeds = findSeeds(
-      agentConfig.seedStrategy, agentEligible, agentConfig.seedsPerTick,
-      agentConfig.footprint, agentConfig.affinity, layers, w, h, resGrid
+      agentEligible, agentConfig.seedsPerTick,
+      agentConfig.minSpacing || 0, agentConfig.affinity, layers, w, h
     );
 
     // Grow existing seeds + new seeds
