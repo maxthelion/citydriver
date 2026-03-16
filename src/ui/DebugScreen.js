@@ -10,7 +10,7 @@ import { setupCity } from '../city/setup.js';
 import { LandFirstDevelopment } from '../city/strategies/landFirstDevelopment.js';
 import { ARCHETYPES } from '../city/archetypes.js';
 import { scoreSettlement } from '../city/archetypeScoring.js';
-import { LAYERS } from '../rendering/debugLayers.js';
+import { LAYERS, layerSlug, layerIndexFromSlug } from '../rendering/debugLayers.js';
 import { renderMap, drawRivers, drawRoads, drawSettlements } from '../rendering/mapRenderer.js';
 import { SeededRandom } from '../core/rng.js';
 
@@ -33,6 +33,12 @@ export class DebugScreen {
     this.currentTick = -1;
     this.currentLayerIndex = 0;
     this._disposed = false;
+
+    // Read URL params for initial state
+    const params = new URLSearchParams(location.search);
+    this._initialArchetype = params.get('archetype') || 'auto';
+    this._initialTick = Math.min(7, parseInt(params.get('tick')) || 0);
+    this._initialLens = params.get('lens') || null;
 
     // Cell detail state
     this._selectedCell = null; // { col, row } or null = overview mode
@@ -109,7 +115,16 @@ export class DebugScreen {
       opt.textContent = arch.name;
       this.archSelect.appendChild(opt);
     }
-    this.archSelect.value = 'auto';
+    if (this._initialArchetype === 'none') {
+      this.archSelect.value = '';
+    } else if (this._initialArchetype && this._initialArchetype !== 'auto') {
+      this.archSelect.value = this._initialArchetype;
+    } else {
+      this.archSelect.value = 'auto';
+    }
+    this.archSelect.onchange = () => {
+      this._generate(); // _generate() calls _updateURL() internally
+    };
     archRow.appendChild(archLabel);
     archRow.appendChild(this.archSelect);
     panel.appendChild(archRow);
@@ -156,6 +171,7 @@ export class DebugScreen {
       btn.onclick = () => {
         this.currentLayerIndex = i;
         this._updateLayerButtons();
+        this._updateURL();
         this._render();
       };
       panel.appendChild(btn);
@@ -186,6 +202,14 @@ export class DebugScreen {
     document.addEventListener('keydown', this._onKeyDown);
 
     this._updateLayerButtons();
+
+    if (this._initialLens) {
+      const idx = layerIndexFromSlug(this._initialLens);
+      if (idx >= 0) {
+        this.currentLayerIndex = idx;
+        this._updateLayerButtons();
+      }
+    }
   }
 
   _updateLayerButtons() {
@@ -234,17 +258,26 @@ export class DebugScreen {
     this._selectedCell = null;
     this.tickLabel.textContent = 'Tick: 0 (setup)';
 
-    const url = new URL(location.href);
-    url.searchParams.set('seed', this.seed);
-    url.searchParams.set('mode', 'debug');
-    url.searchParams.set('gx', this.settlement.gx);
-    url.searchParams.set('gz', this.settlement.gz);
-    history.replaceState(null, '', url);
+    this._updateURL();
 
     this._updateInfo();
     this._setupCanvas();
     this._renderMinimap();
     this._render();
+
+    // Auto-advance to URL-requested tick
+    if (this._initialTick > 0) {
+      const target = this._initialTick;
+      this._initialTick = 0; // only on first generate
+      for (let i = 0; i < target && this._strategy; i++) {
+        this._strategy.tick();
+        this.currentTick++;
+      }
+      const label = TICK_LABELS[this.currentTick] || 'done';
+      this.tickLabel.textContent = `Tick: ${this.currentTick} (${label})`;
+      this._updateInfo();
+      this._render();
+    }
   }
 
   _nextTick() {
@@ -262,6 +295,7 @@ export class DebugScreen {
 
     this._updateInfo();
     this._render();
+    this._updateURL();
   }
 
   _reset() {
@@ -308,6 +342,25 @@ export class DebugScreen {
     url.searchParams.set('mode', 'debug');
     url.searchParams.set('gx', this.settlement.gx);
     url.searchParams.set('gz', this.settlement.gz);
+
+    // Archetype
+    const archVal = this.archSelect.value;
+    if (archVal === '') {
+      url.searchParams.set('archetype', 'none');
+    } else if (archVal) {
+      url.searchParams.set('archetype', archVal);
+    }
+
+    // Tick
+    url.searchParams.set('tick', this.currentTick);
+
+    // Lens
+    const currentLayer = LAYERS[this.currentLayerIndex];
+    if (currentLayer) {
+      url.searchParams.set('lens', layerSlug(currentLayer.name));
+    }
+
+    // Cell detail
     if (this._selectedCell) {
       url.searchParams.set('col', this._selectedCell.col);
       url.searchParams.set('row', this._selectedCell.row);
