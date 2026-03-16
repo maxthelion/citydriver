@@ -148,7 +148,9 @@ export function runGrowthTick(map, archetype, state) {
   }
   const indProximity = boxBlur(indMask, w, h, 40); // ~200m at 5m cells
   // Invert: high value = far from industrial
-  const maxInd = Math.max(...indProximity) || 1;
+  let maxInd = 0;
+  for (let i = 0; i < w * h; i++) if (indProximity[i] > maxInd) maxInd = indProximity[i];
+  maxInd = maxInd || 1;
   const indDistance = new Float32Array(w * h);
   for (let i = 0; i < w * h; i++) {
     indDistance[i] = 1.0 - indProximity[i] / maxInd;
