@@ -52,8 +52,19 @@ On each tick, for each nucleus:
 
 - Agents cannot overwrite each other's claims (first-come in priority order)
 - Nuclei compete — if two nuclei's radii overlap, their agents interleave (highest-scoring claim wins)
-- Each agent has a **per-tick budget** (fraction of new ring cells) and a **cumulative cap** (total share)
+- Each agent's `share` is a **hard cumulative cap** — fraction of total zone cells (same meaning as current archetype shares). Once an agent has claimed `share × totalZoneCells` cells across all ticks, it stops seeding and stops growing existing clusters. Shares need not sum to 1.0 — unclaimed cells remain unreserved.
 - Seeds persist across ticks — a commercial strip started in tick 2 keeps growing in tick 3
+- When an agent hits its cap, partially-grown clusters are kept as-is (realistic irregular edges)
+- If all eligible cells within a nucleus's radius are claimed, that nucleus is skipped for the tick
+- Agents that depend on other agents' claims (e.g. `residentialQuality` avoids industrial) must run after them in priority order — this is a hard ordering constraint, not just a preference
+
+### Termination
+
+Growth ticks stop when **all nuclei's radii have exceeded the map bounds** or **all zone cells have been claimed**. The archetype can also specify a `maxGrowthTicks` cap (default 8). `LandFirstDevelopment.tick()` returns `false` when the termination condition is met, then proceeds to layoutRibbons.
+
+### First tick bootstrap
+
+On the first growth tick (tick 5), there is no existing agriculture to retreat. Agriculture agent runs in step 4 (fill beyond frontier) to establish the initial agricultural belt. From tick 6 onward, step 2 (agriculture retreat) converts agricultural cells within the newly expanded radius to eligible.
 
 ## Archetype Configuration
 
@@ -157,7 +168,7 @@ The agents **consume existing spatial layers as inputs** — no duplication:
 ### What changes
 
 - `reserveLandUse` (tick 5) is **replaced** by the growth agent system running as multiple ticks
-- `extractZones` (tick 3) still produces development zones — agents use zone membership as eligibility constraint
+- `extractZones` (tick 3) still produces development zones — agents use zone cells as the overall eligibility mask (a cell must be in a development zone AND within a nucleus's radius to be eligible). Zone-to-nucleus ownership is ignored for growth — any nucleus whose radius covers the cell can claim it
 - `computeSpatialLayers` (tick 4) runs once to produce layers agents read from
 - Ticks 1-4 unchanged
 
@@ -167,6 +178,20 @@ The agents **consume existing spatial layers as inputs** — no duplication:
 - Expanded reservation types: commercial (1), industrial (2), civic (3), openSpace (4), agriculture (5), residentialFine (6), residentialEstate (7), residentialQuality (8)
 - `reservationZones` array — accumulated across ticks
 - Per-nucleus `currentRadius` tracking
+- Growth state persisted on the map between ticks:
+
+```js
+map.growthState = {
+  nucleusRadii: Map<nucleusIdx, number>,     // current radius per nucleus
+  activeSeeds: Map<agentType, Array<{gx, gz, nucleusIdx}>>,  // seeds that persist across ticks
+  claimedCounts: Map<agentType, number>,     // cells claimed so far (for cap enforcement)
+  tick: number,                               // current growth tick index
+}
+```
+
+### layoutRibbons integration
+
+`layoutRibbons` (N+1) runs after all growth ticks. It should operate on cells reserved as any residential type (6, 7, 8) and unreserved cells (0) within development zones. Industrial (2), civic (3), and agriculture (5) zones are skipped — they don't get internal street networks. Commercial (1) and openSpace (4) may get streets depending on size.
 
 ### Pipeline shape
 
@@ -185,14 +210,14 @@ N+2: connectToNetwork
 
 How each strategy finds locations for new seeds:
 
-- **roadFrontage**: Highest-scoring eligible cell adjacent to a road, within the new ring
-- **edge**: Highest-scoring eligible cell in the outer portion of the development radius
-- **scattered**: Random eligible cells weighted by affinity, spread apart (minimum distance between seeds)
-- **terrain**: Cells scoring highest on a specific spatial layer (e.g. hilltops for parks)
-- **frontier**: Automatically fills cells just beyond the current development radius
-- **fill**: Any unclaimed eligible cell, many small seeds
-- **arterial**: Adjacent to skeleton/arterial roads, preferring large contiguous areas
-- **desirable**: Cells with high land value that are far from industrial claims
+- **roadFrontage**: Eligible cells where `roadGrid > 0` within 2 cells AND within the new ring. Score by affinity. Pick top N seeds with minimum spacing of `footprint[0]` cells apart.
+- **edge**: Eligible cells in the outer 30% of the current development radius. Score by affinity. Pick top N.
+- **scattered**: All eligible cells within radius, scored by affinity, pick top N with minimum spacing of `3 × footprint[1]` cells apart (ensures spread).
+- **terrain**: Eligible cells scored purely by a single dominant spatial layer (highest affinity weight). Pick top N.
+- **frontier**: No explicit seeds. Fills all eligible cells in the ring between `radius` and `radius + radiusStep` that are outside any nucleus's current radius.
+- **fill**: All unclaimed eligible cells within radius, scored by affinity, pick top N. No minimum spacing — many small seeds.
+- **arterial**: Eligible cells where `roadGrid > 0` AND road hierarchy is 'arterial' or 'collector'. Score by contiguous-area potential (prefer cells with many unclaimed neighbours). Pick top N.
+- **desirable**: Eligible cells with `landValue > 0.5` AND no industrial reservation (type 2) within 20 cells. Score by affinity. Pick top N.
 
 ## Spread Behaviours
 
@@ -223,3 +248,6 @@ The footprint parameter (min/max cluster size) varies by archetype to reflect fo
 - **Modify**: `src/city/strategies/landFirstDevelopment.js` — multiple growth ticks instead of single reserveLandUse call
 - **Modify**: `src/rendering/debugLayers.js` — update reservation colours for new use types (agriculture, residential sub-types)
 - **Modify**: `src/core/FeatureMap.js` — ensure clone copies growth state (per-nucleus radii, active seeds)
+- **Modify**: `src/city/archetypeScoring.js` — update to read new agent config structure instead of `shares`/`placement`
+- **Modify**: `src/city/pipeline/layoutRibbons.js` — skip industrial, civic, agriculture zones; operate on residential + unreserved
+- **Modify**: `src/core/composeMask.js` — handle expanded reservation types (5-8)
