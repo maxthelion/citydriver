@@ -71,6 +71,34 @@ describe('computeValleyDepthField', () => {
   });
 });
 
+describe('computeFloodplainField', () => {
+  it('targets below sea level near coast for large rivers', () => {
+    // Low elevation (3m) so terrain is within the floodplain guard window
+    const elevation = makeElevation(64, 64, 50, 3);
+    const resistance = makeResistance();
+    const waterMask = new Grid2D(64, 64, { type: 'uint8', cellSize: 50 });
+
+    // Mark bottom 2 rows as water (coast)
+    for (let gx = 0; gx < 64; gx++) {
+      for (let gz = 62; gz < 64; gz++) {
+        waterMask.set(gx, gz, 1);
+        elevation.set(gx, gz, -5);
+      }
+    }
+
+    // River path running toward coast (south), large accumulation
+    const paths = makeRiverPath(32, 30, 32, 61, 10000);
+
+    const { floodplainTarget } = computeFloodplainField(
+      paths, elevation, waterMask, resistance, 50, 0
+    );
+
+    // Near the coast, the target should be below sea level
+    const targetNearCoast = floodplainTarget.get(32, 60);
+    expect(targetNearCoast).toBeLessThan(0);
+  });
+});
+
 describe('applyTerrainFields', () => {
   it('lowers elevation where valleyDepthField > 0', () => {
     const elevation = makeElevation(64, 64, 50, 100);

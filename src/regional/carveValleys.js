@@ -20,6 +20,10 @@ const GORGE_CHECK_DIST = 4;     // cells (~200m at 50m resolution)
 // Coastal floodplain range
 const FLOODPLAIN_COAST_RANGE_M = 500;
 
+// River mouth depth below sea level
+const RIVER_MOUTH_DEPTH_MIN = 1;  // meters below sea level for small rivers
+const RIVER_MOUTH_DEPTH_MAX = 5;  // meters below sea level for large rivers
+
 // Maximum depth carving can reach below sea level (negative = below)
 const SEA_FLOOR_CLAMP = -50;
 
@@ -133,7 +137,12 @@ export function computeFloodplainField(riverPaths, elevation, waterMask, erosion
 
     // River elevation (approximately at this point)
     const riverElev = elevation.get(cgx, cgz);
-    const targetElev = Math.max(seaLevel, riverElev);
+    // Near coast, river mouth should descend below sea level
+    // Scale depth by accumulation: small rivers -1m, large rivers -5m
+    const accNorm = Math.min(1, Math.max(0, (acc - 500) / 9500)); // 500..10000
+    const mouthDepth = RIVER_MOUTH_DEPTH_MIN + accNorm * (RIVER_MOUTH_DEPTH_MAX - RIVER_MOUTH_DEPTH_MIN);
+    const coastTarget = seaLevel - mouthDepth * coastProximity;
+    const targetElev = Math.min(Math.max(seaLevel, riverElev), coastTarget);
 
     for (let dz = -floodRadiusCells; dz <= floodRadiusCells; dz++) {
       for (let dx = -floodRadiusCells; dx <= floodRadiusCells; dx++) {
@@ -146,8 +155,8 @@ export function computeFloodplainField(riverPaths, elevation, waterMask, erosion
         const strength = (1 - dist / floodRadius) * coastProximity * 0.8;
         const currentElev = elevation.get(gx, gz);
 
-        // Only flatten terrain that's above target (don't raise valleys)
-        if (currentElev <= targetElev + 5) {
+        // Only flatten terrain that's above target (don't raise valleys or plunged seabed)
+        if (currentElev > targetElev && currentElev <= targetElev + 15) {
           if (strength > field.get(gx, gz)) {
             field.set(gx, gz, strength);
             target.set(gx, gz, targetElev);
