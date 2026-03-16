@@ -11,6 +11,11 @@ const TICK_LABELS = [
   'spatial layers', 'reservations', 'ribbons', 'connections',
 ];
 
+/** Yield to the browser so it can repaint. */
+function yieldFrame() {
+  return new Promise(resolve => requestAnimationFrame(resolve));
+}
+
 export class CompareArchetypesScreen {
   constructor(container, layers, settlement, seed, onBack) {
     this.container = container;
@@ -145,6 +150,28 @@ export class CompareArchetypesScreen {
     this._rebuildGrid();
   }
 
+  _showProgress(message) {
+    if (!this._progressOverlay) {
+      this._progressOverlay = document.createElement('div');
+      this._progressOverlay.style.cssText = 'position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.6); z-index:1000;';
+      const box = document.createElement('div');
+      box.style.cssText = 'background:#2a2a3e; border:1px solid #555; padding:16px 24px; border-radius:6px; font-family:monospace; font-size:13px; color:#ccc; min-width:240px; text-align:center;';
+      this._progressText = document.createElement('div');
+      box.appendChild(this._progressText);
+      this._progressOverlay.appendChild(box);
+    }
+    this._progressText.textContent = message;
+    if (!this._progressOverlay.parentNode) {
+      document.body.appendChild(this._progressOverlay);
+    }
+  }
+
+  _hideProgress() {
+    if (this._progressOverlay && this._progressOverlay.parentNode) {
+      this._progressOverlay.parentNode.removeChild(this._progressOverlay);
+    }
+  }
+
   _rebuildGrid() {
     this._gridArea.innerHTML = '';
     const count = this.selectedArchetypes.length;
@@ -182,15 +209,30 @@ export class CompareArchetypesScreen {
     }
   }
 
-  _generate() {
+  async _generate() {
+    this._generationId = (this._generationId || 0) + 1;
+    const id = this._generationId;
+
+    this._showProgress('Setting up city...');
+    await yieldFrame();
+    if (this._disposed || id !== this._generationId) return;
+
     const rng = new SeededRandom(this.seed);
     const baseMap = setupCity(this.layers, this.settlement, rng.fork('city'));
 
     for (const key of this.selectedArchetypes) {
+      if (this._disposed || id !== this._generationId) return;
+
+      const tickLabel = this.currentTick > 0
+        ? ` → tick ${this.currentTick} (${TICK_LABELS[this.currentTick] || '?'})`
+        : '';
+      this._showProgress(`${ARCHETYPES[key].name}${tickLabel}...`);
+      await yieldFrame();
+      if (this._disposed || id !== this._generationId) return;
+
       const map = baseMap.clone();
       const strategy = new LandFirstDevelopment(map, { archetype: ARCHETYPES[key] });
 
-      // Advance to current tick
       for (let t = 0; t < this.currentTick; t++) {
         strategy.tick();
       }
@@ -199,15 +241,41 @@ export class CompareArchetypesScreen {
       this.strategies[key] = strategy;
     }
 
+    this._hideProgress();
     this._updateTickLabel();
     this._updateURL();
     this._renderAll();
   }
 
-  _setTick(tick) {
+  async _setTick(tick) {
     if (tick === this.currentTick) return;
-    this.currentTick = tick;
-    this._generate();
+    if (tick > this.currentTick) {
+      this._generationId = (this._generationId || 0) + 1;
+      const id = this._generationId;
+
+      // Forward: incrementally advance each strategy
+      while (this.currentTick < tick) {
+        const nextTick = this.currentTick + 1;
+        const stepLabel = TICK_LABELS[nextTick] || '?';
+        this._showProgress(`Tick ${nextTick} (${stepLabel})...`);
+        await yieldFrame();
+        if (this._disposed || id !== this._generationId) return;
+
+        for (const key of this.selectedArchetypes) {
+          if (this.strategies[key]) this.strategies[key].tick();
+        }
+        this.currentTick++;
+      }
+
+      this._hideProgress();
+      this._updateTickLabel();
+      this._updateURL();
+      this._renderAll();
+    } else {
+      // Backward: must regenerate from scratch (ticks can't be undone)
+      this.currentTick = tick;
+      this._generate();
+    }
   }
 
   _updateTickLabel() {
@@ -252,6 +320,7 @@ export class CompareArchetypesScreen {
 
   dispose() {
     this._disposed = true;
+    this._hideProgress();
     if (this._onKeyDown) {
       document.removeEventListener('keydown', this._onKeyDown);
     }
