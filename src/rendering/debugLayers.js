@@ -751,3 +751,23 @@ function renderTerrainSuitability(ctx, map) {
     }
   }
 }
+
+/**
+ * Convert a layer display name to a URL-safe kebab-case slug.
+ * Strips parentheses, colons, and other special characters.
+ */
+export function layerSlug(name) {
+  return name
+    .toLowerCase()
+    .replace(/[():]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+/**
+ * Find a LAYERS index by its kebab-case slug. Returns -1 if not found.
+ */
+export function layerIndexFromSlug(slug) {
+  return LAYERS.findIndex(l => layerSlug(l.name) === slug);
+}
