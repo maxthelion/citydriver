@@ -91,9 +91,23 @@ export function spreadFromSeed(seed, budget, resGrid, zoneGrid, resType, behavio
 
     // Behaviour-specific scoring adjustments
     if (behaviour === 'linear') {
-      // Bonus for road-adjacent cells
+      // Strong preference for road-adjacent cells — commercial should hug roads
       const roadGrid = layers.roadGrid;
-      if (roadGrid && roadGrid.get(gx, gz) > 0) score += 1.0;
+      if (roadGrid) {
+        let nearRoad = false;
+        for (const [dx2, dz2] of [[0,0],[1,0],[-1,0],[0,1],[0,-1]]) {
+          const nx = gx + dx2, nz = gz + dz2;
+          if (nx >= 0 && nx < w && nz >= 0 && nz < h && roadGrid.get(nx, nz) > 0) {
+            nearRoad = true;
+            break;
+          }
+        }
+        if (nearRoad) {
+          score += 2.0;
+        } else {
+          score -= 5.0; // strongly penalise spreading away from roads
+        }
+      }
     } else if (behaviour === 'cluster') {
       // Bonus for cells near same-type reservations
       for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {

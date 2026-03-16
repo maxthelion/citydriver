@@ -42,8 +42,8 @@ export const ARCHETYPES = {
           footprint: [500, 5000], affinity: { downwindness: 0.6, edgeness: 0.5 }, seedsPerTick: 3,
         },
         civic: {
-          share: 0.05, seedStrategy: 'scattered', spreadBehaviour: 'dot',
-          footprint: [10, 60], affinity: { centrality: 0.7, roadFrontage: 0.3 }, seedsPerTick: 8,
+          share: 0.05, seedStrategy: 'scattered', spreadBehaviour: 'blob',
+          footprint: [200, 1500], affinity: { centrality: 0.7, roadFrontage: 0.3 }, seedsPerTick: 3,
         },
         openSpace: {
           share: 0.08, seedStrategy: 'terrain', spreadBehaviour: 'blob',

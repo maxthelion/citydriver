@@ -725,9 +725,9 @@ function renderReservations(ctx, map) {
     3: 'rgba(0, 100, 255, 0.6)',   // civic — blue
     4: 'rgba(0, 200, 0, 0.6)',     // open space — green
     5: 'rgba(180, 140, 60, 0.6)',  // agriculture — brown
-    6: 'rgba(200, 180, 140, 0.6)', // residential fine — tan
-    7: 'rgba(160, 120, 100, 0.6)', // residential estate — dark tan
-    8: 'rgba(220, 200, 160, 0.6)', // residential quality — cream
+    6: 'rgba(200, 160, 80, 0.6)',  // residential fine — yellow-tan
+    7: 'rgba(180, 80, 80, 0.6)',   // residential estate — muted red
+    8: 'rgba(160, 100, 200, 0.6)', // residential quality — purple
   };
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
