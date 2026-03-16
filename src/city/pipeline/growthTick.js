@@ -8,6 +8,46 @@ import { Grid2D } from '../../core/Grid2D.js';
 import { RESERVATION, AGENT_TYPE_TO_RESERVATION, scoreCell, findSeeds, spreadFromSeed } from './growthAgents.js';
 
 /**
+ * Separable box blur. Returns a normalised Float32Array (0-1).
+ * @param {Float32Array} src - input values
+ * @param {number} w - grid width
+ * @param {number} h - grid height
+ * @param {number} radius - blur radius in cells
+ * @returns {Float32Array}
+ */
+function boxBlur(src, w, h, radius) {
+  const dst = new Float32Array(w * h);
+  const tmp = new Float32Array(w * h);
+  // Horizontal pass
+  for (let z = 0; z < h; z++) {
+    let sum = 0;
+    for (let x = 0; x < Math.min(radius, w); x++) sum += src[z * w + x];
+    for (let x = 0; x < w; x++) {
+      const add = x + radius < w ? src[z * w + x + radius] : 0;
+      const sub = x - radius - 1 >= 0 ? src[z * w + x - radius - 1] : 0;
+      sum += add - sub;
+      tmp[z * w + x] = sum;
+    }
+  }
+  // Vertical pass
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    for (let z = 0; z < Math.min(radius, h); z++) sum += tmp[z * w + x];
+    for (let z = 0; z < h; z++) {
+      const add = z + radius < h ? tmp[(z + radius) * w + x] : 0;
+      const sub = z - radius - 1 >= 0 ? tmp[(z - radius - 1) * w + x] : 0;
+      sum += add - sub;
+      dst[z * w + x] = sum;
+    }
+  }
+  // Normalise to 0-1
+  let max = 0;
+  for (let i = 0; i < w * h; i++) if (dst[i] > max) max = dst[i];
+  if (max > 0) for (let i = 0; i < w * h; i++) dst[i] /= max;
+  return dst;
+}
+
+/**
  * Initialize growth state for a map.
  * @param {object} map - FeatureMap
  * @param {object} archetype - archetype with growth config
@@ -79,74 +119,64 @@ export function runGrowthTick(map, archetype, state) {
     if (map.hasLayer(name)) layers[name] = map.getLayer(name);
   }
 
-  // Step 1: Expand development frontier
-  // Eligibility is based on proximity to existing development, not circular radius.
-  // On first tick, seed from nuclei positions. On subsequent ticks, cells adjacent
-  // to any claimed cell (within `radiusStepCells` distance) become eligible.
-  // This makes the frontier follow the shape of the city, not a circle.
+  // Step 1: Compute per-tick spatial layers
 
-  // Build a distance grid: BFS outward from all claimed cells (and nuclei on tick 1)
-  const distGrid = new Int16Array(w * h).fill(-1);
-  const queue = [];
-
-  if (state.tick === 1) {
-    // First tick: seed from nuclei
-    for (const n of map.nuclei) {
-      const idx = n.gz * w + n.gx;
-      if (distGrid[idx] < 0) {
-        distGrid[idx] = 0;
-        queue.push(n.gx, n.gz);
-      }
-    }
-  }
-
-  // Also seed from all existing claimed cells
+  // Build binary mask of existing development (not NONE, not AGRICULTURE)
+  const devMask = new Float32Array(w * h);
   for (let gz = 0; gz < h; gz++) {
     for (let gx = 0; gx < w; gx++) {
       const v = resGrid.get(gx, gz);
-      if (v !== RESERVATION.NONE && v !== RESERVATION.AGRICULTURE) {
-        const idx = gz * w + gx;
-        if (distGrid[idx] < 0) {
-          distGrid[idx] = 0;
-          queue.push(gx, gz);
-        }
-      }
+      devMask[gz * w + gx] = (v !== RESERVATION.NONE && v !== RESERVATION.AGRICULTURE) ? 1.0 : 0.0;
     }
   }
-
-  // BFS to find cells within radiusStepCells of existing development
-  let qi = 0;
-  while (qi < queue.length) {
-    const cx = queue[qi++];
-    const cz = queue[qi++];
-    const cd = distGrid[cz * w + cx];
-    if (cd >= radiusStepCells) continue;
-    for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-      const nx = cx + dx, nz = cz + dz;
-      if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
-      const ni = nz * w + nx;
-      if (distGrid[ni] >= 0) continue;
-      distGrid[ni] = cd + 1;
-      queue.push(nx, nz);
+  // On first tick, also seed from nuclei
+  if (state.tick === 1) {
+    for (const n of map.nuclei) {
+      devMask[n.gz * w + n.gx] = 1.0;
     }
   }
+  // Box blur to create smooth proximity gradient
+  const devProximity = boxBlur(devMask, w, h, radiusStepCells);
+  layers.developmentProximity = { get: (x, z) => devProximity[z * w + x] };
 
-  // Step 2: Agriculture retreat — cells now near development become eligible
+  // Build industrial distance layer (inverse of industrial proximity)
+  const indMask = new Float32Array(w * h);
   for (let gz = 0; gz < h; gz++) {
     for (let gx = 0; gx < w; gx++) {
-      if (resGrid.get(gx, gz) === RESERVATION.AGRICULTURE && distGrid[gz * w + gx] >= 0) {
+      indMask[gz * w + gx] = resGrid.get(gx, gz) === RESERVATION.INDUSTRIAL ? 1.0 : 0.0;
+    }
+  }
+  const indProximity = boxBlur(indMask, w, h, 40); // ~200m at 5m cells
+  // Invert: high value = far from industrial
+  const maxInd = Math.max(...indProximity) || 1;
+  const indDistance = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    indDistance[i] = 1.0 - indProximity[i] / maxInd;
+  }
+  layers.industrialDistance = { get: (x, z) => indDistance[z * w + x] };
+
+  // Update nucleus radii to reflect growth (increment by radiusStep each tick)
+  for (const [i] of state.nucleusRadii) {
+    state.nucleusRadii.set(i, state.tick * radiusStepCells);
+  }
+
+  // Step 2: Agriculture retreat — cells with high devProximity that were agriculture become NONE
+  const DEV_PROXIMITY_THRESHOLD = 0.01;
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      if (resGrid.get(gx, gz) === RESERVATION.AGRICULTURE && devProximity[gz * w + gx] >= DEV_PROXIMITY_THRESHOLD) {
         resGrid.set(gx, gz, RESERVATION.NONE);
       }
     }
   }
 
-  // Collect eligible cells: in a zone, within frontier distance, unreserved
+  // Collect eligible cells: in a zone, unreserved, close enough to existing development
   const eligible = [];
   for (let gz = 0; gz < h; gz++) {
     for (let gx = 0; gx < w; gx++) {
       if (zoneGrid.get(gx, gz) === 0) continue;
       if (resGrid.get(gx, gz) !== RESERVATION.NONE) continue;
-      if (distGrid[gz * w + gx] < 0) continue; // not within frontier
+      if (devProximity[gz * w + gx] < DEV_PROXIMITY_THRESHOLD) continue;
       eligible.push({ gx, gz });
     }
   }
@@ -213,20 +243,10 @@ export function runGrowthTick(map, archetype, state) {
       for (let gx = 0; gx < w; gx++) {
         if (zoneGrid.get(gx, gz) === 0) continue;
         if (resGrid.get(gx, gz) !== RESERVATION.NONE) continue;
-        if (distGrid[gz * w + gx] >= 0) continue; // inside frontier — skip
-        // Check if close to frontier (within 2× radiusStep) for agriculture belt
-        let nearFrontier = false;
-        for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-          for (let d = 1; d <= radiusStepCells; d++) {
-            const nx = gx + dx * d, nz = gz + dz * d;
-            if (nx >= 0 && nx < w && nz >= 0 && nz < h && distGrid[nz * w + nx] >= 0) {
-              nearFrontier = true;
-              break;
-            }
-          }
-          if (nearFrontier) break;
-        }
-        if (nearFrontier) {
+        // Agriculture fills cells that are beyond the development frontier
+        // but within a band (nonzero blur from being near the frontier edge)
+        const dp = devProximity[gz * w + gx];
+        if (dp < DEV_PROXIMITY_THRESHOLD && dp > 0.001) {
           resGrid.set(gx, gz, RESERVATION.AGRICULTURE);
         }
       }
