@@ -354,7 +354,6 @@ export class CityScreen {
     const colors = new Float32Array(positions.length);
 
     const seaLevel = map.seaLevel || 0;
-    const BANK_STEP = 0.1;      // terrain always at least this far above water plane
     const WATER_SINK = 1.0;     // water cells sunk this far below sea level
 
     for (let gz = 0; gz < h; gz++) {
@@ -362,12 +361,14 @@ export class CityScreen {
         const idx = gz * w + gx;
         let elev = sd.cutElevation[idx];
 
-        // Water cells: sink below water plane so it covers cleanly
         if (map.waterMask.get(gx, gz) > 0) {
+          // Water cells: sink well below water plane
           elev = Math.min(elev, seaLevel - WATER_SINK);
-        } else {
-          // Land cells: clamp above water plane to prevent z-fighting
-          elev = Math.max(elev, seaLevel + BANK_STEP);
+        } else if (elev < seaLevel) {
+          // Non-water cells below sea level: let the water plane cover them.
+          // This avoids creating islands from low-lying coastal terrain.
+          // The water plane is semi-transparent so submerged terrain shows through.
+          elev = seaLevel - WATER_SINK;
         }
 
         positions[idx * 3 + 1] = elev;
