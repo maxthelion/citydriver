@@ -83,4 +83,16 @@ describe('applyTerrainFields', () => {
     expect(elevation.get(32, 32)).toBe(95);
     expect(elevation.get(0, 0)).toBe(100); // untouched
   });
+
+  it('does not clamp elevation above -0.5m for deep water', () => {
+    // Elevation already at -10m (from coastal falloff in generateTerrain)
+    const elevation = makeElevation(64, 64, 50, -10);
+    const depthField = new Grid2D(64, 64, { cellSize: 50 });
+    const floodField = new Grid2D(64, 64, { cellSize: 50 });
+    const floodTarget = new Grid2D(64, 64, { cellSize: 50 });
+
+    applyTerrainFields(elevation, depthField, floodField, floodTarget, 0);
+    // Should preserve the -10m elevation, not clamp to -0.5m
+    expect(elevation.get(32, 32)).toBeLessThan(-5);
+  });
 });

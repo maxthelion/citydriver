@@ -20,6 +20,9 @@ const GORGE_CHECK_DIST = 4;     // cells (~200m at 50m resolution)
 // Coastal floodplain range
 const FLOODPLAIN_COAST_RANGE_M = 500;
 
+// Maximum depth carving can reach below sea level (negative = below)
+const SEA_FLOOR_CLAMP = -50;
+
 /**
  * Compute a valley depth field from river vector paths.
  * Walk each river path, compute valley profile, write depth values.
@@ -183,7 +186,7 @@ export function applyTerrainFields(elevation, valleyDepthField, floodplainField,
       }
 
       // Never carve below sea floor
-      h = Math.max(h, seaLevel - 0.5);
+      h = Math.max(h, seaLevel + SEA_FLOOR_CLAMP);
 
       elevation.set(gx, gz, h);
     }
