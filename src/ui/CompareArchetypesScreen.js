@@ -218,12 +218,17 @@ export class CompareArchetypesScreen {
     this._generationId = (this._generationId || 0) + 1;
     const id = this._generationId;
 
+    const genStart = performance.now();
+    console.log(`[compare] _generate: ${this.selectedArchetypes.length} archetypes, target tick ${this.currentTick}`);
+
     this._showProgress('Setting up city...');
     await yieldFrame();
     if (this._disposed || id !== this._generationId) return;
 
+    let t0 = performance.now();
     const rng = new SeededRandom(this.seed);
     const baseMap = setupCity(this.layers, this.settlement, rng.fork('city'));
+    console.log(`[compare] setupCity: ${(performance.now() - t0).toFixed(0)}ms`);
 
     // Run shared ticks on the base map
     const sharedTicks = Math.min(this.currentTick, FIRST_ARCHETYPE_TICK - 1);
@@ -233,7 +238,9 @@ export class CompareArchetypesScreen {
       this._showProgress(`${stepLabel}...`);
       await yieldFrame();
       if (this._disposed || id !== this._generationId) return;
+      t0 = performance.now();
       sharedStrategy.tick();
+      console.log(`[compare] shared tick ${t + 1} (${stepLabel}): ${(performance.now() - t0).toFixed(0)}ms`);
     }
 
     // Clone per archetype and run remaining ticks
@@ -244,7 +251,9 @@ export class CompareArchetypesScreen {
       await yieldFrame();
       if (this._disposed || id !== this._generationId) return;
 
+      t0 = performance.now();
       const map = baseMap.clone();
+      console.log(`[compare] clone for ${key}: ${(performance.now() - t0).toFixed(0)}ms`);
       const strategy = new LandFirstDevelopment(map, { archetype: ARCHETYPES[key] });
       strategy._tick = sharedTicks;
 
@@ -253,13 +262,16 @@ export class CompareArchetypesScreen {
         this._showProgress(`${ARCHETYPES[key].name}: ${stepLabel}...`);
         await yieldFrame();
         if (this._disposed || id !== this._generationId) return;
+        t0 = performance.now();
         strategy.tick();
+        console.log(`[compare] ${key} tick ${t + 1} (${stepLabel}): ${(performance.now() - t0).toFixed(0)}ms`);
       }
 
       this.maps[key] = map;
       this.strategies[key] = strategy;
     }
 
+    console.log(`[compare] _generate total: ${(performance.now() - genStart).toFixed(0)}ms`);
     this._hideProgress();
     this._updateTickLabel();
     this._updateURL();
@@ -273,6 +285,9 @@ export class CompareArchetypesScreen {
       const id = this._generationId;
 
       // Forward: incrementally advance each strategy, yielding per archetype
+      const fwdStart = performance.now();
+      console.log(`[compare] _setTick forward: ${this.currentTick} → ${tick}`);
+
       while (this.currentTick < tick) {
         const nextTick = this.currentTick + 1;
         const stepLabel = TICK_LABELS[nextTick] || '?';
@@ -281,11 +296,14 @@ export class CompareArchetypesScreen {
           this._showProgress(`${ARCHETYPES[key].name}: ${stepLabel}...`);
           await yieldFrame();
           if (this._disposed || id !== this._generationId) return;
+          const t0 = performance.now();
           if (this.strategies[key]) this.strategies[key].tick();
+          console.log(`[compare] ${key} tick ${nextTick} (${stepLabel}): ${(performance.now() - t0).toFixed(0)}ms`);
         }
         this.currentTick++;
       }
 
+      console.log(`[compare] _setTick total: ${(performance.now() - fwdStart).toFixed(0)}ms`);
       this._hideProgress();
       this._updateTickLabel();
       this._updateURL();
