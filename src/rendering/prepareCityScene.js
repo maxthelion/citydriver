@@ -137,16 +137,28 @@ function prepareRivers(map, ox, oz, cs) {
     const pts = river.polyline;
     if (!pts || pts.length < 2) return null;
 
-    const localPts = pts.map(p => {
+    const seaLevel = map.seaLevel || 0;
+    const waterType = map.waterType || (map.hasLayer ? map.getLayer('waterType') : null);
+
+    const localPts = [];
+    for (const p of pts) {
       const x = p.x - ox;
       const z = p.z - oz;
+      const gx = Math.round(x / cs);
+      const gz = Math.round(z / cs);
+
+      // Stop the river ribbon where it enters open sea water
+      if (waterType && gx >= 0 && gx < w && gz >= 0 && gz < h) {
+        if (waterType.get(gx, gz) === 1) break; // sea cell — stop here
+      }
+
       const y = map.elevation.sample(x / cs, z / cs) + RIVER_Y_OFFSET;
-      return { x, z, y, width: p.width || 10 };
-    });
+      localPts.push({ x, z, y, width: p.width || 10 });
+    }
+    if (localPts.length < 2) return null;
 
     // Order downstream using elevation (high → low).
-    // Elevation is the reliable signal; accumulation can be wrong after clipping.
-    if (localPts.length >= 2 && localPts[0].y < localPts[localPts.length - 1].y) {
+    if (localPts[0].y < localPts[localPts.length - 1].y) {
       localPts.reverse();
     }
 

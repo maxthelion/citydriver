@@ -75,7 +75,10 @@ export function computeWaterDistance(waterMask, cutoffCells) {
  * @param {Grid2D} waterMask
  * @returns {{ suitability: Grid2D, waterDist: Grid2D }}
  */
-export function computeTerrainSuitability(elevation, slope, waterMask) {
+const FLOOD_MARGIN_M = 2.0; // land below seaLevel + this is unbuildable
+const FLOOD_MARGIN_DIST = 2; // cells within this distance of water AND below flood level → unbuildable
+
+export function computeTerrainSuitability(elevation, slope, waterMask, seaLevel = 0) {
   const width = elevation.width;
   const height = elevation.height;
   const cellSize = elevation.cellSize;
@@ -101,6 +104,11 @@ export function computeTerrainSuitability(elevation, slope, waterMask) {
 
       if (waterMask.get(gx, gz) > 0) continue; // stays 0
 
+      // Flood margin: low-lying land near water is unbuildable
+      const elev = elevation.get(gx, gz);
+      const wdist = waterDist.get(gx, gz);
+      if (elev < seaLevel + FLOOD_MARGIN_M && wdist <= FLOOD_MARGIN_DIST) continue; // stays 0
+
       let score = slopeScore(slope.get(gx, gz));
 
       // Edge taper
@@ -109,9 +117,8 @@ export function computeTerrainSuitability(elevation, slope, waterMask) {
       }
 
       // Waterfront bonus
-      const wd = waterDist.get(gx, gz);
-      if (wd > 0 && wd < waterfrontRange) {
-        score = Math.min(1, score + WATERFRONT_BONUS * (1 - wd / waterfrontRange));
+      if (wdist > 0 && wdist < waterfrontRange) {
+        score = Math.min(1, score + WATERFRONT_BONUS * (1 - wdist / waterfrontRange));
       }
 
       suitability.set(gx, gz, score);

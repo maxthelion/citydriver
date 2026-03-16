@@ -157,6 +157,11 @@ export function setupCity(layers, settlement, rng) {
   // Carve channels
   map.carveChannels();
 
+  // Enforce clean water boundaries:
+  // - Water cells sunk below sea level (no shallow ambiguous cells)
+  // - Land cells adjacent to water raised to form bank edge
+  enforceWaterBoundaries(elevation, map.waterMask, seaLevel);
+
   // Water depth (BFS from land into water — for narrow-river path costs)
   map.computeWaterDepth();
   map.settlement = settlement;
@@ -173,7 +178,7 @@ export function setupCity(layers, settlement, rng) {
 
   // Compute terrain suitability (pure terrain assessment, never mutated)
   const { suitability, waterDist: tWaterDist } = computeTerrainSuitability(
-    map.elevation, map.slope, map.waterMask
+    map.elevation, map.slope, map.waterMask, seaLevel
   );
   map.setLayer('terrainSuitability', suitability);
   // Use the waterDist from terrainSuitability if not already set
@@ -204,6 +209,56 @@ export function setupCity(layers, settlement, rng) {
   map.nuclei = placeNuclei(map, tier, rng);
 
   return map;
+}
+
+// ============================================================
+// Water boundary enforcement
+// ============================================================
+
+const WATER_MIN_DEPTH = 0.5;   // water cells at least this far below sea level
+const BANK_HEIGHT = 1.0;       // land cells adjacent to water raised to at least this above sea level
+const SEA_BANK_HEIGHT = 1.5;   // land cells adjacent to sea raised higher
+
+/**
+ * Enforce clean water boundaries in the elevation grid.
+ * - Water cells are sunk below sea level (prevents z-fighting)
+ * - Land cells adjacent to water are raised to form a bank edge
+ */
+function enforceWaterBoundaries(elevation, waterMask, seaLevel) {
+  const { width, height } = elevation;
+  const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+
+  // Pass 1: sink water cells
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      if (waterMask.get(gx, gz) > 0) {
+        const h = elevation.get(gx, gz);
+        const maxH = seaLevel - WATER_MIN_DEPTH;
+        if (h > maxH) elevation.set(gx, gz, maxH);
+      }
+    }
+  }
+
+  // Pass 2: raise adjacent land cells to form bank
+  for (let gz = 0; gz < height; gz++) {
+    for (let gx = 0; gx < width; gx++) {
+      if (waterMask.get(gx, gz) > 0) continue;
+
+      // Check if adjacent to water
+      let adjacentToWater = false;
+      for (const [dx, dz] of dirs) {
+        const nx = gx + dx, nz = gz + dz;
+        if (nx >= 0 && nx < width && nz >= 0 && nz < height) {
+          if (waterMask.get(nx, nz) > 0) { adjacentToWater = true; break; }
+        }
+      }
+      if (!adjacentToWater) continue;
+
+      const minH = seaLevel + BANK_HEIGHT;
+      const h = elevation.get(gx, gz);
+      if (h < minH) elevation.set(gx, gz, minH);
+    }
+  }
 }
 
 // ============================================================

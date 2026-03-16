@@ -353,10 +353,24 @@ export class CityScreen {
     const positions = geometry.attributes.position.array;
     const colors = new Float32Array(positions.length);
 
+    const seaLevel = map.seaLevel || 0;
+    const BANK_STEP = 0.1;      // terrain always at least this far above water plane
+    const WATER_SINK = 1.0;     // water cells sunk this far below sea level
+
     for (let gz = 0; gz < h; gz++) {
       for (let gx = 0; gx < w; gx++) {
         const idx = gz * w + gx;
-        positions[idx * 3 + 1] = sd.cutElevation[idx];
+        let elev = sd.cutElevation[idx];
+
+        // Water cells: sink below water plane so it covers cleanly
+        if (map.waterMask.get(gx, gz) > 0) {
+          elev = Math.min(elev, seaLevel - WATER_SINK);
+        } else {
+          // Land cells: clamp above water plane to prevent z-fighting
+          elev = Math.max(elev, seaLevel + BANK_STEP);
+        }
+
+        positions[idx * 3 + 1] = elev;
 
         // Coverage-layer-driven color blending
         const ci = gz * w + gx;
