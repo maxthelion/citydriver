@@ -21,9 +21,11 @@ const LV_BUILDABLE_FLOOR = 0.2;
  * @returns {object} map (for chaining)
  */
 export function computeLandValue(map) {
+  const t0 = performance.now();
   const w = map.width;
   const h = map.height;
   const cs = map.cellSize;
+  console.log(`[computeLandValue] grid ${w}×${h} (${w*h} cells), cellSize=${cs}m`);
 
   const slope = map.getLayer('slope');
   const waterMask = map.getLayer('waterMask');
@@ -33,6 +35,8 @@ export function computeLandValue(map) {
 
   // Pre-compute local flatness: average slope in a radius around each cell
   const flatnessR = Math.max(1, Math.round(LV_FLATNESS_RADIUS_M / cs));
+  const kernelSize = (2 * flatnessR + 1);
+  console.log(`[computeLandValue] flatness radius=${flatnessR} cells (${kernelSize}×${kernelSize} kernel, ${w*h*kernelSize*kernelSize} ops)`);
   const flatness = new Float32Array(w * h);
   if (slope) {
     for (let gz = 0; gz < h; gz++) {
@@ -52,6 +56,9 @@ export function computeLandValue(map) {
       }
     }
   }
+
+  const t1 = performance.now();
+  console.log(`[computeLandValue] flatness pass: ${(t1-t0).toFixed(0)}ms`);
 
   const waterBonusRange = Math.round(LV_WATER_BONUS_RANGE_M / cs);
 
@@ -118,6 +125,9 @@ export function computeLandValue(map) {
       landValue.set(gx, gz, v);
     }
   }
+
+  const t2 = performance.now();
+  console.log(`[computeLandValue] value pass: ${(t2-t1).toFixed(0)}ms, total: ${(t2-t0).toFixed(0)}ms`);
 
   map.setLayer('landValue', landValue);
   return map;
