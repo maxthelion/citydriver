@@ -272,15 +272,15 @@ export class CompareArchetypesScreen {
       this._generationId = (this._generationId || 0) + 1;
       const id = this._generationId;
 
-      // Forward: incrementally advance each strategy
+      // Forward: incrementally advance each strategy, yielding per archetype
       while (this.currentTick < tick) {
         const nextTick = this.currentTick + 1;
         const stepLabel = TICK_LABELS[nextTick] || '?';
-        this._showProgress(`Tick ${nextTick} (${stepLabel})...`);
-        await yieldFrame();
-        if (this._disposed || id !== this._generationId) return;
 
         for (const key of this.selectedArchetypes) {
+          this._showProgress(`${ARCHETYPES[key].name}: ${stepLabel}...`);
+          await yieldFrame();
+          if (this._disposed || id !== this._generationId) return;
           if (this.strategies[key]) this.strategies[key].tick();
         }
         this.currentTick++;
