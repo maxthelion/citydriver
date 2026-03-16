@@ -12,7 +12,8 @@ function makeStrategy(seed = 42) {
   return { map, strategy };
 }
 
-describe('FaceSubdivision', { timeout: 30000 }, () => {
+// FaceSubdivision is an archived strategy. Skipped by default.
+describe.skip('FaceSubdivision', { timeout: 30000 }, () => {
   it('builds skeleton roads on first tick', () => {
     const { map, strategy } = makeStrategy();
     const more = strategy.tick();
