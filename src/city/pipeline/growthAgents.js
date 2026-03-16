@@ -91,22 +91,21 @@ export function spreadFromSeed(seed, budget, resGrid, zoneGrid, resType, behavio
 
     // Behaviour-specific scoring adjustments
     if (behaviour === 'linear') {
-      // Strong preference for road-adjacent cells — commercial should hug roads
+      // Hard constraint: commercial only grows within 3 cells of a road
       const roadGrid = layers.roadGrid;
       if (roadGrid) {
         let nearRoad = false;
-        for (const [dx2, dz2] of [[0,0],[1,0],[-1,0],[0,1],[0,-1]]) {
-          const nx = gx + dx2, nz = gz + dz2;
-          if (nx >= 0 && nx < w && nz >= 0 && nz < h && roadGrid.get(nx, nz) > 0) {
-            nearRoad = true;
-            break;
+        for (let dz2 = -3; dz2 <= 3 && !nearRoad; dz2++) {
+          for (let dx2 = -3; dx2 <= 3 && !nearRoad; dx2++) {
+            const nx = gx + dx2, nz = gz + dz2;
+            if (nx >= 0 && nx < w && nz >= 0 && nz < h && roadGrid.get(nx, nz) > 0) {
+              nearRoad = true;
+            }
           }
         }
-        if (nearRoad) {
-          score += 2.0;
-        } else {
-          score -= 5.0; // strongly penalise spreading away from roads
-        }
+        if (!nearRoad) return; // don't add to frontier at all
+        // Bonus for being directly on the road
+        if (roadGrid.get(gx, gz) > 0) score += 1.0;
       }
     } else if (behaviour === 'cluster') {
       // Bonus for cells near same-type reservations

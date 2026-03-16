@@ -79,52 +79,75 @@ export function runGrowthTick(map, archetype, state) {
     if (map.hasLayer(name)) layers[name] = map.getLayer(name);
   }
 
-  // Step 1: Expand radii
-  let allOutOfBounds = true;
-  for (const [idx, radius] of state.nucleusRadii) {
-    const newRadius = radius + radiusStepCells;
-    state.nucleusRadii.set(idx, newRadius);
-    // Check if any part of the radius is still in bounds
-    const n = map.nuclei[idx];
-    if (n.gx - newRadius < w && n.gx + newRadius >= 0 &&
-        n.gz - newRadius < h && n.gz + newRadius >= 0) {
-      allOutOfBounds = false;
+  // Step 1: Expand development frontier
+  // Eligibility is based on proximity to existing development, not circular radius.
+  // On first tick, seed from nuclei positions. On subsequent ticks, cells adjacent
+  // to any claimed cell (within `radiusStepCells` distance) become eligible.
+  // This makes the frontier follow the shape of the city, not a circle.
+
+  // Build a distance grid: BFS outward from all claimed cells (and nuclei on tick 1)
+  const distGrid = new Int16Array(w * h).fill(-1);
+  const queue = [];
+
+  if (state.tick === 1) {
+    // First tick: seed from nuclei
+    for (const n of map.nuclei) {
+      const idx = n.gz * w + n.gx;
+      if (distGrid[idx] < 0) {
+        distGrid[idx] = 0;
+        queue.push(n.gx, n.gz);
+      }
     }
   }
-  if (allOutOfBounds) return true;
 
-  // Step 2: Agriculture retreat — mark agriculture cells within new radii as eligible
+  // Also seed from all existing claimed cells
   for (let gz = 0; gz < h; gz++) {
     for (let gx = 0; gx < w; gx++) {
-      if (resGrid.get(gx, gz) === RESERVATION.AGRICULTURE) {
-        // Check if within any nucleus radius
-        for (const [idx, radius] of state.nucleusRadii) {
-          const n = map.nuclei[idx];
-          const dx = gx - n.gx, dz = gz - n.gz;
-          if (dx * dx + dz * dz <= radius * radius) {
-            resGrid.set(gx, gz, RESERVATION.NONE);
-            break;
-          }
+      const v = resGrid.get(gx, gz);
+      if (v !== RESERVATION.NONE && v !== RESERVATION.AGRICULTURE) {
+        const idx = gz * w + gx;
+        if (distGrid[idx] < 0) {
+          distGrid[idx] = 0;
+          queue.push(gx, gz);
         }
       }
     }
   }
 
-  // Collect eligible cells: in a zone, within any nucleus radius, unreserved
+  // BFS to find cells within radiusStepCells of existing development
+  let qi = 0;
+  while (qi < queue.length) {
+    const cx = queue[qi++];
+    const cz = queue[qi++];
+    const cd = distGrid[cz * w + cx];
+    if (cd >= radiusStepCells) continue;
+    for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nx = cx + dx, nz = cz + dz;
+      if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
+      const ni = nz * w + nx;
+      if (distGrid[ni] >= 0) continue;
+      distGrid[ni] = cd + 1;
+      queue.push(nx, nz);
+    }
+  }
+
+  // Step 2: Agriculture retreat — cells now near development become eligible
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      if (resGrid.get(gx, gz) === RESERVATION.AGRICULTURE && distGrid[gz * w + gx] >= 0) {
+        resGrid.set(gx, gz, RESERVATION.NONE);
+      }
+    }
+  }
+
+  // Collect eligible cells: in a zone, within frontier distance, unreserved
   const eligible = [];
   for (let gz = 0; gz < h; gz++) {
     for (let gx = 0; gx < w; gx++) {
       if (zoneGrid.get(gx, gz) === 0) continue;
       if (resGrid.get(gx, gz) !== RESERVATION.NONE) continue;
-      // Check within any nucleus radius
-      for (const [idx, radius] of state.nucleusRadii) {
-        const n = map.nuclei[idx];
-        const dx = gx - n.gx, dz = gz - n.gz;
-        if (dx * dx + dz * dz <= radius * radius) {
-          eligible.push({ gx, gz });
-          break;
-        }
-      }
+      if (distGrid[gz * w + gx] < 0) continue; // not within frontier
+      eligible.push({ gx, gz });
     }
   }
 
@@ -183,24 +206,27 @@ export function runGrowthTick(map, archetype, state) {
     state.claimedCounts.set(agentType, claimed + totalClaimed);
   }
 
-  // Step 4: Agriculture fills — unclaimed cells beyond all radii
+  // Step 4: Agriculture fills — unclaimed cells beyond the development frontier
   const agriConfig = growth.agents.agriculture;
   if (agriConfig) {
     for (let gz = 0; gz < h; gz++) {
       for (let gx = 0; gx < w; gx++) {
         if (zoneGrid.get(gx, gz) === 0) continue;
         if (resGrid.get(gx, gz) !== RESERVATION.NONE) continue;
-        // Check if OUTSIDE all radii
-        let insideAny = false;
-        for (const [idx, radius] of state.nucleusRadii) {
-          const n = map.nuclei[idx];
-          const dx = gx - n.gx, dz = gz - n.gz;
-          if (dx * dx + dz * dz <= radius * radius) {
-            insideAny = true;
-            break;
+        if (distGrid[gz * w + gx] >= 0) continue; // inside frontier — skip
+        // Check if close to frontier (within 2× radiusStep) for agriculture belt
+        let nearFrontier = false;
+        for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          for (let d = 1; d <= radiusStepCells; d++) {
+            const nx = gx + dx * d, nz = gz + dz * d;
+            if (nx >= 0 && nx < w && nz >= 0 && nz < h && distGrid[nz * w + nx] >= 0) {
+              nearFrontier = true;
+              break;
+            }
           }
+          if (nearFrontier) break;
         }
-        if (!insideAny) {
+        if (nearFrontier) {
           resGrid.set(gx, gz, RESERVATION.AGRICULTURE);
         }
       }
