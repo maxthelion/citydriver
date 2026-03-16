@@ -49,6 +49,7 @@ export function scoreCell(gx, gz, affinity, layers) {
 
 /**
  * BFS spread from a seed cell. Claims cells on resGrid up to budget.
+ * Supports behaviour variants: blob, dot, linear, organic, cluster.
  *
  * @param {{gx,gz}} seed - starting cell
  * @param {number} budget - max cells to claim
