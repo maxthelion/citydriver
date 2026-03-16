@@ -27,27 +27,27 @@ export const ARCHETYPES = {
       openSpace:  'radial',
     },
     growth: {
-      radiusStep: 600,
-      maxGrowthTicks: 8,
+      radiusStep: 800,
+      maxGrowthTicks: 20,
       agentPriority: ['civic', 'commercial', 'industrial', 'openSpace',
                       'residentialQuality', 'residentialFine', 'residentialEstate',
                       'agriculture'],
       agents: {
         commercial: {
           share: 0.12, seedStrategy: 'roadFrontage', spreadBehaviour: 'linear',
-          footprint: [20, 120], affinity: { centrality: 0.6, roadFrontage: 0.8 }, seedsPerTick: 8,
+          footprint: [100, 2000], affinity: { centrality: 0.6, roadFrontage: 0.8 }, seedsPerTick: 10,
         },
         industrial: {
           share: 0.08, seedStrategy: 'edge', spreadBehaviour: 'blob',
-          footprint: [100, 500], affinity: { downwindness: 0.6, edgeness: 0.5 }, seedsPerTick: 2,
+          footprint: [500, 5000], affinity: { downwindness: 0.6, edgeness: 0.5 }, seedsPerTick: 3,
         },
         civic: {
           share: 0.05, seedStrategy: 'scattered', spreadBehaviour: 'dot',
-          footprint: [5, 30], affinity: { centrality: 0.7, roadFrontage: 0.3 }, seedsPerTick: 5,
+          footprint: [10, 60], affinity: { centrality: 0.7, roadFrontage: 0.3 }, seedsPerTick: 8,
         },
         openSpace: {
           share: 0.08, seedStrategy: 'terrain', spreadBehaviour: 'blob',
-          footprint: [40, 200], affinity: { waterfrontness: 0.3, edgeness: 0.4 }, seedsPerTick: 2,
+          footprint: [200, 3000], affinity: { waterfrontness: 0.3, edgeness: 0.4 }, seedsPerTick: 3,
         },
         agriculture: {
           share: 0.15, seedStrategy: 'frontier', spreadBehaviour: 'belt',
@@ -55,15 +55,15 @@ export const ARCHETYPES = {
         },
         residentialFine: {
           share: 0.30, seedStrategy: 'fill', spreadBehaviour: 'organic',
-          footprint: [10, 80], affinity: { centrality: 0.5, roadFrontage: 0.3 }, seedsPerTick: 15,
+          footprint: [50, 3000], affinity: { centrality: 0.5, roadFrontage: 0.3 }, seedsPerTick: 20,
         },
         residentialEstate: {
           share: 0.10, seedStrategy: 'edge', spreadBehaviour: 'blob',
-          footprint: [80, 400], affinity: { edgeness: 0.7 }, seedsPerTick: 2,
+          footprint: [300, 5000], affinity: { edgeness: 0.7 }, seedsPerTick: 3,
         },
         residentialQuality: {
           share: 0.12, seedStrategy: 'desirable', spreadBehaviour: 'cluster',
-          footprint: [30, 200], affinity: { waterfrontness: 0.4, centrality: -0.2, edgeness: 0.3 }, seedsPerTick: 4,
+          footprint: [100, 3000], affinity: { waterfrontness: 0.4, centrality: -0.2, edgeness: 0.3 }, seedsPerTick: 5,
         },
       },
     },
