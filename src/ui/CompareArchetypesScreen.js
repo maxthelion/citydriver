@@ -210,6 +210,11 @@ export class CompareArchetypesScreen {
   }
 
   async _generate() {
+    // Ticks 1-4 are archetype-independent (skeleton, land value, zones, spatial layers).
+    // Only tick 5+ (reservations, ribbons, connections) uses the archetype.
+    // Run shared ticks once on the base map, then clone for archetype-specific ticks.
+    const FIRST_ARCHETYPE_TICK = 5;
+
     this._generationId = (this._generationId || 0) + 1;
     const id = this._generationId;
 
@@ -220,6 +225,18 @@ export class CompareArchetypesScreen {
     const rng = new SeededRandom(this.seed);
     const baseMap = setupCity(this.layers, this.settlement, rng.fork('city'));
 
+    // Run shared ticks on the base map
+    const sharedTicks = Math.min(this.currentTick, FIRST_ARCHETYPE_TICK - 1);
+    const sharedStrategy = new LandFirstDevelopment(baseMap, {});
+    for (let t = 0; t < sharedTicks; t++) {
+      const stepLabel = TICK_LABELS[t + 1] || '?';
+      this._showProgress(`${stepLabel}...`);
+      await yieldFrame();
+      if (this._disposed || id !== this._generationId) return;
+      sharedStrategy.tick();
+    }
+
+    // Clone per archetype and run remaining ticks
     for (const key of this.selectedArchetypes) {
       if (this._disposed || id !== this._generationId) return;
 
@@ -229,8 +246,9 @@ export class CompareArchetypesScreen {
 
       const map = baseMap.clone();
       const strategy = new LandFirstDevelopment(map, { archetype: ARCHETYPES[key] });
+      strategy._tick = sharedTicks;
 
-      for (let t = 0; t < this.currentTick; t++) {
+      for (let t = sharedTicks; t < this.currentTick; t++) {
         const stepLabel = TICK_LABELS[t + 1] || '?';
         this._showProgress(`${ARCHETYPES[key].name}: ${stepLabel}...`);
         await yieldFrame();

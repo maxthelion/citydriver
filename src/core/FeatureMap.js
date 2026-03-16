@@ -898,6 +898,11 @@ export class FeatureMap {
     // Nuclei (deep copy)
     copy.nuclei = this.nuclei.map(n => ({ ...n }));
 
+    // Named layers
+    for (const [name, grid] of this.layers) {
+      copy.layers.set(name, grid.clone ? grid.clone() : grid);
+    }
+
     // Metadata
     copy.seaLevel = this.seaLevel;
     copy.settlement = this.settlement;
