@@ -55,4 +55,12 @@ describe('Regional Pipeline', () => {
       expect(elevA.data[i]).toBe(elevB.data[i]);
     }
   });
+
+  it('generates railway data', () => {
+    const rng = new SeededRandom(42);
+    const layers = generateRegion({ width: 32, height: 32, cellSize: 50 }, rng);
+    expect(layers.hasData('railways')).toBe(true);
+    expect(layers.hasData('offMapCities')).toBe(true);
+    expect(layers.hasGrid('railGrid')).toBe(true);
+  });
 });
