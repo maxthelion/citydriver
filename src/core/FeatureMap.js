@@ -862,6 +862,7 @@ export class FeatureMap {
   // --- Cloning ---
 
   clone() {
+    const t0 = performance.now();
     const copy = new FeatureMap(this.width, this.height, this.cellSize, {
       originX: this.originX,
       originZ: this.originZ,
@@ -925,6 +926,7 @@ export class FeatureMap {
     copy.regionalSettlements = this.regionalSettlements;
     copy.rng = this.rng;
 
+    console.log(`[FeatureMap.clone] ${this.width}×${this.height}, layers=${this.layers.size}, zones=${this.developmentZones?.length || 0}: ${(performance.now() - t0).toFixed(0)}ms`);
     return copy;
   }
 

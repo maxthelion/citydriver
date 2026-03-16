@@ -36,6 +36,8 @@ const SPATIAL_LAYER_NAMES = ['centrality', 'waterfrontness', 'edgeness', 'roadFr
  * @returns {object} map (for chaining)
  */
 export function reserveLandUse(map, archetype) {
+  const t0 = performance.now();
+  console.log(`[reserveLandUse] archetype=${archetype?.name || 'none'}, zones=${map.developmentZones?.length || 0}`);
   const grid = new Grid2D(map.width, map.height, {
     type: 'uint8',
     cellSize: map.cellSize,
@@ -70,6 +72,8 @@ export function reserveLandUse(map, archetype) {
     const zoneSet = new Set();
     for (const c of allZoneCells) zoneSet.add(c.gx | (c.gz << 16));
 
+    console.log(`[reserveLandUse] totalZoneCells=${totalZoneCells}, useTypes=${archetype.reservationOrder.join(',')}`);
+
     // Reserve each use type in order
     for (const useType of archetype.reservationOrder) {
       const share = archetype.shares[useType];
@@ -96,6 +100,9 @@ export function reserveLandUse(map, archetype) {
       scored.sort((a, b) => b.score - a.score);
       const seed = scored[0];
 
+      console.log(`[reserveLandUse]   ${useType}: budget=${budget}, candidates=${scored.length}, mode=${growthMode}`);
+      const tUse = performance.now();
+
       // Grow zone from seed
       let claimed;
       if (growthMode === 'directional') {
@@ -104,6 +111,8 @@ export function reserveLandUse(map, archetype) {
       } else {
         claimed = growRadial(seed, budget, grid, reservationType, placement, spatialLayers, zoneSet);
       }
+
+      console.log(`[reserveLandUse]   ${useType}: claimed=${claimed.length}, ${(performance.now() - tUse).toFixed(0)}ms`);
 
       // Store reservation zone
       if (claimed.length > 0) {
@@ -120,6 +129,7 @@ export function reserveLandUse(map, archetype) {
     }
   }
 
+  console.log(`[reserveLandUse] total: ${(performance.now() - t0).toFixed(0)}ms`);
   map.setLayer('reservationGrid', grid);
   map.reservationZones = reservationZones;
   return map;
