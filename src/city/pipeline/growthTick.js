@@ -13,6 +13,9 @@ import { RESERVATION, AGENT_TYPE_TO_RESERVATION } from './growthAgents.js';
 import { computeInfluenceLayers } from './influenceLayers.js';
 import { composeAllValueLayers } from './valueLayers.js';
 import { allocateFromValueBitmap } from './allocate.js';
+import { allocateFrontage } from './allocateFrontage.js';
+import { allocateRibbon } from './allocateRibbon.js';
+import { growRoads } from './growRoads.js';
 
 /**
  * Initialize growth state for a map.
@@ -108,9 +111,14 @@ export function runGrowthTick(map, archetype, state) {
     }
   }
 
-  // Phase 3 ALLOCATE: for each agent in priority order, claim cells from its value bitmap
+  // Phase 3 ALLOCATE: for each agent in priority order, dispatch to correct allocator
   const agentPriority = growth.agentPriority || Object.keys(growth.agents || {});
   let anyAllocated = false;
+  const allRibbonGaps = [];
+  const allRibbonEndpoints = [];
+
+  const roadGrid = map.hasLayer('roadGrid') ? map.getLayer('roadGrid') : null;
+  const slopeGrid = map.hasLayer('slope') ? map.getLayer('slope') : null;
 
   for (const agentType of agentPriority) {
     if (agentType === 'agriculture') continue; // handled after other agents
@@ -133,28 +141,63 @@ export function runGrowthTick(map, archetype, state) {
     const budget = Math.min(tickBudget, remainingTotal);
     if (budget <= 0) continue;
 
-    // Get this agent's value layer (fall back to empty if not in valueComposition)
+    // Get this agent's value layer
     const valueLayer = valueLayers[agentType] || new Float32Array(w * h);
 
-    const newCells = allocateFromValueBitmap({
-      valueLayer,
-      resGrid,
-      zoneGrid,
-      devProximity,
-      resType,
-      budget,
-      minFootprint: agentConfig.minFootprint || 1,
-      seedCount: agentConfig.seedCount || 3,
-      minSpacing: agentConfig.minSpacing || 20,
-      noise: agentConfig.noise != null ? agentConfig.noise : 0.15,
-      w,
-      h,
-    });
+    let newCells;
+    const allocatorType = agentConfig.allocator || 'blob';
 
-    if (newCells.length > 0) {
+    if (allocatorType === 'frontage' && roadGrid) {
+      newCells = allocateFrontage({
+        valueLayer, resGrid, zoneGrid, roadGrid, devProximity,
+        resType, budget,
+        maxDepth: agentConfig.maxDepth || 3,
+        valueThreshold: agentConfig.valueThreshold || 0.3,
+        w, h,
+      });
+    } else if (allocatorType === 'ribbon' && roadGrid) {
+      const result = allocateRibbon({
+        valueLayer, resGrid, zoneGrid, roadGrid, slope: slopeGrid, devProximity,
+        resType, budget,
+        plotDepth: agentConfig.plotDepth || 3,
+        gapWidth: agentConfig.gapWidth || 1,
+        maxRibbonLength: agentConfig.maxRibbonLength || 30,
+        seedCount: agentConfig.seedCount || 5,
+        noise: agentConfig.noise || 0.1,
+        w, h, cellSize: map.cellSize,
+      });
+      newCells = result.claimed;
+      allRibbonGaps.push(...result.ribbonGaps);
+      allRibbonEndpoints.push(...result.ribbonEndpoints);
+    } else {
+      // Default: BFS blob
+      newCells = allocateFromValueBitmap({
+        valueLayer, resGrid, zoneGrid, devProximity, resType, budget,
+        minFootprint: agentConfig.minFootprint || 1,
+        seedCount: agentConfig.seedCount || 3,
+        minSpacing: agentConfig.minSpacing || 20,
+        noise: agentConfig.noise != null ? agentConfig.noise : 0.15,
+        w, h,
+      });
+    }
+
+    if (newCells && newCells.length > 0) {
       anyAllocated = true;
       state.claimedCounts.set(agentType, claimed + newCells.length);
     }
+  }
+
+  // Phase 4 ROADS: grow streets from ribbon results
+  if (roadGrid && (allRibbonGaps.length > 0 || allRibbonEndpoints.length > 0)) {
+    const roadConfig = growth.roadGrowth || {};
+    growRoads({
+      roadGrid,
+      ribbonGaps: allRibbonGaps,
+      ribbonEndpoints: allRibbonEndpoints,
+      w, h,
+      maxCrossStreetLength: roadConfig.maxCrossStreetLength || 40,
+      pathClosingDistance: roadConfig.pathClosingDistance || 30,
+    });
   }
 
   // Agriculture fill: unclaimed cells just beyond the development frontier
