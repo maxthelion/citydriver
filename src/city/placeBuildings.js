@@ -441,6 +441,15 @@ export function computePlotPlacements(map) {
   // Stamp non-ribbon roads onto occupancy (skeleton, collector, bridges)
   _stampRoadsOntoOccupancy(map, occupancy);
 
+  // Stamp railway corridors onto occupancy (no buildings on tracks)
+  if (map.railwayGrid) {
+    for (let gz = 0; gz < map.height; gz++) {
+      for (let gx = 0; gx < map.width; gx++) {
+        if (map.railwayGrid.get(gx, gz) > 0) occupancy.set(gx, gz, 1);
+      }
+    }
+  }
+
   for (const zone of zones) {
     if (!zone._streets) continue;
     const pressure = zone.pressure ?? 0.5;

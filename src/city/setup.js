@@ -162,6 +162,26 @@ export function setupCity(layers, settlement, rng) {
         phase: rail.phase,
       });
     }
+
+    // Place station at the settlement position, aligned with the nearest track
+    if (cityRailways.length > 0) {
+      const cx = centerX;
+      const cz = centerZ;
+      // Find the nearest point on any railway polyline to get track direction
+      let bestDist = Infinity, bestAngle = 0;
+      for (const rail of cityRailways) {
+        for (let i = 0; i < rail.polyline.length - 1; i++) {
+          const a = rail.polyline[i], b = rail.polyline[i + 1];
+          const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+          const d = (mx - cx) ** 2 + (mz - cz) ** 2;
+          if (d < bestDist) {
+            bestDist = d;
+            bestAngle = Math.atan2(b.z - a.z, b.x - a.x);
+          }
+        }
+      }
+      map.station = { x: cx, z: cz, angle: bestAngle };
+    }
   }
 
   // Set terrain (computes initial buildability, which needs waterMask first)

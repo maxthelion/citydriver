@@ -33,6 +33,7 @@ const COVER_COLORS = {
 };
 const DEFAULT_COLOR = [0.35, 0.5, 0.2];
 const PAVED_COLOR = [0.55, 0.53, 0.5];
+const BALLAST_COLOR = [0.45, 0.42, 0.38];
 
 export class CityScreen {
   constructor(container, layers, settlement, rng, seed, onBack) {
@@ -111,6 +112,12 @@ export class CityScreen {
     const railwayMeshes = this._buildRailways();
     scene.add(railwayMeshes);
     this._meshLayers.railways = railwayMeshes;
+
+    const stationMesh = this._buildStation();
+    if (stationMesh) {
+      scene.add(stationMesh);
+      this._meshLayers.station = stationMesh;
+    }
 
     const water = this._buildWater();
     scene.add(water);
@@ -419,6 +426,14 @@ export class CityScreen {
           b = b + (dc[2] - b) * t;
         }
 
+        // Blend railway (ballast/gravel corridor)
+        if (cov.railway && cov.railway[ci] > 0.01) {
+          const t = cov.railway[ci];
+          r = r + (BALLAST_COLOR[0] - r) * t;
+          g = g + (BALLAST_COLOR[1] - g) * t;
+          b = b + (BALLAST_COLOR[2] - b) * t;
+        }
+
         // Blend road (pavement apron — ground coloring only, road ribbon mesh is separate)
         if (cov.road[ci] > 0.01) {
           const t = cov.road[ci];
@@ -665,6 +680,72 @@ export class CityScreen {
 
     group.add(new THREE.Mesh(geom, material));
     return group;
+  }
+
+  /**
+   * Station building: a flat rectangle aligned with the track direction.
+   */
+  _buildStation() {
+    const station = this._map.station;
+    if (!station) return null;
+
+    const lx = station.x - this._map.originX;
+    const lz = station.z - this._map.originZ;
+    const gx = Math.round(lx / this._map.cellSize);
+    const gz = Math.round(lz / this._map.cellSize);
+
+    if (gx < 0 || gx >= this._map.width || gz < 0 || gz >= this._map.height) return null;
+
+    const y = this._map.elevation.get(gx, gz) + 0.5;
+
+    // Station dimensions: 40m long (along track), 15m wide, 4m tall
+    const length = 40, width = 15, height = 4;
+    const angle = station.angle;
+    const cosA = Math.cos(angle), sinA = Math.sin(angle);
+
+    // Rotated box — 4 corners of the roof
+    const hw = width / 2, hl = length / 2;
+    const corners = [
+      { x: -hl, z: -hw }, { x: hl, z: -hw },
+      { x: hl, z: hw }, { x: -hl, z: hw },
+    ].map(c => ({
+      x: lx + c.x * cosA - c.z * sinA,
+      z: lz + c.x * sinA + c.z * cosA,
+    }));
+
+    const vertices = [];
+    const indices = [];
+
+    // Floor (y)
+    for (const c of corners) vertices.push(c.x, y, c.z);
+    // Roof (y + height)
+    for (const c of corners) vertices.push(c.x, y + height, c.z);
+
+    // Walls (4 sides)
+    for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4;
+      const base = vertices.length / 3;
+      vertices.push(corners[i].x, y, corners[i].z);
+      vertices.push(corners[j].x, y, corners[j].z);
+      vertices.push(corners[j].x, y + height, corners[j].z);
+      vertices.push(corners[i].x, y + height, corners[i].z);
+      indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+
+    // Roof face
+    indices.push(4, 5, 6, 4, 6, 7);
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geom.setIndex(indices);
+    geom.computeVertexNormals();
+
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x8B7355,
+      roughness: 0.9,
+    });
+
+    return new THREE.Mesh(geom, material);
   }
 
   /**
