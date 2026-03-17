@@ -74,7 +74,8 @@ describe('planRiverCorridors', () => {
     const result = planRiverCorridors(params, tectonics, rng);
 
     for (const c of result.corridors) {
-      expect(c.entryAccumulation).toBeGreaterThan(0);
+      // entryAccumulation is 0 here; computed later by carveRiverProfiles
+      expect(c.entryAccumulation).toBe(0);
       expect(c.importance).toBeGreaterThan(0);
       expect(c.importance).toBeLessThanOrEqual(1);
     }

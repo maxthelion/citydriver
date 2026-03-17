@@ -23,11 +23,6 @@ const CORRIDOR_WIDTH_SMALL = 8;    // ~400m at 50m cells
 const CORRIDOR_WIDTH_MEDIUM = 15;  // ~750m
 const CORRIDOR_WIDTH_LARGE = 25;   // ~1250m
 
-// Synthetic accumulation for entry rivers
-const ACC_SMALL = 2000;
-const ACC_MEDIUM = 5000;
-const ACC_LARGE = 10000;
-
 // Margin from corners (fraction of edge length)
 const CORNER_MARGIN = 0.15;
 
@@ -90,12 +85,11 @@ export function planRiverCorridors(params, tectonics, rng) {
 
     // Assign importance based on index (first corridor is largest)
     const importance = i === 0 ? 1.0 : i === 1 ? 0.6 : 0.3;
-    const accLevels = [ACC_LARGE, ACC_MEDIUM, ACC_SMALL];
     const widthLevels = [CORRIDOR_WIDTH_LARGE, CORRIDOR_WIDTH_MEDIUM, CORRIDOR_WIDTH_SMALL];
 
     corridors.push({
       polyline,
-      entryAccumulation: accLevels[i] || ACC_SMALL,
+      entryAccumulation: 0, // computed by carveRiverProfiles (A2b) from terrain elevation
       importance,
       corridorWidth: widthLevels[i] || CORRIDOR_WIDTH_SMALL,
       entryEdge,
