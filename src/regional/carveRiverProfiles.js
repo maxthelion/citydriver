@@ -248,6 +248,22 @@ export function carveRiverProfiles(corridors, elevation, slope, erosionResistanc
       }
     }
 
+    // Trim exit end: walk backward from the end, stop at first above-sea-level cell
+    let trimEnd = corridor.polyline.length;
+    for (let j = corridor.polyline.length - 1; j >= 0; j--) {
+      const pt = corridor.polyline[j];
+      if (elevation.get(pt.gx, pt.gz) > seaLevel) {
+        trimEnd = j + 1;
+        break;
+      }
+    }
+    if (trimEnd < corridor.polyline.length) {
+      corridor.polyline = corridor.polyline.slice(0, trimEnd);
+    }
+
+    // Need at least 2 points to build a meaningful profile
+    if (corridor.polyline.length < 2) continue;
+
     // 2. Compute accumulation from entry elevation
     const startElev = elevation.get(corridor.polyline[0].gx, corridor.polyline[0].gz);
     corridor.entryAccumulation = computeEntryAccumulation(
@@ -263,6 +279,16 @@ export function carveRiverProfiles(corridors, elevation, slope, erosionResistanc
     carveCorridorTerrain(
       corridor.polyline, corridor.profile, corridor.entryAccumulation, elevation, slope,
     );
+
+    // 5. Enforce profile on centreline — raise any cells that are below the profile
+    //    (e.g. cells that were below sea level from terrain generation)
+    for (let i = 0; i < corridor.polyline.length; i++) {
+      const pt = corridor.polyline[i];
+      const current = elevation.get(pt.gx, pt.gz);
+      if (current < corridor.profile[i]) {
+        elevation.set(pt.gx, pt.gz, corridor.profile[i]);
+      }
+    }
   }
 
   return corridors;

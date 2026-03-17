@@ -87,9 +87,6 @@ export function generateRegion(params, rng) {
   layers.setGrid('elevation', terrain.elevation);
   layers.setGrid('slope', terrain.slope);
 
-  // A2b. River profile carving (authoritative elevation profiles along corridors)
-  carveRiverProfiles(corridors, terrain.elevation, terrain.slope, geology.erosionResistance, seaLevel);
-
   // A4. Coastline (before hydrology so erosion shapes the coast first)
   const coastResult = generateCoastline(
     { width, height, seaLevel },
@@ -101,6 +98,9 @@ export function generateRegion(params, rng) {
     layers.setData('coastlineFeatures', coastResult.coastlineFeatures);
   }
 
+  // A2b. River profile carving (authoritative elevation profiles along corridors)
+  carveRiverProfiles(corridors, terrain.elevation, terrain.slope, geology.erosionResistance, seaLevel);
+
   // A3. Hydrology (with corridor accumulation and valley carving)
   const hydrology = generateHydrology(
     { width, height, cellSize, seaLevel },
@@ -110,7 +110,26 @@ export function generateRegion(params, rng) {
     { erosionResistance: geology.erosionResistance, riverCorridors: corridors },
   );
 
-  layers.setData('rivers', hydrology.rivers);
+  // Re-enforce corridor profiles: hydrology's valley carving / floodplain
+  // flattening can push corridor cells below sea level. Clamp them back.
+  for (const corridor of corridors) {
+    if (!corridor.profile) continue;
+    for (let i = 0; i < corridor.polyline.length; i++) {
+      const pt = corridor.polyline[i];
+      const current = terrain.elevation.get(pt.gx, pt.gz);
+      const target = Math.max(corridor.profile[i], seaLevel);
+      if (current < target) {
+        terrain.elevation.set(pt.gx, pt.gz, target);
+      }
+    }
+  }
+
+  // Prune tiny disconnected root streams — these are noise that inflate the
+  // root count without representing meaningful rivers.
+  const MIN_ROOT_FLOW = 300;
+  const prunedRivers = hydrology.rivers.filter(root => root.flowVolume >= MIN_ROOT_FLOW || root.children.length > 0);
+
+  layers.setData('rivers', prunedRivers);
   layers.setData('confluences', hydrology.confluences);
   layers.setData('riverPaths', hydrology.riverPaths);
   layers.setGrid('waterMask', hydrology.waterMask);
