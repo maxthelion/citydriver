@@ -23,7 +23,7 @@ import { planRiverCorridors } from '../src/regional/planRiverCorridors.js';
 import { generateCoastline } from '../src/regional/generateCoastline.js';
 import { PerlinNoise } from '../src/core/noise.js';
 import {
-  fillSinks, flowDirections, flowAccumulation, extractStreams,
+  fillSinks, dinfFlowDirections, dinfFlowAccumulation, extractStreams,
   findConfluences, smoothRiverPaths,
 } from '../src/core/flowAccumulation.js';
 import {
@@ -248,8 +248,8 @@ for (let gz = 0; gz < H; gz++) {
 fillSinks(filledElev);
 
 // Step 3: Flow directions + accumulation
-const flowDirs = flowDirections(filledElev);
-const rawAccumulation = flowAccumulation(filledElev, flowDirs);
+const flowDirs = dinfFlowDirections(filledElev);
+const rawAccumulation = dinfFlowAccumulation(filledElev, flowDirs);
 
 // Geology-adjusted accumulation
 const adjustedAccumulation = new Float32Array(rawAccumulation.length);
