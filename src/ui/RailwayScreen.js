@@ -66,7 +66,7 @@ export class RailwayScreen {
     const railGrid = this.layers.hasGrid('railGrid') ? this.layers.getGrid('railGrid') : null;
 
     // Canvas size: 1 pixel per grid cell, scaled up for display
-    const displayScale = 4;
+    const displayScale = 8;
     const w = elevation.width;
     const h = elevation.height;
     this._canvas.width = w * displayScale;
@@ -85,7 +85,7 @@ export class RailwayScreen {
     renderSchematicLines(ctx, railways, 1);
 
     // Station dots
-    renderSchematicStations(ctx, settlements, railGrid, 1);
+    renderSchematicStations(ctx, settlements, railGrid, 1, railways);
 
     // Off-map city labels
     renderSchematicOffMapCities(ctx, offMapCities, 1, w, h);
