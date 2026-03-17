@@ -14,15 +14,17 @@ The generator runs two main pipelines in sequence. The **regional pipeline** pro
 
 Generates the full regional map from a seed. Each phase enriches a shared LayerStack. Settlements and roads use a feedback loop — roads attract new settlements, which attract more roads.
 
-See [[city-generation-pipeline]] for how the city pipeline inherits from this.
+See [[regional-pipeline]] for the full phase-by-phase breakdown, LayerStack contents, and entry point.
 
-| Phase | Step | What it produces |
-|-------|------|-----------------|
-| A0 | [[regional-geology]] | Tectonic context, plate angles, rock types, erosion resistance, soil fertility |
+| Phase | Detail Page | Summary |
+|-------|------------|---------|
+| A0/A0b | [[regional-pipeline]] | Tectonics + river corridor planning |
+| A1 | [[regional-geology]] | Rock types, erosion resistance, soil fertility |
+| A2 | [[regional-pipeline]] | Terrain from layered noise + geology + corridor depression |
 | A4 | [[regional-coasts]] | Erosion-shaped coastline with bays, headlands, harbours |
-| A3 | [[regional-rivers]] | River networks from flow accumulation, valley carving, floodplains |
-| A6 | [[regional-settlements]] | Primary settlements, farms, market towns, growth via road traffic |
-| A7 | [[regional-roads]] | Phased road network connecting settlements via terrain-aware A* |
+| A3 | [[regional-rivers]] | River networks, valley carving, floodplains |
+| A6 | [[regional-settlements]] | Settlements, farms, market towns (feedback loop with roads) |
+| A7 | [[regional-roads]] | Terrain-aware A* road network (two passes) |
 | A8 | [[railway-network]] | Off-map cities and phased railway construction |
 
 ## 2. City Pipeline
