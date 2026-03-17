@@ -127,7 +127,10 @@ export function runGrowthTick(map, archetype, state) {
     if (claimed >= cap) continue;
 
     const remainingTotal = cap - claimed;
-    const budget = Math.min(agentConfig.budgetPerTick || remainingTotal, remainingTotal);
+    const tickBudget = agentConfig.budgetPerTick
+      ? Math.round(agentConfig.budgetPerTick * state.totalZoneCells)
+      : remainingTotal;
+    const budget = Math.min(tickBudget, remainingTotal);
     if (budget <= 0) continue;
 
     // Get this agent's value layer (fall back to empty if not in valueComposition)
@@ -157,7 +160,10 @@ export function runGrowthTick(map, archetype, state) {
     const agriValueLayer = valueLayers.agriculture || new Float32Array(w * h);
     const agriCap = Math.round(agriConfig.share * state.totalZoneCells);
     const agriClaimed = state.claimedCounts.get('agriculture') || 0;
-    const agriBudget = Math.min(agriConfig.budgetPerTick || agriCap, agriCap - agriClaimed);
+    const agriTickBudget = agriConfig.budgetPerTick
+      ? Math.round(agriConfig.budgetPerTick * state.totalZoneCells)
+      : agriCap;
+    const agriBudget = Math.min(agriTickBudget, agriCap - agriClaimed);
 
     if (agriBudget > 0) {
       // Agriculture fills cells that are outside the active frontier
