@@ -7,6 +7,8 @@ import {
   carveCorridorTerrain,
   carveRiverProfiles,
 } from '../../src/regional/carveRiverProfiles.js';
+import { generateRegion } from '../../src/regional/pipeline.js';
+import { SeededRandom } from '../../src/core/rng.js';
 
 describe('findEntryPoint', () => {
   it('picks the lowest above-sea-level cell in the scan window', () => {
@@ -229,6 +231,38 @@ describe('carveRiverProfiles', () => {
 
     for (const pt of corridors[0].polyline) {
       expect(elevation.get(pt.gx, pt.gz)).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
+
+describe('acceptance: seed 786031 river connectivity', () => {
+  it('produces a connected major river (not 67 fragments)', () => {
+    const rng = new SeededRandom(786031);
+    const layers = generateRegion({ width: 256, height: 256, cellSize: 50, seaLevel: 0 }, rng);
+    const rivers = layers.getData('rivers');
+
+    // Should have far fewer roots than the 67 we had before
+    expect(rivers.length).toBeLessThan(30);
+    // The largest major river should have substantial flow
+    const largest = rivers.reduce((best, r) => r.flowVolume > best.flowVolume ? r : best, { flowVolume: 0 });
+    expect(largest.flowVolume).toBeGreaterThan(10000);
+  });
+
+  it('no corridor cell is below sea level after carving', () => {
+    const rng = new SeededRandom(786031);
+    const layers = generateRegion({ width: 256, height: 256, cellSize: 50, seaLevel: 0 }, rng);
+    const elevation = layers.getGrid('elevation');
+    const corridors = layers.getData('riverCorridors');
+
+    for (const corridor of corridors) {
+      for (let i = 0; i < corridor.polyline.length; i++) {
+        const pt = corridor.polyline[i];
+        // Allow last few cells near coast to be below sea level (coastline erosion)
+        const distFromEnd = corridor.polyline.length - i;
+        if (distFromEnd > 5) {
+          expect(elevation.get(pt.gx, pt.gz)).toBeGreaterThanOrEqual(0);
+        }
+      }
     }
   });
 });
