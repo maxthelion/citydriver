@@ -25,7 +25,7 @@ See [[regional-pipeline]] for the full phase-by-phase breakdown, LayerStack cont
 | A3 | [[regional-rivers]] | River networks, valley carving, floodplains |
 | A6 | [[regional-settlements]] | Settlements, farms, market towns (feedback loop with roads) |
 | A7 | [[regional-roads]] | Terrain-aware A* road network (two passes) |
-| A8 | [[railway-network]] | Off-map cities and phased railway construction |
+| A8 | [[regional-railways-pipeline]] | Off-map cities and railway routing with settlement bonus |
 
 ## 2. City Pipeline
 
@@ -37,7 +37,7 @@ See [[city-generation-pipeline]] for the full tick sequence.
 
 | Tick | Step | What it produces |
 |------|------|-----------------|
-| 0 | Setup | Inherit terrain, rivers, water from region; add Perlin detail; place nuclei |
+| 0 | [[city-region-inheritance]] | Inherit terrain, rivers, railways, water from region; refine; place nuclei |
 | 1 | Skeleton roads | Arterial network connecting nuclei via MST + A* |
 | 2 | Land value | Nucleus-aware land value (flatness + proximity + waterfront) |
 | 3 | Development zones | Voronoi + threshold + morphological close + flood-fill |
