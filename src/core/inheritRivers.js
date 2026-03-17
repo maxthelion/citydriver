@@ -41,7 +41,7 @@ function _walkTree(seg, bounds, chaikinPasses, systemId, result) {
 
     if (clipped && clipped.clipped.length >= 2) {
       const smoothed = chaikinSmooth(
-        clipped.clipped.map(p => ({ x: p.x, z: p.z, accumulation: p.accumulation })),
+        clipped.clipped.map(p => ({ x: p.x, z: p.z, accumulation: p.accumulation, elevation: p.elevation })),
         chaikinPasses,
       );
 
@@ -50,6 +50,7 @@ function _walkTree(seg, bounds, chaikinPasses, systemId, result) {
           x: p.x,
           z: p.z,
           accumulation: p.accumulation,
+          elevation: p.elevation,
           width: riverHalfWidth(p.accumulation) * 2,
         })),
         systemId,

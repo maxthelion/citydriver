@@ -361,15 +361,15 @@ export class CityScreen {
         const idx = gz * w + gx;
         let elev = sd.cutElevation[idx];
 
-        if (map.waterMask.get(gx, gz) > 0) {
-          // Water cells: sink well below water plane
+        const wt = map.waterType ? map.waterType.get(gx, gz) : 0;
+        if (wt === 1 || wt === 2) {
+          // Sea/lake cells: sink below water plane
           elev = Math.min(elev, seaLevel - WATER_SINK);
-        } else if (elev < seaLevel) {
-          // Non-water cells below sea level: let the water plane cover them.
-          // This avoids creating islands from low-lying coastal terrain.
-          // The water plane is semi-transparent so submerged terrain shows through.
+        } else if (wt === 0 && elev < seaLevel) {
+          // Non-water cells below sea level: let the water plane cover them
           elev = seaLevel - WATER_SINK;
         }
+        // River cells (wt === 3): keep carved channel elevation as-is
 
         positions[idx * 3 + 1] = elev;
 

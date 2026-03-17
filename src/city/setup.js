@@ -159,7 +159,7 @@ export function setupCity(layers, settlement, rng) {
 
   // Enforce clean water boundaries:
   // - Water cells sunk below sea level (no shallow ambiguous cells)
-  enforceWaterDepth(elevation, map.waterMask, seaLevel);
+  enforceWaterDepth(elevation, map.waterMask, map.waterType, seaLevel);
 
   // Water depth (BFS from land into water — for narrow-river path costs)
   map.computeWaterDepth();
@@ -222,13 +222,18 @@ const WATER_MIN_DEPTH = 0.5; // water cells at least this far below sea level
  * Ensure water cells are clearly below sea level.
  * The renderer handles the land side (clamping terrain above water plane).
  */
-function enforceWaterDepth(elevation, waterMask, seaLevel) {
+function enforceWaterDepth(elevation, waterMask, waterType, seaLevel) {
   const { width, height } = elevation;
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
       if (waterMask.get(gx, gz) > 0) {
-        const maxH = seaLevel - WATER_MIN_DEPTH;
-        if (elevation.get(gx, gz) > maxH) elevation.set(gx, gz, maxH);
+        // Only enforce sea level depth for sea cells (type 1) and lakes (type 2)
+        // River cells (type 3) keep their natural terrain elevation
+        const wt = waterType ? waterType.get(gx, gz) : 0;
+        if (wt === 1 || wt === 2) {
+          const maxH = seaLevel - WATER_MIN_DEPTH;
+          if (elevation.get(gx, gz) > maxH) elevation.set(gx, gz, maxH);
+        }
       }
     }
   }

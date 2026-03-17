@@ -653,7 +653,8 @@ export class FeatureMap {
     // Phase 2: Carve channels using channel profile.
     // Where _targetY is set, use it as the absolute river bed elevation
     // instead of carving relative to current terrain.
-    const seaFloor = this.seaLevel != null ? this.seaLevel - 0.5 : -Infinity;
+    const seaLevel = this.seaLevel != null ? this.seaLevel : -Infinity;
+    const seaFloor = seaLevel !== -Infinity ? seaLevel - 0.5 : -Infinity;
     for (const river of this.rivers) {
       const polyline = river.polyline;
       if (!polyline || polyline.length < 2) continue;
@@ -710,8 +711,10 @@ export class FeatureMap {
                 // Fallback: relative carving
                 newElev = current - profile * maxDepth;
               }
-              // Never carve below sea level (prevents chasms at river mouths)
-              newElev = Math.max(newElev, seaFloor);
+              // Don't carve below sea floor at river mouths
+              if (targetY != null && targetY < seaLevel) {
+                newElev = Math.max(newElev, seaFloor);
+              }
               if (newElev < current) {
                 this.elevation.set(gx, gz, newElev);
               }

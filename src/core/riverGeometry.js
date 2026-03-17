@@ -23,11 +23,13 @@ export function chaikinSmooth(points, iterations = 3) {
         x: a.x * 0.75 + b.x * 0.25,
         z: a.z * 0.75 + b.z * 0.25,
         accumulation: a.accumulation * 0.75 + b.accumulation * 0.25,
+        elevation: (a.elevation ?? 0) * 0.75 + (b.elevation ?? 0) * 0.25,
       });
       next.push({
         x: a.x * 0.25 + b.x * 0.75,
         z: a.z * 0.25 + b.z * 0.75,
         accumulation: a.accumulation * 0.25 + b.accumulation * 0.75,
+        elevation: (a.elevation ?? 0) * 0.25 + (b.elevation ?? 0) * 0.75,
       });
     }
     next.push(result[result.length - 1]);
@@ -139,6 +141,7 @@ export function segmentsToVectorPaths(roots, cellSize, options = {}) {
         x: cell.gx * cellSize,
         z: cell.gz * cellSize,
         accumulation: cell.accumulation,
+        elevation: cell.elevation,
       });
     }
 
@@ -154,6 +157,7 @@ export function segmentsToVectorPaths(roots, cellSize, options = {}) {
         z: p.z,
         width: riverHalfWidth(p.accumulation) * 2,
         accumulation: p.accumulation,
+        elevation: p.elevation,
       }));
       path = { points, children: [] };
       paths.push(path);
@@ -164,6 +168,7 @@ export function segmentsToVectorPaths(roots, cellSize, options = {}) {
       x: firstCell.gx * cellSize,
       z: firstCell.gz * cellSize,
       accumulation: firstCell.accumulation,
+      elevation: firstCell.elevation,
     };
     for (const child of (seg.children || [])) {
       const childResult = processSegment(child, joinPoint);
