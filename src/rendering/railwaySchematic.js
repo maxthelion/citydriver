@@ -5,7 +5,6 @@
  */
 
 import { chaikinSmooth } from '../core/math.js';
-import { simplifyPath } from '../core/pathfinding.js';
 
 const HIERARCHY_STYLES = {
   trunk:  { color: '#cc2222', width: 2.5 },
@@ -68,11 +67,9 @@ export function renderSchematicLines(ctx, railways, scale) {
 
     const style = HIERARCHY_STYLES[rail.hierarchy] || HIERARCHY_STYLES.branch;
 
-    // Aggressively simplify grid path to a few control points (RDP with high epsilon),
-    // then Chaikin-smooth into sweeping curves. Without simplification, the hundreds
-    // of per-cell A* points just produce wobbly lines no matter how much we smooth.
-    const simplified = simplifyPath(pathData, 8);
-    let points = simplified.map(p => ({
+    // Path is already simplified by generateRailways (RDP epsilon=8).
+    // Chaikin-smooth for sweeping curves.
+    let points = pathData.map(p => ({
       x: p.gx * scale,
       z: p.gz * scale,
     }));

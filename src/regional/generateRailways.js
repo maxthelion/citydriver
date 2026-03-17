@@ -11,9 +11,9 @@
  */
 
 import { railwayCostFunction } from '../core/railwayCost.js';
+import { findPath, simplifyPath } from '../core/pathfinding.js';
 import { distance2D } from '../core/math.js';
 import { Grid2D } from '../core/Grid2D.js';
-import { buildRoadNetwork } from '../core/buildRoadNetwork.js';
 
 /**
  * @param {object} params - { width, height, cellSize }
@@ -54,7 +54,7 @@ export function generateRailways(params, settlements, offMapCities, elevation, s
     if (!isFinite(base)) return base;
     if (railGrid.get(toGx, toGz) > 0) {
       const dx = toGx - fromGx, dz = toGz - fromGz;
-      return Math.sqrt(dx * dx + dz * dz) * 0.2;
+      return Math.sqrt(dx * dx + dz * dz) * 0.05; // very strong preference for existing track
     }
     return base;
   };
@@ -112,24 +112,36 @@ export function generateRailways(params, settlements, offMapCities, elevation, s
     }
   }
 
-  // Phase 4: Cross-country — off-map cities connected through tier-2 if shorter
-  if (offMapCities.length >= 2) {
+  // Phase 4: Cross-country — at most one route connecting two off-map cities
+  // through a tier-2 settlement that isn't already well-connected.
+  // Only add if the tier-2 is genuinely between them (within 25% of midpoint).
+  if (offMapCities.length >= 2 && tier2.length > 0) {
+    let bestRoute = null;
+    let bestScore = Infinity;
     for (let i = 0; i < offMapCities.length; i++) {
       for (let j = i + 1; j < offMapCities.length; j++) {
         const midGx = (offMapCities[i].gx + offMapCities[j].gx) / 2;
         const midGz = (offMapCities[i].gz + offMapCities[j].gz) / 2;
+        const routeDist = distance2D(offMapCities[i].gx, offMapCities[i].gz, offMapCities[j].gx, offMapCities[j].gz);
         const nearMid = tier2.find(s =>
-          distance2D(s.gx, s.gz, midGx, midGz) < width * 0.4
+          distance2D(s.gx, s.gz, midGx, midGz) < routeDist * 0.25
         );
         if (nearMid) {
-          connections.push({
-            from: { gx: offMapCities[i].gx, gz: offMapCities[i].gz },
-            to: { gx: offMapCities[j].gx, gz: offMapCities[j].gz },
-            hierarchy: 'main',
-            phase: 4,
-          });
+          const score = distance2D(nearMid.gx, nearMid.gz, midGx, midGz);
+          if (score < bestScore) {
+            bestScore = score;
+            bestRoute = { i, j };
+          }
         }
       }
+    }
+    if (bestRoute) {
+      connections.push({
+        from: { gx: offMapCities[bestRoute.i].gx, gz: offMapCities[bestRoute.i].gz },
+        to: { gx: offMapCities[bestRoute.j].gx, gz: offMapCities[bestRoute.j].gz },
+        hierarchy: 'main',
+        phase: 4,
+      });
     }
   }
 
@@ -147,32 +159,35 @@ export function generateRailways(params, settlements, offMapCities, elevation, s
 
   deduped.sort((a, b) => a.phase - b.phase);
 
-  // Pathfind all connections via buildRoadNetwork
-  const results = buildRoadNetwork({
-    width,
-    height,
-    cellSize,
-    costFn: railAwareCost,
-    connections: deduped,
-    roadGrid: railGrid,
-    originX: 0,
-    originZ: 0,
-  });
+  // Pathfind each connection individually. Unlike roads, railways don't need
+  // segment merging — we want one clean simplified line per connection.
+  // Stamp railGrid after each so later paths prefer existing corridors.
+  const railways = [];
 
-  // Stamp rail grid with results
-  for (const rail of results) {
-    if (!rail.cells) continue;
-    for (const cell of rail.cells) {
-      railGrid.set(cell.gx, cell.gz, 1);
+  for (const conn of deduped) {
+    const result = findPath(
+      conn.from.gx, conn.from.gz,
+      conn.to.gx, conn.to.gz,
+      width, height, railAwareCost,
+    );
+    if (!result) continue;
+
+    // Stamp grid so later paths share this corridor
+    for (const p of result.path) {
+      railGrid.set(p.gx, p.gz, 1);
     }
-  }
 
-  // Attach phase/hierarchy metadata
-  const railways = results.map((r, i) => ({
-    ...r,
-    phase: deduped[i]?.phase ?? 1,
-    hierarchy: deduped[i]?.hierarchy ?? 'branch',
-  }));
+    // Aggressively simplify — railways should be a handful of sweeping segments
+    const simplified = simplifyPath(result.path, 8);
+
+    railways.push({
+      path: simplified,
+      hierarchy: conn.hierarchy,
+      phase: conn.phase,
+      from: conn.from,
+      to: conn.to,
+    });
+  }
 
   return { railways, railGrid };
 }

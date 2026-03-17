@@ -219,24 +219,26 @@ export function buildRegionRailways(layers) {
   const halfW = (elevation.width - 1) * cs / 2;
   const halfH = (elevation.height - 1) * cs / 2;
 
-  const hierarchyColors = { trunk: 0x222222, main: 0x444444, branch: 0x666666 };
+  const hierarchyColors = { trunk: 0x000000, main: 0x111111, branch: 0x333333 };
 
   for (const rail of railways) {
     const pathData = rail.rawPath || rail.path;
     if (!pathData || pathData.length < 2) continue;
 
-    const color = hierarchyColors[rail.hierarchy] || 0x444444;
+    const color = hierarchyColors[rail.hierarchy] || 0x111111;
     const points = pathData.map(p => {
-      const elev = elevation.get(p.gx, p.gz);
+      const gx = Math.min(Math.max(0, p.gx), elevation.width - 1);
+      const gz = Math.min(Math.max(0, p.gz), elevation.height - 1);
+      const elev = elevation.get(gx, gz);
       return new THREE.Vector3(
         p.gx * cs - halfW,
-        elev + 3,
+        elev + 5,
         p.gz * cs - halfH,
       );
     });
 
     const geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const material = new THREE.LineBasicMaterial({ color, linewidth: 2 });
+    const material = new THREE.LineBasicMaterial({ color, linewidth: 3 });
     group.add(new THREE.Line(geometry, material));
   }
 

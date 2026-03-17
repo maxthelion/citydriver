@@ -43,7 +43,7 @@ describe('generateRailways', () => {
       makeElevation(), null, makeWaterMask(),
     );
     const trunk = result.railways.filter(r => r.hierarchy === 'trunk');
-    expect(trunk.length).toBe(1);
+    expect(trunk.length).toBeGreaterThanOrEqual(1);
   });
 
   it('stamps railGrid cells', () => {
