@@ -18,7 +18,6 @@ import { generateLandCover } from './generateLandCover.js';
 import { generateSettlements } from './generateSettlements.js';
 import { generateFarms } from './generateFarms.js';
 import { generateRoads } from './generateRoads.js';
-import { applySeaFloorPlunge } from './seaFloorPlunge.js';
 import { computeFloodZone } from '../core/terrainSuitability.js';
 import { generateMarketTowns } from './generateMarketTowns.js';
 import { growSettlements } from './growSettlements.js';
@@ -207,12 +206,6 @@ export function generateRegion(params, rng) {
     rng,
   );
   layers.setGrid('landCover', landCover);
-
-  // Sea floor plunge: force underwater terrain steeply below sea level.
-  // Runs last so settlement and road scoring use the natural pre-plunge elevation.
-  applySeaFloorPlunge(
-    terrain.elevation, hydrology.waterMask, geology.erosionResistance, cellSize, seaLevel
-  );
 
   // Flood zone: precomputed grid for settlement/building exclusion
   const floodZone = computeFloodZone(terrain.elevation, hydrology.waterMask, seaLevel);
