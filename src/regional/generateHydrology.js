@@ -9,7 +9,7 @@
 import { Grid2D } from '../core/Grid2D.js';
 import { clamp } from '../core/math.js';
 import { PerlinNoise } from '../core/noise.js';
-import { fillSinks, flowDirections, flowAccumulation, extractStreams, findConfluences, smoothRiverPaths } from '../core/flowAccumulation.js';
+import { fillSinks, dinfFlowDirections, dinfFlowAccumulation, extractStreams, findConfluences, smoothRiverPaths } from '../core/flowAccumulation.js';
 import { segmentsToVectorPaths, paintPathsOntoWaterMask, riverHalfWidth, channelProfile } from '../core/riverGeometry.js';
 import { computeValleyDepthField, computeFloodplainField, applyTerrainFields } from './carveValleys.js';
 
@@ -58,11 +58,11 @@ export function generateHydrology(params, elevation, permeability, rng, options 
   // Fill sinks so water can always reach an edge
   fillSinks(filledElev);
 
-  // Compute flow directions
-  const flowDirs = flowDirections(filledElev);
+  // Compute D-infinity flow directions (nearest D8 for path tracing)
+  const flowDirs = dinfFlowDirections(filledElev);
 
-  // Compute flow accumulation
-  const accumulation = flowAccumulation(filledElev, flowDirs);
+  // Compute D-infinity flow accumulation (proportional two-neighbor distribution)
+  const accumulation = dinfFlowAccumulation(filledElev, flowDirs);
 
   // --- Geology-aware flow thresholds ---
   // On impermeable rock (low permeability), lower the threshold so more

@@ -1,5 +1,5 @@
 /**
- * D8 flow routing and drainage network extraction.
+ * D8 and D-infinity flow routing and drainage network extraction.
  * Adapted to work with Grid2D.
  */
 
@@ -180,6 +180,215 @@ export function flowAccumulation(elevation, directions) {
     if (nx < 0 || nx >= W || nz < 0 || nz >= H) continue;
 
     acc[nz * W + nx] += acc[idx];
+  }
+
+  return acc;
+}
+
+// ─── D-infinity (Tarboton 1997) ─────────────────────────────────────────────
+//
+// 8 triangular facets, each formed by two adjacent D8 neighbors.
+// Facet k uses directions k and (k+1)%8 as its two edges.
+//
+// Facet 0: E  & SE    (dirs 0,1)
+// Facet 1: SE & S     (dirs 1,2)
+// Facet 2: S  & SW    (dirs 2,3)
+// Facet 3: SW & W     (dirs 3,4)
+// Facet 4: W  & NW    (dirs 4,5)
+// Facet 5: NW & N     (dirs 5,6)
+// Facet 6: N  & NE    (dirs 6,7)
+// Facet 7: NE & E     (dirs 7,0)
+
+const PI_OVER_4 = Math.PI / 4;
+
+/**
+ * Internal: compute the D-infinity angle and the two facet neighbor directions
+ * for a single cell.  Returns { angle, dir1, dir2, singleDir } where angle is
+ * the continuous angle (radians, 0 = east, increasing counter-clockwise in D8
+ * convention), dir1/dir2 are the two D8 neighbor indices for the best facet,
+ * and singleDir is set (instead of dir1/dir2) when only one neighbor is downhill.
+ * Returns null if the cell is a pit (no downhill neighbor).
+ */
+function _dinfCell(elevation, gx, gz) {
+  const W = elevation.width;
+  const H = elevation.height;
+  const e0 = elevation.get(gx, gz);
+
+  let bestSlope = 0;
+  let bestAngle = 0;
+  let bestD1 = -1;
+  let bestD2 = -1;
+  let bestSingle = -1;
+
+  for (let f = 0; f < 8; f++) {
+    const d1 = f;
+    const d2 = (f + 1) % 8;
+
+    const nx1 = gx + DX[d1];
+    const nz1 = gz + DZ[d1];
+    const nx2 = gx + DX[d2];
+    const nz2 = gz + DZ[d2];
+
+    const in1 = nx1 >= 0 && nx1 < W && nz1 >= 0 && nz1 < H;
+    const in2 = nx2 >= 0 && nx2 < W && nz2 >= 0 && nz2 < H;
+
+    if (!in1 && !in2) continue;
+
+    const s1 = in1 ? (e0 - elevation.get(nx1, nz1)) / DIST[d1] : -Infinity;
+    const s2 = in2 ? (e0 - elevation.get(nx2, nz2)) / DIST[d2] : -Infinity;
+
+    if (s1 <= 0 && s2 <= 0) continue; // both uphill or flat
+
+    let slope, angle, isSingle, singleDir;
+
+    if (s1 > 0 && s2 > 0) {
+      // Both neighbors downhill — compute optimal angle within facet
+      let r = Math.atan2(s2, s1);
+      if (r < 0) r = 0;
+      if (r > PI_OVER_4) r = PI_OVER_4;
+      slope = Math.sqrt(s1 * s1 + s2 * s2);
+      angle = f * PI_OVER_4 + r;
+      isSingle = false;
+    } else if (s1 > 0) {
+      slope = s1;
+      angle = f * PI_OVER_4; // exactly at d1
+      isSingle = true;
+      singleDir = d1;
+    } else {
+      slope = s2;
+      angle = (f + 1) * PI_OVER_4; // exactly at d2
+      isSingle = true;
+      singleDir = d2;
+    }
+
+    if (slope > bestSlope) {
+      bestSlope = slope;
+      bestAngle = angle;
+      if (isSingle) {
+        bestD1 = -1;
+        bestD2 = -1;
+        bestSingle = singleDir;
+      } else {
+        bestD1 = d1;
+        bestD2 = d2;
+        bestSingle = -1;
+      }
+    }
+  }
+
+  if (bestSlope <= 0) return null; // pit
+
+  return { angle: bestAngle, dir1: bestD1, dir2: bestD2, singleDir: bestSingle };
+}
+
+/**
+ * Compute D-infinity flow directions, returned as the nearest D8 direction
+ * (Int8Array) for compatibility with downstream code that traces D8 paths.
+ *
+ * The key improvement over plain D8: on gentle slopes where the true gradient
+ * falls between two D8 directions, Dinf picks the direction closest to the
+ * true gradient rather than always picking the steepest single-neighbor drop.
+ *
+ * @param {import('./Grid2D.js').Grid2D} elevation
+ * @returns {Int8Array}
+ */
+export function dinfFlowDirections(elevation) {
+  const W = elevation.width;
+  const H = elevation.height;
+  const dirs = new Int8Array(W * H);
+
+  for (let gz = 0; gz < H; gz++) {
+    for (let gx = 0; gx < W; gx++) {
+      const result = _dinfCell(elevation, gx, gz);
+      if (!result) {
+        dirs[gz * W + gx] = NO_DIR;
+        continue;
+      }
+
+      if (result.singleDir >= 0) {
+        dirs[gz * W + gx] = result.singleDir;
+      } else {
+        // Convert continuous angle to nearest D8 direction
+        let d8 = Math.round(result.angle / PI_OVER_4) % 8;
+        dirs[gz * W + gx] = d8;
+      }
+    }
+  }
+
+  return dirs;
+}
+
+/**
+ * Compute D-infinity flow accumulation.
+ *
+ * Unlike D8 which sends all flow to a single neighbor, Dinf distributes each
+ * cell's flow proportionally to TWO downstream neighbors based on the
+ * continuous flow angle within the steepest triangular facet. This eliminates
+ * the axis-aligned accumulation artifacts typical of D8.
+ *
+ * @param {import('./Grid2D.js').Grid2D} elevation
+ * @param {Int8Array} _dinfDirsUnused - Kept for API symmetry with D8 flowAccumulation(elevation, directions)
+ * @returns {Float32Array}
+ */
+export function dinfFlowAccumulation(elevation, _dinfDirsUnused) {
+  const W = elevation.width;
+  const H = elevation.height;
+  const total = W * H;
+
+  // Sort cells by elevation, highest first
+  const indices = new Uint32Array(total);
+  for (let i = 0; i < total; i++) indices[i] = i;
+
+  const elevations = new Float32Array(total);
+  for (let gz = 0; gz < H; gz++) {
+    for (let gx = 0; gx < W; gx++) {
+      elevations[gz * W + gx] = elevation.get(gx, gz);
+    }
+  }
+  indices.sort((a, b) => elevations[b] - elevations[a]);
+
+  // Accumulation starts at 1 for each cell (self)
+  const acc = new Float32Array(total);
+  for (let i = 0; i < total; i++) acc[i] = 1;
+
+  // Process from highest to lowest, distributing flow proportionally
+  for (let k = 0; k < total; k++) {
+    const idx = indices[k];
+    const gx = idx % W;
+    const gz = (idx / W) | 0;
+
+    const result = _dinfCell(elevation, gx, gz);
+    if (!result) continue;
+
+    const cellAcc = acc[idx];
+
+    if (result.singleDir >= 0) {
+      // Only one downhill neighbor — send all flow there
+      const d = result.singleDir;
+      const nx = gx + DX[d];
+      const nz = gz + DZ[d];
+      if (nx >= 0 && nx < W && nz >= 0 && nz < H) {
+        acc[nz * W + nx] += cellAcc;
+      }
+    } else {
+      // Two downhill neighbors — distribute proportionally
+      const facetStart = result.dir1 * PI_OVER_4;
+      const r = result.angle - facetStart; // angle within facet [0, π/4]
+      const p2 = r / PI_OVER_4;            // proportion to dir2
+      const p1 = 1 - p2;                   // proportion to dir1
+
+      const nx1 = gx + DX[result.dir1];
+      const nz1 = gz + DZ[result.dir1];
+      const nx2 = gx + DX[result.dir2];
+      const nz2 = gz + DZ[result.dir2];
+
+      if (nx1 >= 0 && nx1 < W && nz1 >= 0 && nz1 < H) {
+        acc[nz1 * W + nx1] += cellAcc * p1;
+      }
+      if (nx2 >= 0 && nx2 < W && nz2 >= 0 && nz2 < H) {
+        acc[nz2 * W + nx2] += cellAcc * p2;
+      }
+    }
   }
 
   return acc;
