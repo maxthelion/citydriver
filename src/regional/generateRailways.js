@@ -79,7 +79,7 @@ export function generateRailways(params, settlements, offMapCities, elevation, s
   for (const omc of sortedOffMap) {
     const hierarchy = omc.importance === 1 ? 'trunk' : 'main';
     _addLine(railways, bridges, railGrid, mainCity, omc, hierarchy,
-      width, height, railCost, waterMask, settlements);
+      width, height, cellSize, railCost, waterMask, settlements);
   }
 
   // Tier-2 settlements get a short branch if not already near track
@@ -89,7 +89,7 @@ export function generateRailways(params, settlements, offMapCities, elevation, s
     const junction = _findNearestTrack(railGrid, s.gx, s.gz, width, height);
     if (junction && distance2D(s.gx, s.gz, junction.gx, junction.gz) < width * 0.3) {
       _addLine(railways, bridges, railGrid, s, junction, 'branch',
-        width, height, railCost, waterMask, settlements);
+        width, height, cellSize, railCost, waterMask, settlements);
     }
   }
 
@@ -97,7 +97,7 @@ export function generateRailways(params, settlements, offMapCities, elevation, s
 }
 
 function _addLine(railways, bridges, railGrid, from, to, hierarchy,
-  width, height, costFn, waterMask, settlements) {
+  width, height, cellSize, costFn, waterMask, settlements) {
   const result = findPath(from.gx, from.gz, to.gx, to.gz, width, height, costFn);
   if (!result) return;
 
@@ -112,8 +112,12 @@ function _addLine(railways, bridges, railGrid, from, to, hierarchy,
   // Build waypoints: RDP-simplified path, with settlements pinned as waypoints
   const path = _buildWaypoints(result.path, settlements);
 
+  // World-coordinate polyline for city inheritance (clipPolylineToBounds needs {x, z})
+  const polyline = path.map(p => ({ x: p.gx * cellSize, z: p.gz * cellSize }));
+
   railways.push({
     path,
+    polyline,
     hierarchy,
     from: { gx: from.gx, gz: from.gz },
     to: { gx: to.gx, gz: to.gz },
