@@ -108,6 +108,10 @@ export class CityScreen {
     scene.add(roads);
     this._meshLayers.roads = roads;
 
+    const railwayMeshes = this._buildRailways();
+    scene.add(railwayMeshes);
+    this._meshLayers.railways = railwayMeshes;
+
     const water = this._buildWater();
     scene.add(water);
     this._meshLayers.water = water;
@@ -582,6 +586,84 @@ export class CityScreen {
       group.add(new THREE.Mesh(geom, getRoadMaterial(hierarchy)));
     }
 
+    return group;
+  }
+
+  /**
+   * Railway ribbon meshes from railway features on the map.
+   * Narrower and darker than roads (halfWidth=2m, colour 0x333333).
+   */
+  _buildRailways() {
+    const group = new THREE.Group();
+    const railFeatures = (this._map.features || []).filter(f => f.type === 'railway');
+    if (railFeatures.length === 0) return group;
+
+    const vertices = [];
+    const indices = [];
+    const halfWidth = 2;
+
+    for (const feat of railFeatures) {
+      const pts = feat.polyline;
+      if (!pts || pts.length < 2) continue;
+
+      const baseVertex = vertices.length / 3;
+
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        const lx = p.x - this._map.originX;
+        const lz = p.z - this._map.originZ;
+
+        const gx = Math.round(lx / this._map.cellSize);
+        const gz = Math.round(lz / this._map.cellSize);
+        const y = (gx >= 0 && gx < this._map.width && gz >= 0 && gz < this._map.height)
+          ? this._map.elevation.get(gx, gz) + 0.3
+          : 0;
+
+        let perpX, perpZ;
+        if (i === 0) {
+          const dx = pts[1].x - p.x, dz = pts[1].z - p.z;
+          const len = Math.sqrt(dx * dx + dz * dz) || 1;
+          perpX = -dz / len; perpZ = dx / len;
+        } else if (i === pts.length - 1) {
+          const dx = p.x - pts[i - 1].x, dz = p.z - pts[i - 1].z;
+          const len = Math.sqrt(dx * dx + dz * dz) || 1;
+          perpX = -dz / len; perpZ = dx / len;
+        } else {
+          const dx0 = p.x - pts[i - 1].x, dz0 = p.z - pts[i - 1].z;
+          const len0 = Math.sqrt(dx0 * dx0 + dz0 * dz0) || 1;
+          const px0 = -dz0 / len0, pz0 = dx0 / len0;
+          const dx1 = pts[i + 1].x - p.x, dz1 = pts[i + 1].z - p.z;
+          const len1 = Math.sqrt(dx1 * dx1 + dz1 * dz1) || 1;
+          const px1 = -dz1 / len1, pz1 = dx1 / len1;
+          const ax = px0 + px1, az = pz0 + pz1;
+          const alen = Math.sqrt(ax * ax + az * az) || 1;
+          perpX = ax / alen; perpZ = az / alen;
+        }
+
+        vertices.push(lx + perpX * halfWidth, y, lz + perpZ * halfWidth);
+        vertices.push(lx - perpX * halfWidth, y, lz - perpZ * halfWidth);
+
+        if (i > 0) {
+          const b = baseVertex + (i - 1) * 2;
+          indices.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+        }
+      }
+    }
+
+    if (vertices.length < 6) return group;
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geom.setIndex(indices);
+    geom.computeVertexNormals();
+
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x333333,
+      roughness: 0.8,
+      metalness: 0.1,
+    });
+
+    group.add(new THREE.Mesh(geom, material));
     return group;
   }
 
