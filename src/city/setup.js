@@ -11,6 +11,7 @@ import { Grid2D } from '../core/Grid2D.js';
 import { FeatureMap } from '../core/FeatureMap.js';
 import { PerlinNoise } from '../core/noise.js';
 import { inheritRivers } from '../core/inheritRivers.js';
+import { inheritRailways } from '../core/inheritRailways.js';
 import { distance2D } from '../core/math.js';
 import { CITY_CELL_SIZE, CITY_RADIUS } from './constants.js';
 import { computeTerrainSuitability, computeFloodZone } from '../core/terrainSuitability.js';
@@ -127,21 +128,39 @@ export function setupCity(layers, settlement, rng) {
     }
   }
 
+  // Bounds shared by river and railway inheritance
+  const bounds = {
+    minX: originX,
+    minZ: originZ,
+    maxX: originX + cityGridW * cityCellSize,
+    maxZ: originZ + cityGridH * cityCellSize,
+  };
+
   // Import rivers as features (shared inheritance utility)
   const riverPaths = layers.getData('riverPaths');
   if (riverPaths) {
-    const bounds = {
-      minX: originX,
-      minZ: originZ,
-      maxX: originX + cityGridW * cityCellSize,
-      maxZ: originZ + cityGridH * cityCellSize,
-    };
     const cityRivers = inheritRivers(riverPaths, bounds, {
       chaikinPasses: 1,
       margin: cityCellSize,
     });
     for (const river of cityRivers) {
       map.addFeature('river', { polyline: river.polyline, systemId: river.systemId });
+    }
+  }
+
+  // Import railways as features
+  const railways = layers.getData('railways');
+  if (railways) {
+    const cityRailways = inheritRailways(railways, bounds, {
+      chaikinPasses: 2,
+      margin: cityCellSize,
+    });
+    for (const rail of cityRailways) {
+      map.addFeature('railway', {
+        polyline: rail.polyline,
+        hierarchy: rail.hierarchy,
+        phase: rail.phase,
+      });
     }
   }
 
