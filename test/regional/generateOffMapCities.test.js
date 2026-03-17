@@ -27,6 +27,19 @@ describe('generateOffMapCities', () => {
     }
   });
 
+  it('avoids coastal edges', () => {
+    const rng = new SeededRandom(42);
+    const cities = generateOffMapCities(
+      { width: 128, height: 128, cellSize: 50 }, rng,
+      { coastEdges: ['west', 'south'] },
+    );
+    for (const c of cities) {
+      expect(c.edge).not.toBe('west');
+      expect(c.edge).not.toBe('south');
+    }
+    expect(cities.length).toBeGreaterThan(0);
+  });
+
   it('is deterministic', () => {
     const a = generateOffMapCities({ width: 128, height: 128, cellSize: 50 }, new SeededRandom(99));
     const b = generateOffMapCities({ width: 128, height: 128, cellSize: 50 }, new SeededRandom(99));

@@ -217,7 +217,9 @@ export function generateRegion(params, rng) {
   growSettlements(allSettlements, roadsB.roads);
 
   // A8a. Off-map cities (railway destinations beyond region)
-  const offMapCities = generateOffMapCities({ width, height, cellSize }, rng.fork('offMapCities'));
+  const offMapCities = generateOffMapCities({ width, height, cellSize }, rng.fork('offMapCities'), {
+    coastEdges: tectonics.coastEdges || [],
+  });
   layers.setData('offMapCities', offMapCities);
 
   // A8b. Railway network (phased construction)
