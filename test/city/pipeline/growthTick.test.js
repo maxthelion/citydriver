@@ -56,23 +56,25 @@ function makeTestMap(w, h) {
 }
 
 describe('initGrowthState', () => {
-  it('creates state with radius 0 for each nucleus', () => {
+  it('creates state with tick 0 and claimed counts', () => {
     const map = makeTestMap(40, 40);
     const archetype = {
       growth: {
-        radiusStep: 200,
         maxGrowthTicks: 8,
         agentPriority: ['commercial'],
+        valueComposition: {
+          commercial: { centrality: 0.5 },
+        },
+        influenceRadii: {},
         agents: {
-          commercial: { share: 0.1, seedStrategy: 'fill', spreadBehaviour: 'blob',
-                        footprint: [2, 10], affinity: {}, seedsPerTick: 1 },
+          commercial: { share: 0.1, budgetPerTick: 10, minFootprint: 1 },
         },
       },
     };
     const state = initGrowthState(map, archetype);
     expect(state.tick).toBe(0);
-    expect(state.nucleusRadii.get(0)).toBe(0);
     expect(state.claimedCounts.get('commercial')).toBe(0);
+    expect(state.totalZoneCells).toBeGreaterThan(0);
   });
 });
 
@@ -81,12 +83,14 @@ describe('runGrowthTick', () => {
     const map = makeTestMap(40, 40);
     const archetype = {
       growth: {
-        radiusStep: 100, // 20 cells at 5m/cell
         maxGrowthTicks: 8,
         agentPriority: ['commercial'],
+        valueComposition: {
+          commercial: { centrality: 0.5 },
+        },
+        influenceRadii: {},
         agents: {
-          commercial: { share: 0.5, seedStrategy: 'fill', spreadBehaviour: 'blob',
-                        footprint: [2, 10], affinity: { centrality: 0.5 }, seedsPerTick: 2 },
+          commercial: { share: 0.5, budgetPerTick: 10, minFootprint: 1 },
         },
       },
     };
@@ -94,7 +98,6 @@ describe('runGrowthTick', () => {
     const done = runGrowthTick(map, archetype, state);
 
     expect(state.tick).toBe(1);
-    expect(state.nucleusRadii.get(0)).toBeGreaterThan(0);
     // Some cells should be claimed
     const resGrid = map.getLayer('reservationGrid');
     expect(resGrid).toBeTruthy();
@@ -110,12 +113,14 @@ describe('runGrowthTick', () => {
     const map = makeTestMap(20, 20);
     const archetype = {
       growth: {
-        radiusStep: 500, // large — covers whole map
         maxGrowthTicks: 2,
         agentPriority: ['commercial'],
+        valueComposition: {
+          commercial: { centrality: 0.5 },
+        },
+        influenceRadii: {},
         agents: {
-          commercial: { share: 0.01, seedStrategy: 'fill', spreadBehaviour: 'dot',
-                        footprint: [1, 1], affinity: {}, seedsPerTick: 1 },
+          commercial: { share: 0.01, budgetPerTick: 1, minFootprint: 1 },
         },
       },
     };

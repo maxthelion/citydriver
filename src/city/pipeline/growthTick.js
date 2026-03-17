@@ -1,51 +1,18 @@
 // src/city/pipeline/growthTick.js
 /**
  * Growth tick orchestration.
- * Each tick expands development radii and runs growth agents.
+ *
+ * Each tick runs the influence → value → allocate pipeline:
+ *   Phase 1 INFLUENCE: blur reservation masks into proximity gradients
+ *   Phase 2 VALUE:     compose per-agent value bitmaps from spatial + influence layers
+ *   Phase 3 ALLOCATE:  BFS-claim cells from each agent's value bitmap
  */
 
 import { Grid2D } from '../../core/Grid2D.js';
-import { RESERVATION, AGENT_TYPE_TO_RESERVATION, scoreCell, findSeeds, spreadFromSeed } from './growthAgents.js';
-
-/**
- * Separable box blur. Returns a normalised Float32Array (0-1).
- * @param {Float32Array} src - input values
- * @param {number} w - grid width
- * @param {number} h - grid height
- * @param {number} radius - blur radius in cells
- * @returns {Float32Array}
- */
-function boxBlur(src, w, h, radius) {
-  const dst = new Float32Array(w * h);
-  const tmp = new Float32Array(w * h);
-  // Horizontal pass
-  for (let z = 0; z < h; z++) {
-    let sum = 0;
-    for (let x = 0; x < Math.min(radius, w); x++) sum += src[z * w + x];
-    for (let x = 0; x < w; x++) {
-      const add = x + radius < w ? src[z * w + x + radius] : 0;
-      const sub = x - radius - 1 >= 0 ? src[z * w + x - radius - 1] : 0;
-      sum += add - sub;
-      tmp[z * w + x] = sum;
-    }
-  }
-  // Vertical pass
-  for (let x = 0; x < w; x++) {
-    let sum = 0;
-    for (let z = 0; z < Math.min(radius, h); z++) sum += tmp[z * w + x];
-    for (let z = 0; z < h; z++) {
-      const add = z + radius < h ? tmp[(z + radius) * w + x] : 0;
-      const sub = z - radius - 1 >= 0 ? tmp[(z - radius - 1) * w + x] : 0;
-      sum += add - sub;
-      dst[z * w + x] = sum;
-    }
-  }
-  // Normalise to 0-1
-  let max = 0;
-  for (let i = 0; i < w * h; i++) if (dst[i] > max) max = dst[i];
-  if (max > 0) for (let i = 0; i < w * h; i++) dst[i] /= max;
-  return dst;
-}
+import { RESERVATION, AGENT_TYPE_TO_RESERVATION } from './growthAgents.js';
+import { computeInfluenceLayers } from './influenceLayers.js';
+import { composeAllValueLayers } from './valueLayers.js';
+import { allocateFromValueBitmap } from './allocate.js';
 
 /**
  * Initialize growth state for a map.
@@ -54,16 +21,10 @@ function boxBlur(src, w, h, radius) {
  * @returns {object} growth state
  */
 export function initGrowthState(map, archetype) {
-  const nucleusRadii = new Map();
-  for (let i = 0; i < map.nuclei.length; i++) {
-    nucleusRadii.set(i, 0);
-  }
-
   const claimedCounts = new Map();
-  const activeSeeds = new Map();
-  for (const agentType of archetype.growth.agentPriority) {
+  const agentPriority = archetype.growth.agentPriority || Object.keys(archetype.growth.agents || {});
+  for (const agentType of agentPriority) {
     claimedCounts.set(agentType, 0);
-    activeSeeds.set(agentType, []);
   }
 
   // Initialize reservation grid if not present
@@ -84,8 +45,6 @@ export function initGrowthState(map, archetype) {
 
   return {
     tick: 0,
-    nucleusRadii,
-    activeSeeds,
     claimedCounts,
     totalZoneCells,
   };
@@ -106,90 +65,57 @@ export function runGrowthTick(map, archetype, state) {
   if (state.tick >= maxTicks) return true;
 
   state.tick++;
-  const radiusStepCells = Math.round(growth.radiusStep / map.cellSize);
+
   const w = map.width;
   const h = map.height;
 
   const resGrid = map.getLayer('reservationGrid');
   const zoneGrid = map.getLayer('zoneGrid');
 
-  // Load spatial layers
+  // Load base spatial layers from map (Grid2D or array-like accessors)
   const layers = {};
   for (const name of ['centrality', 'waterfrontness', 'edgeness', 'roadFrontage', 'downwindness', 'roadGrid', 'landValue']) {
     if (map.hasLayer(name)) layers[name] = map.getLayer(name);
   }
 
-  // Step 1: Compute per-tick spatial layers
+  // Phase 1 INFLUENCE: compute blurred proximity gradients from the reservation grid
+  const influenceRadii = growth.influenceRadii || {};
+  const nuclei = map.nuclei || [];
+  const influenceLayers = computeInfluenceLayers(resGrid, w, h, influenceRadii, nuclei);
 
-  // Build binary mask of existing development (not NONE, not AGRICULTURE)
-  const devMask = new Float32Array(w * h);
-  for (let gz = 0; gz < h; gz++) {
-    for (let gx = 0; gx < w; gx++) {
-      const v = resGrid.get(gx, gz);
-      devMask[gz * w + gx] = (v !== RESERVATION.NONE && v !== RESERVATION.AGRICULTURE) ? 1.0 : 0.0;
-    }
-  }
-  // On first tick, also seed from nuclei
-  if (state.tick === 1) {
-    for (const n of map.nuclei) {
-      devMask[n.gz * w + n.gx] = 1.0;
-    }
-  }
-  // Box blur to create smooth proximity gradient
-  const devProximity = boxBlur(devMask, w, h, radiusStepCells);
-  layers.developmentProximity = { get: (x, z) => devProximity[z * w + x] };
-
-  // Build industrial distance layer (inverse of industrial proximity)
-  const indMask = new Float32Array(w * h);
-  for (let gz = 0; gz < h; gz++) {
-    for (let gx = 0; gx < w; gx++) {
-      indMask[gz * w + gx] = resGrid.get(gx, gz) === RESERVATION.INDUSTRIAL ? 1.0 : 0.0;
-    }
-  }
-  const indProximity = boxBlur(indMask, w, h, 40); // ~200m at 5m cells
-  // Invert: high value = far from industrial
-  let maxInd = 0;
-  for (let i = 0; i < w * h; i++) if (indProximity[i] > maxInd) maxInd = indProximity[i];
-  maxInd = maxInd || 1;
-  const indDistance = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) {
-    indDistance[i] = 1.0 - indProximity[i] / maxInd;
-  }
-  layers.industrialDistance = { get: (x, z) => indDistance[z * w + x] };
-
-  // Update nucleus radii to reflect growth (increment by radiusStep each tick)
-  for (const [i] of state.nucleusRadii) {
-    state.nucleusRadii.set(i, state.tick * radiusStepCells);
+  // Merge influence layers (Float32Array values) into the combined layers object.
+  // composeAllValueLayers accepts both Grid2D (.get method) and Float32Array (index access).
+  for (const [name, arr] of Object.entries(influenceLayers)) {
+    layers[name] = arr;
   }
 
-  // Step 2: Agriculture retreat — cells with high devProximity that were agriculture become NONE
+  // Pull out the development proximity array for use as a filter in allocate
+  const devProximity = influenceLayers.developmentProximity;
   const DEV_PROXIMITY_THRESHOLD = 0.01;
-  for (let gz = 0; gz < h; gz++) {
-    for (let gx = 0; gx < w; gx++) {
-      if (resGrid.get(gx, gz) === RESERVATION.AGRICULTURE && devProximity[gz * w + gx] >= DEV_PROXIMITY_THRESHOLD) {
-        resGrid.set(gx, gz, RESERVATION.NONE);
-      }
+
+  // Phase 2 VALUE: compose per-agent value bitmaps
+  const valueComposition = growth.valueComposition || {};
+  const valueLayers = composeAllValueLayers(valueComposition, layers, w, h);
+
+  // Store on map for debugging
+  map._valueLayers = valueLayers;
+  map._influenceLayers = influenceLayers;
+
+  // Agriculture retreat: cells near development that were agriculture → NONE
+  for (let i = 0; i < w * h; i++) {
+    if (resGrid.data[i] === RESERVATION.AGRICULTURE && devProximity[i] >= DEV_PROXIMITY_THRESHOLD) {
+      resGrid.data[i] = RESERVATION.NONE;
     }
   }
 
-  // Collect eligible cells: in a zone, unreserved, close enough to existing development
-  const eligible = [];
-  for (let gz = 0; gz < h; gz++) {
-    for (let gx = 0; gx < w; gx++) {
-      if (zoneGrid.get(gx, gz) === 0) continue;
-      if (resGrid.get(gx, gz) !== RESERVATION.NONE) continue;
-      if (devProximity[gz * w + gx] < DEV_PROXIMITY_THRESHOLD) continue;
-      eligible.push({ gx, gz });
-    }
-  }
+  // Phase 3 ALLOCATE: for each agent in priority order, claim cells from its value bitmap
+  const agentPriority = growth.agentPriority || Object.keys(growth.agents || {});
+  let anyAllocated = false;
 
-  if (eligible.length === 0) return true; // all claimed
+  for (const agentType of agentPriority) {
+    if (agentType === 'agriculture') continue; // handled after other agents
 
-  // Step 3: Run agents in priority order
-  for (const agentType of growth.agentPriority) {
-    if (agentType === 'agriculture') continue; // handled separately in step 4
-
-    const agentConfig = growth.agents[agentType];
+    const agentConfig = (growth.agents || {})[agentType];
     if (!agentConfig) continue;
 
     const resType = AGENT_TYPE_TO_RESERVATION[agentType];
@@ -199,58 +125,68 @@ export function runGrowthTick(map, archetype, state) {
     const cap = Math.round(agentConfig.share * state.totalZoneCells);
     const claimed = state.claimedCounts.get(agentType) || 0;
     if (claimed >= cap) continue;
-    const remainingBudget = cap - claimed;
 
-    // Re-filter eligible (cells may have been claimed by earlier agents this tick)
-    const agentEligible = eligible.filter(c => resGrid.get(c.gx, c.gz) === RESERVATION.NONE);
-    if (agentEligible.length === 0) continue;
+    const remainingTotal = cap - claimed;
+    const budget = Math.min(agentConfig.budgetPerTick || remainingTotal, remainingTotal);
+    if (budget <= 0) continue;
 
-    // Find new seeds
-    const seeds = findSeeds(
-      agentEligible, agentConfig.seedsPerTick,
-      agentConfig.minSpacing || 0, agentConfig.affinity, layers, w, h
-    );
+    // Get this agent's value layer (fall back to empty if not in valueComposition)
+    const valueLayer = valueLayers[agentType] || new Float32Array(w * h);
 
-    // Grow existing seeds + new seeds
-    const allSeeds = [...(state.activeSeeds.get(agentType) || []), ...seeds];
-    let totalClaimed = 0;
-    const survivingSeeds = [];
+    const newCells = allocateFromValueBitmap({
+      valueLayer,
+      resGrid,
+      zoneGrid,
+      devProximity,
+      resType,
+      budget,
+      minFootprint: agentConfig.minFootprint || 1,
+      w,
+      h,
+    });
 
-    for (const seed of allSeeds) {
-      if (totalClaimed >= remainingBudget) break;
-      // Check seed is still valid (not claimed by another agent)
-      if (resGrid.get(seed.gx, seed.gz) !== RESERVATION.NONE &&
-          resGrid.get(seed.gx, seed.gz) !== resType) continue;
-
-      const budget = Math.min(agentConfig.footprint[1], remainingBudget - totalClaimed);
-      const newCells = spreadFromSeed(
-        seed, budget, resGrid, zoneGrid, resType,
-        agentConfig.spreadBehaviour, agentConfig.affinity, layers, w, h
-      );
-      totalClaimed += newCells.length;
-
-      if (newCells.length > 0) {
-        survivingSeeds.push(seed); // keep for next tick
-      }
+    if (newCells.length > 0) {
+      anyAllocated = true;
+      state.claimedCounts.set(agentType, claimed + newCells.length);
     }
-
-    state.activeSeeds.set(agentType, survivingSeeds);
-    state.claimedCounts.set(agentType, claimed + totalClaimed);
   }
 
-  // Step 4: Agriculture fills — unclaimed cells beyond the development frontier
-  const agriConfig = growth.agents.agriculture;
+  // Agriculture fill: unclaimed cells just beyond the development frontier
+  const agriConfig = (growth.agents || {}).agriculture;
   if (agriConfig) {
-    for (let gz = 0; gz < h; gz++) {
-      for (let gx = 0; gx < w; gx++) {
-        if (zoneGrid.get(gx, gz) === 0) continue;
-        if (resGrid.get(gx, gz) !== RESERVATION.NONE) continue;
-        // Agriculture fills cells that are beyond the development frontier
-        // but within a band (nonzero blur from being near the frontier edge)
-        const dp = devProximity[gz * w + gx];
-        if (dp < DEV_PROXIMITY_THRESHOLD && dp > 0.001) {
-          resGrid.set(gx, gz, RESERVATION.AGRICULTURE);
+    const agriValueLayer = valueLayers.agriculture || new Float32Array(w * h);
+    const agriCap = Math.round(agriConfig.share * state.totalZoneCells);
+    const agriClaimed = state.claimedCounts.get('agriculture') || 0;
+    const agriBudget = Math.min(agriConfig.budgetPerTick || agriCap, agriCap - agriClaimed);
+
+    if (agriBudget > 0) {
+      // Agriculture fills cells that are outside the active frontier
+      // (devProximity is small but nonzero — just beyond the settled fringe)
+      // Build a custom value layer for agriculture: eligible only beyond frontier
+      const agriMask = new Float32Array(w * h);
+      for (let i = 0; i < w * h; i++) {
+        const dp = devProximity[i];
+        if (resGrid.data[i] === RESERVATION.NONE && dp < DEV_PROXIMITY_THRESHOLD && dp > 0.001) {
+          agriMask[i] = agriValueLayer[i] > 0 ? agriValueLayer[i] : 0.5;
         }
+      }
+
+      // Direct fill without devProximity filter (we've already filtered via agriMask)
+      const newAgriCells = allocateFromValueBitmap({
+        valueLayer: agriMask,
+        resGrid,
+        zoneGrid,
+        devProximity: null, // already encoded in agriMask
+        resType: RESERVATION.AGRICULTURE,
+        budget: agriBudget,
+        minFootprint: agriConfig.minFootprint || 1,
+        w,
+        h,
+      });
+
+      if (newAgriCells.length > 0) {
+        anyAllocated = true;
+        state.claimedCounts.set('agriculture', agriClaimed + newAgriCells.length);
       }
     }
   }
@@ -258,5 +194,6 @@ export function runGrowthTick(map, archetype, state) {
   // Persist state on map for clone support
   map.growthState = state;
 
-  return false;
+  // Terminate if nothing was allocated (all caps reached or no eligible cells)
+  return !anyAllocated;
 }
