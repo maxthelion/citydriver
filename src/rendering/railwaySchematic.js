@@ -5,11 +5,12 @@
  */
 
 import { chaikinSmooth } from '../core/math.js';
+import { simplifyPath } from '../core/pathfinding.js';
 
 const HIERARCHY_STYLES = {
-  trunk:  { color: '#cc2222', width: 4 },
-  main:   { color: '#cc6622', width: 3 },
-  branch: { color: '#888888', width: 2 },
+  trunk:  { color: '#cc2222', width: 2.5 },
+  main:   { color: '#cc6622', width: 2 },
+  branch: { color: '#888888', width: 1.5 },
 };
 
 /**
@@ -67,13 +68,15 @@ export function renderSchematicLines(ctx, railways, scale) {
 
     const style = HIERARCHY_STYLES[rail.hierarchy] || HIERARCHY_STYLES.branch;
 
-    // Smooth the path (path is in grid coords {gx, gz})
-    let points = pathData.map(p => ({
+    // Aggressively simplify grid path to a few control points (RDP with high epsilon),
+    // then Chaikin-smooth into sweeping curves. Without simplification, the hundreds
+    // of per-cell A* points just produce wobbly lines no matter how much we smooth.
+    const simplified = simplifyPath(pathData, 8);
+    let points = simplified.map(p => ({
       x: p.gx * scale,
       z: p.gz * scale,
     }));
-    points = chaikinSmooth(points);
-    points = chaikinSmooth(points);
+    for (let i = 0; i < 4; i++) points = chaikinSmooth(points);
 
     // Draw line
     ctx.strokeStyle = style.color;
@@ -91,31 +94,42 @@ export function renderSchematicLines(ctx, railways, scale) {
 
 /**
  * Render settlement dots at station locations.
+ * Only shows settlements that are connection endpoints in the railway data,
+ * not every settlement that happens to be near a rail cell.
  */
-export function renderSchematicStations(ctx, settlements, railGrid, scale) {
+export function renderSchematicStations(ctx, settlements, railGrid, scale, railways) {
+  // Build set of grid positions that are railway endpoints
+  const endpointKeys = new Set();
+  if (railways) {
+    for (const rail of railways) {
+      if (rail.from) endpointKeys.add(`${rail.from.gx},${rail.from.gz}`);
+      if (rail.to) endpointKeys.add(`${rail.to.gx},${rail.to.gz}`);
+    }
+  }
+
   for (const s of settlements) {
     if (s.tier > 3) continue;
-    const onRail = railGrid && railGrid.get(s.gx, s.gz) > 0;
 
-    let nearRail = onRail;
-    if (!nearRail && railGrid) {
-      for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]]) {
-        const nx = s.gx + dx, nz = s.gz + dz;
-        if (nx >= 0 && nx < railGrid.width && nz >= 0 && nz < railGrid.height) {
-          if (railGrid.get(nx, nz) > 0) { nearRail = true; break; }
+    // Check if this settlement is near any railway endpoint
+    let isStation = endpointKeys.has(`${s.gx},${s.gz}`);
+    if (!isStation) {
+      // Check within 3 cells of an endpoint (settlements and rail endpoints may not coincide exactly)
+      for (let dz = -3; dz <= 3 && !isStation; dz++) {
+        for (let dx = -3; dx <= 3 && !isStation; dx++) {
+          if (endpointKeys.has(`${s.gx + dx},${s.gz + dz}`)) isStation = true;
         }
       }
     }
 
-    if (!nearRail) continue;
+    if (!isStation) continue;
 
     const x = s.gx * scale;
     const z = s.gz * scale;
-    const r = s.tier === 1 ? 5 : s.tier === 2 ? 4 : 3;
+    const r = s.tier === 1 ? 4 : s.tier === 2 ? 3 : 2.5;
 
     ctx.fillStyle = '#ffffff';
     ctx.strokeStyle = '#333333';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.arc(x, z, r, 0, Math.PI * 2);
     ctx.fill();
