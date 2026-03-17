@@ -693,6 +693,18 @@ export const LAYERS = [
   { name: 'Edgeness', render: renderNamedHeatLayer('edgeness') },
   { name: 'Road Frontage', render: renderNamedHeatLayer('roadFrontage') },
   { name: 'Downwindness', render: renderNamedHeatLayer('downwindness') },
+  // Influence layers (blurred proximity gradients from reservationGrid)
+  { name: 'Influence: Dev Proximity', render: renderFloat32HeatLayer('_influenceLayers', 'developmentProximity') },
+  { name: 'Influence: Industrial Distance', render: renderFloat32HeatLayer('_influenceLayers', 'industrialDistance') },
+  // Value layers (composed per-agent bitmaps used for allocation)
+  { name: 'Value: Commercial', render: renderFloat32HeatLayer('_valueLayers', 'commercial') },
+  { name: 'Value: Industrial', render: renderFloat32HeatLayer('_valueLayers', 'industrial') },
+  { name: 'Value: Civic', render: renderFloat32HeatLayer('_valueLayers', 'civic') },
+  { name: 'Value: Open Space', render: renderFloat32HeatLayer('_valueLayers', 'openSpace') },
+  { name: 'Value: Agriculture', render: renderFloat32HeatLayer('_valueLayers', 'agriculture') },
+  { name: 'Value: Residential Fine', render: renderFloat32HeatLayer('_valueLayers', 'residentialFine') },
+  { name: 'Value: Residential Estate', render: renderFloat32HeatLayer('_valueLayers', 'residentialEstate') },
+  { name: 'Value: Residential Quality', render: renderFloat32HeatLayer('_valueLayers', 'residentialQuality') },
 ];
 
 function renderNamedHeatLayer(layerName) {
@@ -703,6 +715,30 @@ function renderNamedHeatLayer(layerName) {
     for (let gz = 0; gz < height; gz++) {
       for (let gx = 0; gx < width; gx++) {
         const v = grid.get(gx, gz);
+        if (v > 0.01) {
+          ctx.fillStyle = heatColor(v);
+          ctx.fillRect(gx, gz, 1, 1);
+        }
+      }
+    }
+  };
+}
+
+/**
+ * Render a Float32Array heat layer stored in a named collection on the map.
+ * @param {string} collection - property name on map ('_valueLayers' or '_influenceLayers')
+ * @param {string} layerName - key within the collection
+ */
+function renderFloat32HeatLayer(collection, layerName) {
+  return function(ctx, map) {
+    const col = map[collection];
+    if (!col) return;
+    const arr = col[layerName];
+    if (!arr) return;
+    const { width, height } = map;
+    for (let gz = 0; gz < height; gz++) {
+      for (let gx = 0; gx < width; gx++) {
+        const v = arr[gz * width + gx];
         if (v > 0.01) {
           ctx.fillStyle = heatColor(v);
           ctx.fillRect(gx, gz, 1, 1);
