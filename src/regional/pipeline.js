@@ -21,6 +21,7 @@ import { generateRoads } from './generateRoads.js';
 import { computeFloodZone } from '../core/terrainSuitability.js';
 import { generateMarketTowns } from './generateMarketTowns.js';
 import { growSettlements } from './growSettlements.js';
+import { carveRiverProfiles } from './carveRiverProfiles.js';
 
 /**
  * @param {object} params
@@ -85,6 +86,9 @@ export function generateRegion(params, rng) {
 
   layers.setGrid('elevation', terrain.elevation);
   layers.setGrid('slope', terrain.slope);
+
+  // A2b. River profile carving (authoritative elevation profiles along corridors)
+  carveRiverProfiles(corridors, terrain.elevation, terrain.slope, geology.erosionResistance, seaLevel);
 
   // A4. Coastline (before hydrology so erosion shapes the coast first)
   const coastResult = generateCoastline(
