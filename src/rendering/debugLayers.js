@@ -728,6 +728,7 @@ function renderReservations(ctx, map) {
     6: 'rgba(200, 160, 80, 0.6)',  // residential fine — yellow-tan
     7: 'rgba(180, 80, 80, 0.6)',   // residential estate — muted red
     8: 'rgba(160, 100, 200, 0.6)', // residential quality — purple
+    9: 'rgba(0, 180, 180, 0.6)',   // port — teal
   };
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {

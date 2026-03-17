@@ -13,6 +13,7 @@ export const RESERVATION = {
   RESIDENTIAL_FINE: 6,
   RESIDENTIAL_ESTATE: 7,
   RESIDENTIAL_QUALITY: 8,
+  PORT: 9,
 };
 
 export const AGENT_TYPE_TO_RESERVATION = {
@@ -24,6 +25,7 @@ export const AGENT_TYPE_TO_RESERVATION = {
   residentialFine: RESERVATION.RESIDENTIAL_FINE,
   residentialEstate: RESERVATION.RESIDENTIAL_ESTATE,
   residentialQuality: RESERVATION.RESIDENTIAL_QUALITY,
+  port: RESERVATION.PORT,
 };
 
 const SPATIAL_LAYER_NAMES = ['centrality', 'waterfrontness', 'edgeness', 'roadFrontage', 'downwindness', 'developmentProximity', 'industrialDistance'];
