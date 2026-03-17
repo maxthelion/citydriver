@@ -60,10 +60,11 @@ const colors = {
   2: [128, 128, 128],       // industrial — gray
   3: [0, 100, 255],         // civic — blue
   4: [0, 200, 0],           // open space — green
-  5: [180, 140, 60],        // agriculture — brown
-  6: [200, 160, 80],        // residential fine — yellow-tan
-  7: [180, 80, 80],         // residential estate — muted red
-  8: [160, 100, 200],       // residential quality — purple
+  5: [120, 90, 30],         // agriculture — dark brown
+  6: [230, 200, 120],       // residential fine — warm yellow
+  7: [200, 60, 60],         // residential estate — red
+  8: [180, 120, 220],       // residential quality — light purple
+  9: [0, 180, 180],         // port — teal
 };
 
 // Write PPM image

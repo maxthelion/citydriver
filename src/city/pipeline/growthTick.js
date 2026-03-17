@@ -144,6 +144,9 @@ export function runGrowthTick(map, archetype, state) {
       resType,
       budget,
       minFootprint: agentConfig.minFootprint || 1,
+      seedCount: agentConfig.seedCount || 3,
+      minSpacing: agentConfig.minSpacing || 20,
+      noise: agentConfig.noise != null ? agentConfig.noise : 0.15,
       w,
       h,
     });
