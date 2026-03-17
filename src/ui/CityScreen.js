@@ -12,7 +12,7 @@ import { scoreSettlement } from '../city/archetypeScoring.js';
 import { prepareCityScene } from '../rendering/prepareCityScene.js';
 import { getRoadMaterial, getRiverMaterial } from '../rendering/materials.js';
 import { FlyCamera } from './FlyCamera.js';
-import { renderMap, drawRivers, drawRoads, drawSettlements } from '../rendering/mapRenderer.js';
+import { renderMap, drawRivers, drawRoads, drawRailways, drawSettlements } from '../rendering/mapRenderer.js';
 import { CITY_RADIUS } from '../city/constants.js';
 import { placeBuildings, placeTerracedRows } from '../city/placeBuildings.js';
 import { chaikinSmooth } from '../core/math.js';
@@ -280,7 +280,18 @@ export class CityScreen {
     const ctx = offscreen.getContext('2d');
     drawRivers(layers, ctx);
     drawRoads(layers, ctx);
+    drawRailways(layers, ctx);
     drawSettlements(layers, ctx);
+
+    // Draw green dot at station location
+    if (this._map.station) {
+      const stGx = Math.round(this._map.station.x / params.cellSize);
+      const stGz = Math.round(this._map.station.z / params.cellSize);
+      ctx.fillStyle = '#00ff00';
+      ctx.beginPath();
+      ctx.arc(stGx, stGz, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     // Draw city extent rectangle
     const cityRadius = CITY_RADIUS;
@@ -605,34 +616,26 @@ export class CityScreen {
   }
 
   /**
-   * Railway ribbon meshes from railway features on the map.
-   * Narrower and darker than roads (halfWidth=2m, colour 0x333333).
+   * Railway ribbon meshes using pre-processed scene data (terrain-following).
+   * Same approach as _buildRoads but single batch, bright green for visibility.
    */
   _buildRailways() {
     const group = new THREE.Group();
-    const railFeatures = (this._map.features || []).filter(f => f.type === 'railway');
-    if (railFeatures.length === 0) return group;
+    const railways = this._sceneData.railways;
+    if (!railways || railways.length === 0) return group;
 
     const vertices = [];
     const indices = [];
-    const halfWidth = 2;
 
-    for (const feat of railFeatures) {
-      const pts = feat.polyline;
+    for (const rail of railways) {
+      const pts = rail.localPts;
+      const halfW = rail.halfWidth;
       if (!pts || pts.length < 2) continue;
 
       const baseVertex = vertices.length / 3;
 
       for (let i = 0; i < pts.length; i++) {
         const p = pts[i];
-        const lx = p.x - this._map.originX;
-        const lz = p.z - this._map.originZ;
-
-        const gx = Math.round(lx / this._map.cellSize);
-        const gz = Math.round(lz / this._map.cellSize);
-        const y = (gx >= 0 && gx < this._map.width && gz >= 0 && gz < this._map.height)
-          ? this._map.elevation.get(gx, gz) + 0.3
-          : 0;
 
         let perpX, perpZ;
         if (i === 0) {
@@ -655,8 +658,8 @@ export class CityScreen {
           perpX = ax / alen; perpZ = az / alen;
         }
 
-        vertices.push(lx + perpX * halfWidth, y, lz + perpZ * halfWidth);
-        vertices.push(lx - perpX * halfWidth, y, lz - perpZ * halfWidth);
+        vertices.push(p.x + perpX * halfW, p.y, p.z + perpZ * halfW);
+        vertices.push(p.x - perpX * halfW, p.y, p.z - perpZ * halfW);
 
         if (i > 0) {
           const b = baseVertex + (i - 1) * 2;
@@ -673,9 +676,10 @@ export class CityScreen {
     geom.computeVertexNormals();
 
     const material = new THREE.MeshStandardMaterial({
-      color: 0x333333,
+      color: 0x00ff00,
       roughness: 0.8,
       metalness: 0.1,
+      side: THREE.DoubleSide,
     });
 
     group.add(new THREE.Mesh(geom, material));

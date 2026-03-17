@@ -163,24 +163,43 @@ export function setupCity(layers, settlement, rng) {
       });
     }
 
-    // Place station at the settlement position, aligned with the nearest track
+    // Place station near the city centre, on dry land, aligned with nearest track.
+    // The settlement position itself may be on water (river cities), so search
+    // outward from centre for the closest point that's on a railway polyline
+    // and not underwater.
     if (cityRailways.length > 0) {
-      const cx = centerX;
-      const cz = centerZ;
-      // Find the nearest point on any railway polyline to get track direction
-      let bestDist = Infinity, bestAngle = 0;
+      let bestDist = Infinity;
+      let bestX = centerX, bestZ = centerZ, bestAngle = 0;
+
       for (const rail of cityRailways) {
         for (let i = 0; i < rail.polyline.length - 1; i++) {
           const a = rail.polyline[i], b = rail.polyline[i + 1];
-          const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
-          const d = (mx - cx) ** 2 + (mz - cz) ** 2;
-          if (d < bestDist) {
-            bestDist = d;
-            bestAngle = Math.atan2(b.z - a.z, b.x - a.x);
+          // Sample points along this segment
+          const dx = b.x - a.x, dz = b.z - a.z;
+          const segLen = Math.sqrt(dx * dx + dz * dz);
+          const steps = Math.max(1, Math.ceil(segLen / cityCellSize));
+          for (let s = 0; s <= steps; s++) {
+            const t = s / steps;
+            const px = a.x + dx * t, pz = a.z + dz * t;
+            // Check if this point is on dry land
+            const gx = Math.round((px - originX) / cityCellSize);
+            const gz = Math.round((pz - originZ) / cityCellSize);
+            if (gx < 0 || gx >= cityGridW || gz < 0 || gz >= cityGridH) continue;
+            if (map.waterMask.get(gx, gz) > 0) continue;
+            const d = (px - centerX) ** 2 + (pz - centerZ) ** 2;
+            if (d < bestDist) {
+              bestDist = d;
+              bestX = px;
+              bestZ = pz;
+              bestAngle = Math.atan2(dz, dx);
+            }
           }
         }
       }
-      map.station = { x: cx, z: cz, angle: bestAngle };
+
+      if (bestDist < Infinity) {
+        map.station = { x: bestX, z: bestZ, angle: bestAngle };
+      }
     }
   }
 

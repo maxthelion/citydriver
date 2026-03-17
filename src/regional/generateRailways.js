@@ -70,6 +70,13 @@ export function generateRailways(params, settlements, offMapCities, elevation, s
 
   const mainCity = settlements.reduce((a, b) => a.tier <= b.tier ? a : b);
 
+  // If main city is on water, nudge the railway origin to nearest dry land
+  let railOrigin = { gx: mainCity.gx, gz: mainCity.gz };
+  if (waterMask && waterMask.get(railOrigin.gx, railOrigin.gz) > 0) {
+    const dry = _findNearestDryLand(waterMask, railOrigin.gx, railOrigin.gz, width, height);
+    if (dry) railOrigin = dry;
+  }
+
   const railways = [];
   const bridges = [];
 
@@ -78,7 +85,7 @@ export function generateRailways(params, settlements, offMapCities, elevation, s
 
   for (const omc of sortedOffMap) {
     const hierarchy = omc.importance === 1 ? 'trunk' : 'main';
-    _addLine(railways, bridges, railGrid, mainCity, omc, hierarchy,
+    _addLine(railways, bridges, railGrid, railOrigin, omc, hierarchy,
       width, height, cellSize, railCost, waterMask, settlements);
   }
 
@@ -239,6 +246,27 @@ function _findNearestTrack(railGrid, gx, gz, width, height) {
       return { gx: cur.gx, gz: cur.gz };
     }
     if (cur.d >= MAX_DIST) continue;
+    for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nx = cur.gx + dx, nz = cur.gz + dz;
+      if (nx < 0 || nx >= width || nz < 0 || nz >= height) continue;
+      const key = `${nx},${nz}`;
+      if (visited.has(key)) continue;
+      visited.add(key);
+      queue.push({ gx: nx, gz: nz, d: cur.d + 1 });
+    }
+  }
+  return null;
+}
+
+function _findNearestDryLand(waterMask, gx, gz, width, height) {
+  const queue = [{ gx, gz, d: 0 }];
+  const visited = new Set();
+  visited.add(`${gx},${gz}`);
+  let head = 0;
+  while (head < queue.length) {
+    const cur = queue[head++];
+    if (waterMask.get(cur.gx, cur.gz) === 0) return { gx: cur.gx, gz: cur.gz };
+    if (cur.d >= 20) continue;
     for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
       const nx = cur.gx + dx, nz = cur.gz + dz;
       if (nx < 0 || nx >= width || nz < 0 || nz >= height) continue;

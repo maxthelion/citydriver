@@ -27,6 +27,9 @@ export function prepareCityScene(map) {
   // 2. Convert river polylines to local coords + enforce downhill flow
   const rivers = prepareRivers(map, ox, oz, cs);
 
+  // 2b. Convert railway polylines to local coords + terrain-following heights
+  const railways = prepareRailways(map, ox, oz, cs);
+
   // 3. Build surface height grids from roads and rivers
   const surfaceGrid = new Float32Array(w * h).fill(-Infinity);
   stampRoadHeights(roads, surfaceGrid, w, h, cs);
@@ -35,7 +38,7 @@ export function prepareCityScene(map) {
   // 4. Compute modified terrain elevation (cut under roads/rivers, blend edges)
   const cutElevation = cutTerrain(map.elevation, surfaceGrid, w, h);
 
-  return { roads, rivers, cutElevation, surfaceGrid, width: w, height: h, cellSize: cs };
+  return { roads, rivers, railways, cutElevation, surfaceGrid, width: w, height: h, cellSize: cs };
 }
 
 /**
@@ -72,6 +75,35 @@ function prepareRoads(map, ox, oz, cs) {
       width: road.width || 6,
       hierarchy: road.hierarchy || 'local',
     };
+  }).filter(Boolean);
+}
+
+/**
+ * Convert railway polylines from world to local coords.
+ * Same approach as roads: densify for terrain following, sample elevation.
+ */
+function prepareRailways(map, ox, oz, cs) {
+  const railFeatures = (map.features || []).filter(f => f.type === 'railway');
+  return railFeatures.map(rail => {
+    const pts = rail.polyline;
+    if (!pts || pts.length < 2) return null;
+
+    let localPts = pts.map(p => {
+      const x = p.x - ox;
+      const z = p.z - oz;
+      const centerY = map.elevation.sample(x / cs, z / cs) + ROAD_Y_OFFSET;
+      return { x, z, y: centerY };
+    });
+
+    localPts = _densifyAndResample(localPts, cs, map.elevation, ox, oz);
+
+    if (map.seaLevel != null) {
+      const seaY = map.seaLevel + ROAD_Y_OFFSET;
+      localPts = _trimBelowSea(localPts, seaY);
+      if (localPts.length < 2) return null;
+    }
+
+    return { localPts, halfWidth: 4, hierarchy: rail.hierarchy || 'branch' };
   }).filter(Boolean);
 }
 
