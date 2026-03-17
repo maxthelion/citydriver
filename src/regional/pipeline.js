@@ -233,6 +233,7 @@ export function generateRegion(params, rng) {
   );
   layers.setData('railways', railResult.railways);
   layers.setGrid('railGrid', railResult.railGrid);
+  layers.setData('railBridges', railResult.bridges);
 
   layers.setData('settlements', allSettlements);
   layers.setData('roads', roadsB.roads);

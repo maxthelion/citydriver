@@ -125,9 +125,9 @@ export function drawRailways(layers, ctx) {
   if (!railways) return;
 
   const hierarchyStyles = {
-    trunk:  { color: '#000000', width: 2 },
-    main:   { color: '#000000', width: 1.5 },
-    branch: { color: '#333333', width: 1 },
+    trunk:  { color: '#000000', width: 1 },
+    main:   { color: '#000000', width: 1 },
+    branch: { color: '#333333', width: 0.5 },
   };
 
   for (const rail of railways) {

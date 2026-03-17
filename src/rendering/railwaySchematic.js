@@ -7,9 +7,9 @@
 import { chaikinSmooth } from '../core/math.js';
 
 const HIERARCHY_STYLES = {
-  trunk:  { color: '#cc2222', width: 2.5 },
-  main:   { color: '#cc6622', width: 2 },
-  branch: { color: '#888888', width: 1.5 },
+  trunk:  { color: '#cc2222', width: 1.5 },
+  main:   { color: '#cc6622', width: 1 },
+  branch: { color: '#888888', width: 0.5 },
 };
 
 /**
@@ -73,7 +73,7 @@ export function renderSchematicLines(ctx, railways, scale) {
       x: p.gx * scale,
       z: p.gz * scale,
     }));
-    for (let i = 0; i < 4; i++) points = chaikinSmooth(points);
+    points = chaikinSmooth(points);
 
     // Draw line
     ctx.strokeStyle = style.color;
@@ -90,47 +90,50 @@ export function renderSchematicLines(ctx, railways, scale) {
 }
 
 /**
- * Render settlement dots at station locations.
- * Only shows settlements that are connection endpoints in the railway data,
- * not every settlement that happens to be near a rail cell.
+ * Render all settlements. Those near track get a filled station dot;
+ * those not connected get a small hollow circle.
  */
 export function renderSchematicStations(ctx, settlements, railGrid, scale, railways) {
-  // Build set of grid positions that are railway endpoints
-  const endpointKeys = new Set();
-  if (railways) {
-    for (const rail of railways) {
-      if (rail.from) endpointKeys.add(`${rail.from.gx},${rail.from.gz}`);
-      if (rail.to) endpointKeys.add(`${rail.to.gx},${rail.to.gz}`);
-    }
-  }
+  const NEAR_TRACK_RADIUS = 5; // cells — how close to count as "connected"
 
   for (const s of settlements) {
     if (s.tier > 3) continue;
 
-    // Check if this settlement is near any railway endpoint
-    let isStation = endpointKeys.has(`${s.gx},${s.gz}`);
-    if (!isStation) {
-      // Check within 3 cells of an endpoint (settlements and rail endpoints may not coincide exactly)
-      for (let dz = -3; dz <= 3 && !isStation; dz++) {
-        for (let dx = -3; dx <= 3 && !isStation; dx++) {
-          if (endpointKeys.has(`${s.gx + dx},${s.gz + dz}`)) isStation = true;
+    const x = s.gx * scale;
+    const z = s.gz * scale;
+
+    // Check if near track
+    let connected = false;
+    if (railGrid) {
+      for (let dz = -NEAR_TRACK_RADIUS; dz <= NEAR_TRACK_RADIUS && !connected; dz++) {
+        for (let dx = -NEAR_TRACK_RADIUS; dx <= NEAR_TRACK_RADIUS && !connected; dx++) {
+          const nx = s.gx + dx, nz = s.gz + dz;
+          if (nx >= 0 && nx < railGrid.width && nz >= 0 && nz < railGrid.height) {
+            if (railGrid.get(nx, nz) > 0) connected = true;
+          }
         }
       }
     }
 
-    if (!isStation) continue;
+    const r = s.tier === 1 ? 3 : s.tier === 2 ? 2 : 1.5;
 
-    const x = s.gx * scale;
-    const z = s.gz * scale;
-    const r = s.tier === 1 ? 4 : s.tier === 2 ? 3 : 2.5;
-
-    ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = '#333333';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(x, z, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    if (connected) {
+      // Filled white dot with dark border — station
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#333333';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(x, z, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      // Small hollow circle — unconnected settlement
+      ctx.strokeStyle = '#999999';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.arc(x, z, r * 0.7, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 }
 
@@ -138,33 +141,13 @@ export function renderSchematicStations(ctx, settlements, railGrid, scale, railw
  * Render off-map city labels at region edges.
  */
 export function renderSchematicOffMapCities(ctx, offMapCities, scale, canvasWidth, canvasHeight) {
-  ctx.font = '11px monospace';
-  ctx.textBaseline = 'middle';
-
   for (const c of offMapCities) {
     const x = c.gx * scale;
     const z = c.gz * scale;
 
     ctx.fillStyle = c.role === 'capital' ? '#cc2222' : '#666666';
     ctx.beginPath();
-    ctx.arc(x, z, 4, 0, Math.PI * 2);
+    ctx.arc(x, z, 3, 0, Math.PI * 2);
     ctx.fill();
-
-    ctx.fillStyle = '#444444';
-    const label = c.role === 'capital' ? `${c.name} (Capital)` : c.name;
-
-    if (c.edge === 'north') {
-      ctx.textAlign = 'center';
-      ctx.fillText(label, x, z + 10);
-    } else if (c.edge === 'south') {
-      ctx.textAlign = 'center';
-      ctx.fillText(label, x, z - 10);
-    } else if (c.edge === 'west') {
-      ctx.textAlign = 'left';
-      ctx.fillText(label, x + 8, z);
-    } else {
-      ctx.textAlign = 'right';
-      ctx.fillText(label, x - 8, z);
-    }
   }
 }

@@ -238,7 +238,7 @@ export function buildRegionRailways(layers) {
     });
 
     const geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const material = new THREE.LineBasicMaterial({ color, linewidth: 3 });
+    const material = new THREE.LineBasicMaterial({ color, linewidth: 1 });
     group.add(new THREE.Line(geometry, material));
   }
 
