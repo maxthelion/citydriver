@@ -118,6 +118,37 @@ export function drawRoads(layers, ctx) {
 }
 
 /**
+ * Draw railway lines on the map.
+ */
+export function drawRailways(layers, ctx) {
+  const railways = layers.getData('railways');
+  if (!railways) return;
+
+  const hierarchyStyles = {
+    trunk:  { color: '#222222', width: 2 },
+    main:   { color: '#444444', width: 1.5 },
+    branch: { color: '#777777', width: 1 },
+  };
+
+  for (const rail of railways) {
+    if (!rail.path || rail.path.length < 2) continue;
+    const style = hierarchyStyles[rail.hierarchy] || hierarchyStyles.branch;
+
+    ctx.strokeStyle = style.color;
+    ctx.lineWidth = style.width;
+    ctx.setLineDash([3, 2]);
+    ctx.beginPath();
+    for (let i = 0; i < rail.path.length; i++) {
+      const p = rail.path[i];
+      if (i === 0) ctx.moveTo(p.gx, p.gz);
+      else ctx.lineTo(p.gx, p.gz);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+/**
  * Draw river lines on the map.
  */
 export function drawRivers(layers, ctx) {
