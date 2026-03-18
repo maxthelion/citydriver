@@ -105,8 +105,20 @@ export function createZoneBoundaryRoads(map) {
       const cells = bresenham(segment[i].gx, segment[i].gz, segment[i + 1].gx, segment[i + 1].gz);
       for (const c of cells) {
         if (c.gx >= 0 && c.gx < w && c.gz >= 0 && c.gz < h) {
+          // Skip map edges — not real road corridors
+          const edgeMargin = 3;
+          if (c.gx < edgeMargin || c.gx >= w - edgeMargin || c.gz < edgeMargin || c.gz >= h - edgeMargin) continue;
           if (waterMask && waterMask.get(c.gx, c.gz) > 0) continue;
-          if (roadGrid.get(c.gx, c.gz) === 0) {
+          if (roadGrid.get(c.gx, c.gz) > 0) continue; // already a road
+          // Skip cells near existing roads (avoid parallel duplicates)
+          let nearExisting = false;
+          for (const [dx, dz] of [[2,0],[-2,0],[0,2],[0,-2],[1,1],[-1,-1],[1,-1],[-1,1]]) {
+            const nx = c.gx + dx, nz = c.gz + dz;
+            if (nx >= 0 && nx < w && nz >= 0 && nz < h && roadGrid.get(nx, nz) > 0) {
+              nearExisting = true; break;
+            }
+          }
+          if (!nearExisting) {
             roadGrid.set(c.gx, c.gz, 1);
             stampedCells.push(c);
           }
