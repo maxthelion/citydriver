@@ -8,6 +8,8 @@
  * 4. Walk zone boundary segments between confirmed junctions → mark as roads
  */
 
+import { chaikinSmooth } from '../../core/math.js';
+
 const CLUSTER_RADIUS = 3;       // cells — merge vertices within this distance
 const ARTERIAL_SNAP_DIST = 5;   // cells — max distance to snap to a road cell
 const MIN_SEGMENT_LENGTH = 5;   // cells — skip very short boundary segments
@@ -98,9 +100,17 @@ export function createZoneBoundaryRoads(map) {
     }
   }
 
-  // Step 5: Stamp road segments onto roadGrid
+  // Step 5: Smooth boundaries and stamp onto roadGrid
   const stampedCells = [];
-  for (const segment of placedSegments) {
+  for (let segment of placedSegments) {
+    // Chaikin smooth to remove staircase jaggies (2 passes)
+    // Convert gx/gz to x/z for chaikinSmooth, then back
+    let pts = segment.map(p => ({ x: p.gx, z: p.gz }));
+    for (let pass = 0; pass < 2; pass++) {
+      if (pts.length >= 3) pts = chaikinSmooth(pts);
+    }
+    segment = pts.map(p => ({ gx: Math.round(p.x), gz: Math.round(p.z) }));
+
     for (let i = 0; i < segment.length - 1; i++) {
       const cells = bresenham(segment[i].gx, segment[i].gz, segment[i + 1].gx, segment[i + 1].gz);
       for (const c of cells) {
