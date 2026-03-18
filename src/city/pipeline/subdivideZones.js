@@ -73,21 +73,21 @@ export function subdivideLargeZones(map, options = {}) {
     const perpX = dot >= 0 ? perpX1 : -perpX1;
     const perpZ = dot >= 0 ? perpZ1 : -perpZ1;
 
+    // Project to the far side of the map — the walk stops when it hits a road
     // Add some randomness (±20% angle variation)
     const angle = Math.atan2(perpZ, perpX) + (Math.random() - 0.5) * 0.4;
-    const projDist = edgeLen * projFrac;
-    const targetX = midX + Math.cos(angle) * projDist;
-    const targetZ = midZ + Math.sin(angle) * projDist;
+    const mapDiag = Math.sqrt(w * w + h * h) * cs;
+    const targetX = midX + Math.cos(angle) * mapDiag;
+    const targetZ = midZ + Math.sin(angle) * mapDiag;
 
-    // Convert to grid coords
+    // Convert to grid coords, clamp target to map bounds
     const startGx = Math.round((midX - ox) / cs);
     const startGz = Math.round((midZ - oz) / cs);
-    const endGx = Math.round((targetX - ox) / cs);
-    const endGz = Math.round((targetZ - oz) / cs);
+    const endGx = Math.max(0, Math.min(w - 1, Math.round((targetX - ox) / cs)));
+    const endGz = Math.max(0, Math.min(h - 1, Math.round((targetZ - oz) / cs)));
 
-    // Bounds check
+    // Bounds check start only
     if (startGx < 0 || startGx >= w || startGz < 0 || startGz >= h) continue;
-    if (endGx < 0 || endGx >= w || endGz < 0 || endGz >= h) continue;
 
     // Step 4: Pathfind from midpoint toward target, stopping at any road
     // Simple grid walk — follow direction, stop when hitting road or water or out of zone
