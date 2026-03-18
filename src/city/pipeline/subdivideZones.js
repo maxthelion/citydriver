@@ -161,11 +161,13 @@ function walkTowardTarget(sx, sz, tx, tz, roadGrid, waterMask, w, h) {
     if (gx < 0 || gx >= w || gz < 0 || gz >= h) break;
     if (waterMask && waterMask.get(gx, gz) > 0) break;
 
-    // If we're near a road (within 3 cells) and we've walked at least a few cells, stop
-    if (i > 3) {
+    // Stop when near a road — but only after walking far enough to leave
+    // the starting road behind. We need at least ~20 cells of clear ground
+    // before we start looking for the destination road.
+    if (i > 20) {
       let nearRoad = false;
-      for (let dz2 = -3; dz2 <= 3 && !nearRoad; dz2++) {
-        for (let dx2 = -3; dx2 <= 3 && !nearRoad; dx2++) {
+      for (let dz2 = -2; dz2 <= 2 && !nearRoad; dz2++) {
+        for (let dx2 = -2; dx2 <= 2 && !nearRoad; dx2++) {
           const nx = gx + dx2, nz = gz + dz2;
           if (nx >= 0 && nx < w && nz >= 0 && nz < h && roadGrid.get(nx, nz) > 0) {
             nearRoad = true;
