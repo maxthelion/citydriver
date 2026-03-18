@@ -14,6 +14,7 @@
 import { railwayCostFunction } from '../core/railwayCost.js';
 import { findPath, simplifyPath } from '../core/pathfinding.js';
 import { distance2D } from '../core/math.js';
+import { chaikinSmooth } from '../core/math.js';
 
 const CONE_HALF_ANGLE = Math.PI / 3;
 const ENTRY_MERGE_ANGLE = Math.PI / 6;
@@ -174,17 +175,54 @@ export function routeCityRailways(railways, elevation, waterMask, landValue, bou
     // Stamp temp grid so later paths share corridor
     for (const p of result.path) tempGrid.set(p.gx, p.gz, 1);
 
-    // Simplify aggressively — this polyline IS the source of truth
-    const simplified = simplifyPath(result.path, 40);
-    const polyline = simplified.map(p => ({
+    // Simplify to remove grid zigzag, then Chaikin smooth for curves.
+    // Epsilon 10 keeps enough waypoints to respect terrain; Chaikin adds curvature.
+    const simplified = simplifyPath(result.path, 10);
+    let polyline = simplified.map(p => ({
       x: originX + p.gx * cellSize,
       z: originZ + p.gz * cellSize,
     }));
+    for (let i = 0; i < 2; i++) polyline = chaikinSmooth(polyline);
+
+    // After smoothing, check for water collisions and nudge points onto dry land
+    polyline = _nudgeOffWater(polyline, waterMask, cellSize, originX, originZ, w, h);
 
     polylines.push(polyline);
   }
 
   return { polylines, station, entries };
+}
+
+/**
+ * After Chaikin smoothing, check each point for water collision.
+ * If a point is on water, nudge it toward the nearest dry land.
+ */
+function _nudgeOffWater(polyline, waterMask, cellSize, originX, originZ, w, h) {
+  const SEARCH_RADIUS = 10; // cells
+
+  return polyline.map(p => {
+    const gx = Math.round((p.x - originX) / cellSize);
+    const gz = Math.round((p.z - originZ) / cellSize);
+    if (gx < 0 || gx >= w || gz < 0 || gz >= h) return p;
+    if (waterMask.get(gx, gz) === 0) return p;
+
+    // Find nearest dry land cell
+    let bestDist = Infinity, bestGx = gx, bestGz = gz;
+    for (let dz = -SEARCH_RADIUS; dz <= SEARCH_RADIUS; dz++) {
+      for (let dx = -SEARCH_RADIUS; dx <= SEARCH_RADIUS; dx++) {
+        const nx = gx + dx, nz = gz + dz;
+        if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
+        if (waterMask.get(nx, nz) > 0) continue;
+        const d = dx * dx + dz * dz;
+        if (d < bestDist) { bestDist = d; bestGx = nx; bestGz = nz; }
+      }
+    }
+
+    if (bestDist < Infinity) {
+      return { x: originX + bestGx * cellSize, z: originZ + bestGz * cellSize };
+    }
+    return p;
+  });
 }
 
 /**

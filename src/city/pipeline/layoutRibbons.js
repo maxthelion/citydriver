@@ -117,6 +117,7 @@ function _clipStreetToGrid(street, map) {
   if (street.length < 2) return [];
 
   const roadGrid = map.hasLayer ? map.getLayer('roadGrid') : map.roadGrid;
+  const railwayGrid = map.railwayGrid || null;
   const waterMask = map.hasLayer ? map.getLayer('waterMask') : map.waterMask;
   const cs = map.cellSize;
   const ox = map.originX, oz = map.originZ;
@@ -149,6 +150,7 @@ function _clipStreetToGrid(street, map) {
         const nx = gx + dx, nz = gz + dz;
         if (nx < 0 || nz < 0 || nx >= map.width || nz >= map.height) continue;
         if (roadGrid && roadGrid.get(nx, nz) > 0) return false;
+        if (railwayGrid && railwayGrid.get(nx, nz) > 0) return false;
       }
     }
     return true;

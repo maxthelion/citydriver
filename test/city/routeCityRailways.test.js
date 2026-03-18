@@ -79,7 +79,7 @@ describe('unit tests', () => {
 // --- Bitmap invariant tests (full pipeline) ---
 
 describe('bitmap invariants', () => {
-  for (const seed of [42, 99, 751119]) {
+  for (const seed of [42, 99, 751119, 241654]) {
     describe(`seed ${seed}`, () => {
       const map = makeCity(seed);
 
