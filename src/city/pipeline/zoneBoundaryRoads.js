@@ -13,7 +13,7 @@
  * 6. Add as roads via _addRoad (stamps grid, updates graph, snaps nodes)
  */
 
-import { chaikinSmooth } from '../../core/math.js';
+// No smoothing — RDP simplification only. Chaikin drifts junction vertices.
 
 const ARTERIAL_SNAP_DIST_M = 25;  // metres — max distance to snap to arterial
 const MIN_ZONE_CELLS = 1000;       // skip tiny zones
@@ -76,55 +76,10 @@ export function createZoneBoundaryRoads(map) {
     let pts = [...boundary];
 
     // Simplify (Ramer-Douglas-Peucker)
-    pts = simplifyPolyline(pts, cs * 2);
+    pts = simplifyPolyline(pts, cs * 4); // higher tolerance to remove staircase jaggies
 
-    // Identify junction vertices (near existing roads) — pin during smoothing
-    const pinned = pts.map(p => {
-      const gx = Math.round((p.x - map.originX) / cs);
-      const gz = Math.round((p.z - map.originZ) / cs);
-      for (let dz = -3; dz <= 3; dz++) {
-        for (let dx = -3; dx <= 3; dx++) {
-          const nx = gx + dx, nz = gz + dz;
-          if (nx >= 0 && nx < w && nz >= 0 && nz < h && roadGrid.get(nx, nz) > 0) return true;
-        }
-      }
-      return false;
-    });
-
-    // Chaikin smooth with pinned junctions (2 passes)
-    for (let pass = 0; pass < 2; pass++) {
-      if (pts.length < 3) break;
-      const smoothed = [pts[0]];
-      const newPinned = [pinned[0]];
-      for (let i = 0; i < pts.length - 1; i++) {
-        const a = pts[i], b = pts[i + 1];
-        if (pinned[i] || pinned[i + 1]) {
-          if (!pinned[i]) {
-            smoothed.push({ x: a.x * 0.75 + b.x * 0.25, z: a.z * 0.75 + b.z * 0.25 });
-            newPinned.push(false);
-          }
-          if (pinned[i + 1]) {
-            smoothed.push(b);
-            newPinned.push(true);
-          } else {
-            smoothed.push({ x: a.x * 0.25 + b.x * 0.75, z: a.z * 0.25 + b.z * 0.75 });
-            newPinned.push(false);
-          }
-        } else {
-          smoothed.push({ x: a.x * 0.75 + b.x * 0.25, z: a.z * 0.75 + b.z * 0.25 });
-          newPinned.push(false);
-          smoothed.push({ x: a.x * 0.25 + b.x * 0.75, z: a.z * 0.25 + b.z * 0.75 });
-          newPinned.push(false);
-        }
-      }
-      if (!pinned[pts.length - 1]) {
-        smoothed.push(pts[pts.length - 1]);
-        newPinned.push(pinned[pts.length - 1]);
-      }
-      pts = smoothed;
-      pinned.length = 0;
-      pinned.push(...newPinned);
-    }
+    // No Chaikin smoothing — it drifts junction vertices and breaks connections.
+    // The RDP simplification with higher tolerance handles raggedness instead.
 
     // Step 3: Clip against existing roads and water
     const segments = clipStreetToGrid(pts, map);
