@@ -69,9 +69,21 @@ export class LandFirstDevelopment {
 
     if (this._phase === 'finish') {
       this._finishTick = (this._finishTick || 0) + 1;
+      // When growth config is active, skip layoutRibbons — roads are grown during ticks
+      const hasGrowth = this.archetype && this.archetype.growth;
       switch (this._finishTick) {
-        case 1: this.map = layoutRibbons(this.map); return true;
-        case 2: this.map = connectToNetwork(this.map); return true;
+        case 1:
+          if (hasGrowth) {
+            // Skip layoutRibbons, go straight to connectToNetwork
+            this.map = connectToNetwork(this.map);
+            return true;
+          }
+          this.map = layoutRibbons(this.map);
+          return true;
+        case 2:
+          if (hasGrowth) return false; // already ran connectToNetwork
+          this.map = connectToNetwork(this.map);
+          return true;
         default: return false;
       }
     }

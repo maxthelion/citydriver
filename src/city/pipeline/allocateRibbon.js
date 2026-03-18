@@ -159,6 +159,7 @@ export function allocateRibbon({
         const maxDist = plotDepth * 8 + gapWidth * 7; // up to 8 strips
         while (d < maxDist) {
           // Claim plotDepth cells
+          const stripStart = claimed.length;
           for (let pd = 0; pd < plotDepth; pd++) {
             if (claimed.length >= budget) break;
             const gx = roadX + Math.round(perpX * side * (d + pd));
@@ -176,9 +177,13 @@ export function allocateRibbon({
             resGrid.set(gx, gz, resType);
             claimed.push({ gx, gz });
           }
+          const stripClaimed = claimed.length - stripStart;
           d += plotDepth;
 
-          // Leave gap (future street)
+          // If the strip didn't claim anything, stop — no point adding gaps beyond
+          if (stripClaimed === 0) break;
+
+          // Leave gap (future street) — only if strip above actually claimed cells
           for (let gd = 0; gd < gapWidth; gd++) {
             const gx = roadX + Math.round(perpX * side * (d + gd));
             const gz = roadZ + Math.round(perpZ * side * (d + gd));
