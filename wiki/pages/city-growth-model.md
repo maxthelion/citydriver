@@ -45,24 +45,55 @@ Grid operations: blur, threshold, compose (weighted sum), flood fill. These are 
 
 The ribbon layout system works at the polygon level. It takes a zone boundary, computes a street direction from slope, and sweeps parallel lines across the polygon. This produces the terrain-following, contour-aware street pattern that looks organic.
 
-## What Should Drive What
+## Pipeline Sequence
 
 ```
-Regional inputs (arterial roads, railways, terrain, water)
-    ↓
-Spatial layers (bitmaps — buildability, land value, centrality, etc.)
-    ↓
-Zone extraction (polygons — parcels of buildable land between roads/water)
-    ↓
-Per-tick growth:
-    1. Score zones against value bitmaps → decide what each zone becomes
-    2. For residential zones: ribbon layout creates internal streets
-    3. Commercial claims road frontage (grid-level, along all roads)
-    4. Influence layers recomputed (bitmaps)
-    5. New roads from zone boundaries and ribbon gaps update road grid
-    ↓
-Feedback: new roads → new zones (roads split existing zones) → new spatial layers
+1. SETUP
+   Regional inputs arrive: terrain, water, arterial roads, railways
+   Spatial layers computed: elevation, slope, buildability, land value
+
+2. SKELETON ROADS (tick 1)
+   Arterial roads connecting settlements. These are the anchor roads.
+
+3. FIRST ZONES (tick 3)
+   Extract development zones — large parcels between arterials and water.
+   These are coarse: some cover 25% of the map.
+
+4. SECONDARY ROADS
+   Run roads along first-zone boundaries. The edges of zones are natural
+   street corridors — they follow terrain, water, and road features.
+   This creates a secondary road network between the arterials.
+
+5. SECOND ZONES (re-extract)
+   Re-extract zones. The new secondary roads split the large first zones
+   into smaller, finer-grained parcels. These are the allocation unit.
+
+6. SPATIAL LAYERS (tick 4)
+   Compute centrality, waterfrontness, edgeness, roadFrontage, etc.
+   Compose per-use value bitmaps from these layers.
+
+7. PER-TICK GROWTH (tick 5+)
+   Each tick:
+   a. Score unassigned zones against value bitmaps
+   b. Assign N highest-scoring zones to use types
+   c. For residential zones: ribbon layout creates internal streets
+   d. Commercial claims road frontage (strongly favouring arterials)
+   e. Influence layers recomputed
+   f. Optionally: new roads from ribbon gaps split zones further
+
+8. FEEDBACK
+   New roads → zones re-split → finer parcels → more allocation.
+   Each tick the city gets finer-grained as roads subdivide zones.
 ```
+
+### Road Hierarchy and Commercial
+
+Commercial strongly favours anchor (arterial) roads. The main high street forms along arterials first. Secondary roads (zone boundaries) get less commercial. Ribbon streets within residential zones get little to none.
+
+This creates a realistic gradient:
+- **Arterials**: dense commercial frontage (shops, markets)
+- **Secondary roads**: some commercial, mixed with residential
+- **Ribbon streets**: purely residential
 
 ## Open Questions
 
@@ -83,17 +114,19 @@ Currently zones are extracted once (tick 3). But as new roads are laid, they sho
 In real cities, central zones mix commercial frontage with residential behind. The current model separates these — commercial is road frontage, residential fills the rest. Is that sufficient?
 
 ### How do roads grow?
-Current options we've explored:
-1. layoutRibbons fills a whole zone with streets (too aggressive)
-2. Ribbon allocator creates gap-roads as it claims (chicken-and-egg)
-3. Zone boundaries become roads naturally (promising but untested)
+Roads come from three sources at different scales:
 
-The most promising approach: roads come from two sources:
-- **Zone boundaries** — natural street corridors between zones
-- **Ribbon layout within residential zones** — internal streets when a zone is assigned residential
+1. **Skeleton arterials** — regional connections, placed once (tick 1)
+2. **Zone boundary roads** — placed along edges of first zones, creating secondary network
+3. **Ribbon streets** — placed inside residential zones when assigned, creating tertiary network
+
+Each level of road subdivides zones further, creating a natural refinement cascade.
 
 ### What's the role of the value bitmap?
-The value bitmap should score zones for allocation decisions, not drive cell-by-cell claiming. Once a zone is assigned a type, the internal layout (ribbons, frontage) handles the cell-level detail.
+The value bitmap scores zones for allocation decisions — not cell-by-cell claiming. Each zone is scored by averaging the value bitmap across its cells. The highest-scoring zones for each use type get assigned first. Once assigned, the internal layout (ribbons for residential, nothing for industrial) handles cell-level detail.
+
+### Should zones be re-extracted after new roads?
+Yes. Each time new roads are placed (zone boundary roads, ribbon streets), they split existing zones. Re-extracting zones after road placement creates progressively finer parcels. This is the subdivision mechanism.
 
 ## Principles
 
