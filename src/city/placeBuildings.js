@@ -432,14 +432,46 @@ export function computePlotPlacements(map) {
   // Ribbon (local land-first) roads are excluded — plots are designed to line them.
   const { Grid2D } = _getGrid2D(map);
   const occupancy = new Grid2D(map.width, map.height, { type: 'uint8' });
-  for (let gz = 0; gz < map.height; gz++) {
-    for (let gx = 0; gx < map.width; gx++) {
+  const w = map.width, h = map.height;
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
       if (map.waterMask.get(gx, gz) > 0) { occupancy.set(gx, gz, 1); continue; }
       if (map.buildability.get(gx, gz) < 0.15) { occupancy.set(gx, gz, 1); continue; }
     }
   }
+
+  // River bank buffer — don't build right on the riverbank (1 cell = 5m buffer)
+  const RIVER_BANK_BUFFER = 1;
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      if (map.waterMask.get(gx, gz) === 0) continue;
+      for (let dz = -RIVER_BANK_BUFFER; dz <= RIVER_BANK_BUFFER; dz++) {
+        for (let dx = -RIVER_BANK_BUFFER; dx <= RIVER_BANK_BUFFER; dx++) {
+          const nx = gx + dx, nz = gz + dz;
+          if (nx >= 0 && nx < w && nz >= 0 && nz < h) occupancy.set(nx, nz, 1);
+        }
+      }
+    }
+  }
+
   // Stamp non-ribbon roads onto occupancy (skeleton, collector, bridges)
   _stampRoadsOntoOccupancy(map, occupancy);
+
+  // Railway corridor buffer — 2 cells beyond the stamped track (total ~30m exclusion)
+  const RAILWAY_BUFFER = 2;
+  if (map.railwayGrid) {
+    for (let gz = 0; gz < h; gz++) {
+      for (let gx = 0; gx < w; gx++) {
+        if (map.railwayGrid.get(gx, gz) === 0) continue;
+        for (let dz = -RAILWAY_BUFFER; dz <= RAILWAY_BUFFER; dz++) {
+          for (let dx = -RAILWAY_BUFFER; dx <= RAILWAY_BUFFER; dx++) {
+            const nx = gx + dx, nz = gz + dz;
+            if (nx >= 0 && nx < w && nz >= 0 && nz < h) occupancy.set(nx, nz, 1);
+          }
+        }
+      }
+    }
+  }
 
   for (const zone of zones) {
     if (!zone._streets) continue;

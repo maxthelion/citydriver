@@ -77,6 +77,29 @@ export function stampWater(map) {
 }
 
 /**
+ * Stamp railway grid with 3-cell buffer. Returns Float32Array.
+ */
+export function stampRailway(map) {
+  const { width: w, height: h } = map;
+  const out = new Float32Array(w * h);
+  if (!map.railwayGrid) return out;
+  for (let gz = 0; gz < h; gz++) {
+    for (let gx = 0; gx < w; gx++) {
+      if (map.railwayGrid.get(gx, gz) === 0) continue;
+      for (let dz = -3; dz <= 3; dz++) {
+        for (let dx = -3; dx <= 3; dx++) {
+          const nx = gx + dx, nz = gz + dz;
+          if (nx >= 0 && nz >= 0 && nx < w && nz < h) {
+            out[nz * w + nx] = 1.0;
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Stamp road grid with 2-cell buffer. Returns Float32Array.
  */
 export function stampRoad(map) {
@@ -214,6 +237,7 @@ export function enforcePriority(layers, w, h) {
 /** Layer definitions: name, stamp function, blur radius, noise amplitude, seed offset. */
 const LAYER_DEFS = [
   { name: 'water',       stamp: stampWater,       blur: 6, noise: 0.15, seed: 1 },
+  { name: 'railway',     stamp: stampRailway,     blur: 2, noise: 0.05, seed: 6 },
   { name: 'road',        stamp: stampRoad,        blur: 3, noise: 0.10, seed: 2 },
   { name: 'development', stamp: stampDevelopment, blur: 8, noise: 0.15, seed: 3 },
   { name: 'forest',      stamp: stampForest,      blur: 12, noise: 0.25, seed: 4 },

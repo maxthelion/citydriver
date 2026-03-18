@@ -25,7 +25,7 @@ See [[regional-pipeline]] for the full phase-by-phase breakdown, LayerStack cont
 | A3 | [[regional-rivers]] | River networks, valley carving, floodplains |
 | A6 | [[regional-settlements]] | Settlements, farms, market towns (feedback loop with roads) |
 | A7 | [[regional-roads]] | Terrain-aware A* road network (two passes) |
-| A8 | [[railway-network]] | Off-map cities and phased railway construction |
+| A8 | [[regional-railways-pipeline]] | Off-map cities and railway routing with settlement bonus |
 
 ## 2. City Pipeline
 
@@ -37,7 +37,7 @@ See [[city-generation-pipeline]] for the full tick sequence.
 
 | Tick | Step | What it produces |
 |------|------|-----------------|
-| 0 | Setup | Inherit terrain, rivers, water from region; add Perlin detail; place nuclei |
+| 0 | [[city-region-inheritance]] | Inherit terrain, rivers, railways, water from region; refine; place nuclei |
 | 1 | Skeleton roads | Arterial network connecting nuclei via MST + A* |
 | 2 | Land value | Nucleus-aware land value (flatness + proximity + waterfront) |
 | 3 | Development zones | Voronoi + threshold + morphological close + flood-fill |
@@ -103,3 +103,9 @@ Each archetype defines a set of starting variables and eligibility rules that de
 **Eligibility:** Favours higher-tier settlements (tier 1-2). Benefits from road count.
 
 **Starting variables:** Civic 18%, open space 14% — largest non-residential allocation. Industrial minimal (4%) and pushed far downwind.
+
+## 5. Pipeline Integrity
+
+The pipeline produces multiple grid layers that must maintain invariant relationships — water cells can't be road cells, buildings can't sit on railways, etc.
+
+See [[bitmap-invariants]] for the full list of layer relationships, and [[pipeline-invariant-tests]] for the integration test strategy that checks these at every pipeline step across multiple seeds.

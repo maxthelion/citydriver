@@ -10,22 +10,9 @@ last-modified-by: user
 
 Cities are not generated from scratch. They inherit terrain, rivers, water, and settlement positions from the regional map, then develop through a sequence of growth ticks. The city's [[city-archetypes|archetype]] determines how the growth ticks allocate and shape land use.
 
-## Inherited Features from the Regional Map
+## Tick 0: Region Inheritance
 
-City setup (`setupCity`, tick 0) extracts a window from the regional map centred on a settlement and refines it to city resolution (5m cells, vs ~200m regional cells):
-
-- **Elevation** — bilinear interpolation from regional grid, refined with 3-octave Perlin noise (2m amplitude) for local detail
-- **Slope** — recomputed via central difference after elevation refinement
-- **Water mask** — seeded from sea level threshold on the refined elevation
-- **Rivers** — imported as vector polylines from regional river paths, smoothed with Chaikin subdivision
-- **Regional settlements** — filtered to those within city bounds, used as nucleus seeds
-- **Flood zones** — precomputed grid for building exclusion
-
-From these inherited layers, setup also computes:
-- Water classification (river/estuary/ocean) and water depth (BFS)
-- Terrain suitability (composite of elevation, slope, water, flood risk)
-- Initial land value
-- **Nuclei** — growth centre seeds placed on buildable land, starting with the settlement location and nearby regional settlements, then greedy placement up to a tier-based cap (10-20)
+City setup extracts a window from the regional map, refines terrain to 5m resolution, and imports rivers, railways, and settlements. See [[city-region-inheritance]] for full details of what is inherited and how.
 
 ## Archetype Selection
 

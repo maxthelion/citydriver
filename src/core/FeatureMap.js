@@ -79,6 +79,7 @@ export class FeatureMap {
     this.waterMask = new Grid2D(width, height, { ...gridOpts, type: 'uint8' });
     this.bridgeGrid = new Grid2D(width, height, { ...gridOpts, type: 'uint8' });
     this.roadGrid = new Grid2D(width, height, { ...gridOpts, type: 'uint8' });
+    this.railwayGrid = new Grid2D(width, height, { ...gridOpts, type: 'uint8' });
     this.landValue = new Grid2D(width, height, { ...gridOpts, type: 'float32' });
     this.waterType = null; // set by classifyWater
 
@@ -129,6 +130,9 @@ export class FeatureMap {
       case 'building':
         this.buildings.push(feature);
         this._stampBuilding(feature);
+        break;
+      case 'railway':
+        this._stampRailway(feature);
         break;
     }
 
@@ -317,6 +321,50 @@ export class FeatureMap {
               if (feature.bridge && this.waterMask.get(gx, gz) > 0) {
                 this.bridgeGrid.set(gx, gz, 1);
               }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // --- Railway stamping ---
+
+  _stampRailway(feature) {
+    const polyline = feature.polyline;
+    if (!polyline || polyline.length < 2) return;
+
+    const halfWidth = 7; // 7m half-width (14m total — track + embankment shoulders)
+
+    for (let i = 0; i < polyline.length - 1; i++) {
+      const ax = polyline[i].x, az = polyline[i].z;
+      const bx = polyline[i + 1].x, bz = polyline[i + 1].z;
+      const dx = bx - ax, dz = bz - az;
+      const segLen = Math.sqrt(dx * dx + dz * dz);
+      if (segLen < 0.01) continue;
+
+      const stepSize = this.cellSize * STAMP_STEP_FRACTION;
+      const steps = Math.ceil(segLen / stepSize);
+
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const px = ax + dx * t, pz = az + dz * t;
+        const cellRadius = Math.ceil(halfWidth / this.cellSize);
+        const cgx = Math.round((px - this.originX) / this.cellSize);
+        const cgz = Math.round((pz - this.originZ) / this.cellSize);
+
+        for (let ddz = -cellRadius; ddz <= cellRadius; ddz++) {
+          for (let ddx = -cellRadius; ddx <= cellRadius; ddx++) {
+            const gx = cgx + ddx, gz = cgz + ddz;
+            if (gx < 0 || gx >= this.width || gz < 0 || gz >= this.height) continue;
+            const cellCenterX = this.originX + gx * this.cellSize;
+            const cellCenterZ = this.originZ + gz * this.cellSize;
+            const distSq = (cellCenterX - px) ** 2 + (cellCenterZ - pz) ** 2;
+            if (distSq <= halfWidth * halfWidth) {
+              // Never stamp railway on water cells
+              if (this.waterMask.get(gx, gz) > 0) continue;
+              this.railwayGrid.set(gx, gz, 1);
+              this.buildability.set(gx, gz, 0);
             }
           }
         }
@@ -880,6 +928,7 @@ export class FeatureMap {
     copy.waterMask = this.waterMask.clone();
     copy.bridgeGrid = this.bridgeGrid.clone();
     copy.roadGrid = this.roadGrid.clone();
+    copy.railwayGrid = this.railwayGrid.clone();
     copy.landValue = this.landValue.clone();
     if (this.waterType) copy.waterType = this.waterType.clone();
     if (this.waterDist) copy.waterDist = this.waterDist.clone();

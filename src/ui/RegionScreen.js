@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { generateRegion } from '../regional/pipeline.js';
 import { runValidators } from '../validators/framework.js';
 import { getRegionalValidators } from '../regional/validators.js';
-import { renderMap, drawSettlements, drawRivers, drawRoads } from '../rendering/mapRenderer.js';
-import { buildRegionTerrain, buildWaterPlane, buildSettlementMarkers, buildRegionRoads, buildRegionRiverMeshes, buildCityBoundary } from '../rendering/regionPreview3D.js';
+import { renderMap, drawSettlements, drawRivers, drawRoads, drawRailways } from '../rendering/mapRenderer.js';
+import { buildRegionTerrain, buildWaterPlane, buildSettlementMarkers, buildRegionRoads, buildRegionRailways, buildRegionRiverMeshes, buildCityBoundary } from '../rendering/regionPreview3D.js';
 import { createScorePanel, updateScorePanel } from './ScorePanel.js';
 import { SeededRandom } from '../core/rng.js';
 
@@ -263,6 +263,9 @@ export class RegionScreen {
     const roadLines = buildRegionRoads(this._layers);
     worldGroup.add(roadLines);
 
+    const railwayLines = buildRegionRailways(this._layers);
+    worldGroup.add(railwayLines);
+
     const riverMeshes = buildRegionRiverMeshes(this._layers);
     worldGroup.add(riverMeshes);
 
@@ -341,6 +344,7 @@ export class RegionScreen {
     const ctx = this._mapCanvas.getContext('2d');
     drawRivers(this._layers, ctx);
     drawRoads(this._layers, ctx);
+    drawRailways(this._layers, ctx);
     drawSettlements(this._layers, ctx);
 
     if (this._selectedSettlement) {

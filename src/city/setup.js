@@ -11,6 +11,8 @@ import { Grid2D } from '../core/Grid2D.js';
 import { FeatureMap } from '../core/FeatureMap.js';
 import { PerlinNoise } from '../core/noise.js';
 import { inheritRivers } from '../core/inheritRivers.js';
+import { inheritRailways } from '../core/inheritRailways.js';
+import { routeCityRailways, extractEntryPoints, gradeRailwayCorridor } from './routeCityRailways.js';
 import { distance2D } from '../core/math.js';
 import { CITY_CELL_SIZE, CITY_RADIUS } from './constants.js';
 import { computeTerrainSuitability, computeFloodZone } from '../core/terrainSuitability.js';
@@ -127,15 +129,17 @@ export function setupCity(layers, settlement, rng) {
     }
   }
 
+  // Bounds shared by river and railway inheritance
+  const bounds = {
+    minX: originX,
+    minZ: originZ,
+    maxX: originX + cityGridW * cityCellSize,
+    maxZ: originZ + cityGridH * cityCellSize,
+  };
+
   // Import rivers as features (shared inheritance utility)
   const riverPaths = layers.getData('riverPaths');
   if (riverPaths) {
-    const bounds = {
-      minX: originX,
-      minZ: originZ,
-      maxX: originX + cityGridW * cityCellSize,
-      maxZ: originZ + cityGridH * cityCellSize,
-    };
     const cityRivers = inheritRivers(riverPaths, bounds, {
       chaikinPasses: 1,
       margin: cityCellSize,
@@ -144,6 +148,9 @@ export function setupCity(layers, settlement, rng) {
       map.addFeature('river', { polyline: river.polyline, systemId: river.systemId });
     }
   }
+
+  // Railway import is deferred until after terrain/water/landValue are ready
+  // (see below, after computeLandValue)
 
   // Set terrain (computes initial buildability, which needs waterMask first)
   map.setTerrain(elevation, slope);
@@ -204,6 +211,41 @@ export function setupCity(layers, settlement, rng) {
   // Compute initial land value from terrain features
   map.computeLandValue();
   map.setLayer('landValue', map.landValue);
+
+  // Import and re-route railways at city resolution.
+  // Done here (after terrain/water/landValue) so routing can use the city grid.
+  // Polyline is the single source of truth — grid is derived from it by addFeature.
+  const railways = layers.getData('railways');
+  if (railways) {
+    const cityRailways = inheritRailways(railways, bounds, {
+      chaikinPasses: 0, // no smoothing — re-routing on city grid
+      margin: cityCellSize,
+    });
+
+    if (cityRailways.length > 0) {
+      const railResult = routeCityRailways(
+        cityRailways, elevation, map.waterMask, map.landValue,
+        bounds, cityCellSize, originX, originZ, seaLevel,
+      );
+
+      // Grade terrain along polylines BEFORE adding features.
+      // Grading modifies elevation; _stampRailway then reads correct terrain.
+      if (railResult.polylines.length > 0 && railResult.station) {
+        gradeRailwayCorridor(
+          railResult.polylines, railResult.entries, railResult.station,
+          elevation, cityCellSize, originX, originZ,
+        );
+      }
+
+      // Add as features — _stampRailway stamps railwayGrid from the polyline.
+      // No separate grid copy needed.
+      for (const polyline of railResult.polylines) {
+        map.addFeature('railway', { polyline });
+      }
+
+      if (railResult.station) map.station = railResult.station;
+    }
+  }
 
   // Place nuclei (shared across all growth strategies)
   const tier = settlement.tier || 3;

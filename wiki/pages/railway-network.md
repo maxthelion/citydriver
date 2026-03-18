@@ -143,33 +143,42 @@ The railway network is displayed as a **2D schematic map** — a separate screen
 - URL mode: `?seed=<n>&mode=railway`
 - Shows the same region, same seed — just a different view of the generated data
 
-## Integration with Existing Pipeline
+## Implementation Status
 
-The railway generation step would run in the regional pipeline after roads and settlement growth (phases A7b / A6d), since railway placement should consider the mature settlement pattern:
+The core railway system is implemented. See [[regional-railways-pipeline]] for generation details and [[city-region-inheritance]] for how railways are inherited by cities.
 
-```
-... existing pipeline ...
-A6d. growSettlements()
-NEW: generateOffMapCities()     — place exit points on map edges
-NEW: generateRailwayNetwork()   — phased line construction with A* routing
-... existing continuation (land cover, etc.) ...
-```
+**Implemented:**
+- Off-map city placement on inland edges
+- A* routing with settlement bonus and corridor sharing
+- Path simplification with settlement waypoints
+- Bridge detection at water crossings
+- Railway grid stamping and building exclusion at city scale
+- Station placement on dry land aligned with track
+- 3D and 2D rendering at both regional and city scale
+- 2D schematic view (`?mode=railway`)
 
-The railway grid/features are stored on the LayerStack alongside roads and rivers, available for city inheritance.
+**Deferred:**
+- Per-phase gradient constraints (trunk 1.5%, branch 3%)
+- Curvature penalty in cost function
+- Tunnel detection and routing
+- Terminus fan-shape station geometry with parallel platforms
+- Branch line closure modelling
+- Freight-only lines
 
 ## Open Questions
 
-- Should off-map cities influence settlement scoring earlier in the pipeline? (e.g. a "trade route" bonus for settlements near the capital direction)
-- How do railway cuttings/embankments interact with terrain at city scale? Rivers carve channels — do railways create flat corridors?
-- Should branch line closure be modelled? (Beeching cuts — some branch lines exist as disused corridors)
-- Freight-only lines to industrial areas / ports — separate from passenger network?
+- Should off-map cities influence settlement scoring earlier in the pipeline?
+- Should branch line closure be modelled? (Beeching cuts — disused corridors)
+- Freight-only lines to industrial areas / ports?
 
-## Source Files (Planned)
+## Source Files
 
 | File | Role |
 |------|------|
-| `src/regional/generateOffMapCities.js` | Off-map city placement and properties |
-| `src/regional/generateRailwayNetwork.js` | Phased network construction |
+| `src/regional/generateOffMapCities.js` | Off-map city placement |
+| `src/regional/generateRailways.js` | Network construction and A* routing |
 | `src/core/railwayCost.js` | Railway-specific A* cost function |
-| `src/ui/RailwayScreen.js` | 2D schematic visualization |
-| `src/rendering/railwaySchematic.js` | Line rendering and station symbols |
+| `src/core/inheritRailways.js` | Clip polylines to city bounds |
+| `src/ui/RailwayScreen.js` | 2D schematic screen |
+| `src/rendering/railwaySchematic.js` | Schematic rendering functions |
+| `src/rendering/prepareCityScene.js` | City-scale terrain-following coords |

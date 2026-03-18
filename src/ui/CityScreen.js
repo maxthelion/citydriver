@@ -12,7 +12,7 @@ import { scoreSettlement } from '../city/archetypeScoring.js';
 import { prepareCityScene } from '../rendering/prepareCityScene.js';
 import { getRoadMaterial, getRiverMaterial } from '../rendering/materials.js';
 import { FlyCamera } from './FlyCamera.js';
-import { renderMap, drawRivers, drawRoads, drawSettlements } from '../rendering/mapRenderer.js';
+import { renderMap, drawRivers, drawRoads, drawRailways, drawSettlements } from '../rendering/mapRenderer.js';
 import { CITY_RADIUS } from '../city/constants.js';
 import { placeBuildings, placeTerracedRows } from '../city/placeBuildings.js';
 import { chaikinSmooth } from '../core/math.js';
@@ -33,6 +33,7 @@ const COVER_COLORS = {
 };
 const DEFAULT_COLOR = [0.35, 0.5, 0.2];
 const PAVED_COLOR = [0.55, 0.53, 0.5];
+const BALLAST_COLOR = [0.45, 0.42, 0.38];
 
 export class CityScreen {
   constructor(container, layers, settlement, rng, seed, onBack) {
@@ -108,6 +109,16 @@ export class CityScreen {
     scene.add(roads);
     this._meshLayers.roads = roads;
 
+    const railwayMeshes = this._buildRailways();
+    scene.add(railwayMeshes);
+    this._meshLayers.railways = railwayMeshes;
+
+    const stationMesh = this._buildStation();
+    if (stationMesh) {
+      scene.add(stationMesh);
+      this._meshLayers.station = stationMesh;
+    }
+
     const water = this._buildWater();
     scene.add(water);
     this._meshLayers.water = water;
@@ -131,7 +142,15 @@ export class CityScreen {
     // Camera + fly controls
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.5, 10000);
     this._camera = camera;
-    this._flyCamera = new FlyCamera(camera, renderer.domElement);
+    this._flyCamera = new FlyCamera(camera, renderer.domElement, {
+      getTerrainHeight: (x, z) => {
+        const gx = Math.round(x / map.cellSize);
+        const gz = Math.round(z / map.cellSize);
+        if (gx < 0 || gx >= map.width || gz < 0 || gz >= map.height) return 0;
+        return map.elevation.get(gx, gz);
+      },
+      minHeightAboveTerrain: 3,
+    });
 
     // Position camera: 100m above ground, 200m from city center
     const cityW = map.width * map.cellSize;
@@ -253,7 +272,7 @@ export class CityScreen {
     // Instructions
     const info = document.createElement('div');
     info.style.cssText = 'position:fixed;bottom:10px;left:10px;color:white;font-family:monospace;font-size:13px;pointer-events:none;text-shadow:1px 1px 2px black;z-index:100';
-    info.textContent = 'Click to capture mouse. WASD move, Mouse look, Space/Shift up/down, Scroll speed.';
+    info.textContent = 'Click to capture mouse. WASD move, Mouse look, Space up, Double-click drop, Scroll speed.';
     document.body.appendChild(info);
     this._hud.push(info);
   }
@@ -269,7 +288,18 @@ export class CityScreen {
     const ctx = offscreen.getContext('2d');
     drawRivers(layers, ctx);
     drawRoads(layers, ctx);
+    drawRailways(layers, ctx);
     drawSettlements(layers, ctx);
+
+    // Draw green dot at station location
+    if (this._map.station) {
+      const stGx = Math.round(this._map.station.x / params.cellSize);
+      const stGz = Math.round(this._map.station.z / params.cellSize);
+      ctx.fillStyle = '#00ff00';
+      ctx.beginPath();
+      ctx.arc(stGx, stGz, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     // Draw city extent rectangle
     const cityRadius = CITY_RADIUS;
@@ -413,6 +443,14 @@ export class CityScreen {
           r = r + (dc[0] - r) * t;
           g = g + (dc[1] - g) * t;
           b = b + (dc[2] - b) * t;
+        }
+
+        // Blend railway (ballast/gravel corridor)
+        if (cov.railway && cov.railway[ci] > 0.01) {
+          const t = cov.railway[ci];
+          r = r + (BALLAST_COLOR[0] - r) * t;
+          g = g + (BALLAST_COLOR[1] - g) * t;
+          b = b + (BALLAST_COLOR[2] - b) * t;
         }
 
         // Blend road (pavement apron — ground coloring only, road ribbon mesh is separate)
@@ -583,6 +621,143 @@ export class CityScreen {
     }
 
     return group;
+  }
+
+  /**
+   * Railway ribbon meshes using pre-processed scene data (terrain-following).
+   * Same approach as _buildRoads but single batch, bright green for visibility.
+   */
+  _buildRailways() {
+    const group = new THREE.Group();
+    const railways = this._sceneData.railways;
+    if (!railways || railways.length === 0) return group;
+
+    const vertices = [];
+    const indices = [];
+
+    for (const rail of railways) {
+      const pts = rail.localPts;
+      const halfW = rail.halfWidth;
+      if (!pts || pts.length < 2) continue;
+
+      const baseVertex = vertices.length / 3;
+
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+
+        let perpX, perpZ;
+        if (i === 0) {
+          const dx = pts[1].x - p.x, dz = pts[1].z - p.z;
+          const len = Math.sqrt(dx * dx + dz * dz) || 1;
+          perpX = -dz / len; perpZ = dx / len;
+        } else if (i === pts.length - 1) {
+          const dx = p.x - pts[i - 1].x, dz = p.z - pts[i - 1].z;
+          const len = Math.sqrt(dx * dx + dz * dz) || 1;
+          perpX = -dz / len; perpZ = dx / len;
+        } else {
+          const dx0 = p.x - pts[i - 1].x, dz0 = p.z - pts[i - 1].z;
+          const len0 = Math.sqrt(dx0 * dx0 + dz0 * dz0) || 1;
+          const px0 = -dz0 / len0, pz0 = dx0 / len0;
+          const dx1 = pts[i + 1].x - p.x, dz1 = pts[i + 1].z - p.z;
+          const len1 = Math.sqrt(dx1 * dx1 + dz1 * dz1) || 1;
+          const px1 = -dz1 / len1, pz1 = dx1 / len1;
+          const ax = px0 + px1, az = pz0 + pz1;
+          const alen = Math.sqrt(ax * ax + az * az) || 1;
+          perpX = ax / alen; perpZ = az / alen;
+        }
+
+        vertices.push(p.x + perpX * halfW, p.y, p.z + perpZ * halfW);
+        vertices.push(p.x - perpX * halfW, p.y, p.z - perpZ * halfW);
+
+        if (i > 0) {
+          const b = baseVertex + (i - 1) * 2;
+          indices.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+        }
+      }
+    }
+
+    if (vertices.length < 6) return group;
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geom.setIndex(indices);
+    geom.computeVertexNormals();
+
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x00ff00,
+      roughness: 0.8,
+      metalness: 0.1,
+      side: THREE.DoubleSide,
+    });
+
+    group.add(new THREE.Mesh(geom, material));
+    return group;
+  }
+
+  /**
+   * Station building: a flat rectangle aligned with the track direction.
+   */
+  _buildStation() {
+    const station = this._map.station;
+    if (!station) return null;
+
+    const lx = station.x - this._map.originX;
+    const lz = station.z - this._map.originZ;
+    const gx = Math.round(lx / this._map.cellSize);
+    const gz = Math.round(lz / this._map.cellSize);
+
+    if (gx < 0 || gx >= this._map.width || gz < 0 || gz >= this._map.height) return null;
+
+    const y = this._map.elevation.get(gx, gz) + 0.5;
+
+    // Station dimensions: 40m long (along track), 15m wide, 4m tall
+    const length = 40, width = 15, height = 4;
+    const angle = station.angle;
+    const cosA = Math.cos(angle), sinA = Math.sin(angle);
+
+    // Rotated box — 4 corners of the roof
+    const hw = width / 2, hl = length / 2;
+    const corners = [
+      { x: -hl, z: -hw }, { x: hl, z: -hw },
+      { x: hl, z: hw }, { x: -hl, z: hw },
+    ].map(c => ({
+      x: lx + c.x * cosA - c.z * sinA,
+      z: lz + c.x * sinA + c.z * cosA,
+    }));
+
+    const vertices = [];
+    const indices = [];
+
+    // Floor (y)
+    for (const c of corners) vertices.push(c.x, y, c.z);
+    // Roof (y + height)
+    for (const c of corners) vertices.push(c.x, y + height, c.z);
+
+    // Walls (4 sides)
+    for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4;
+      const base = vertices.length / 3;
+      vertices.push(corners[i].x, y, corners[i].z);
+      vertices.push(corners[j].x, y, corners[j].z);
+      vertices.push(corners[j].x, y + height, corners[j].z);
+      vertices.push(corners[i].x, y + height, corners[i].z);
+      indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+
+    // Roof face
+    indices.push(4, 5, 6, 4, 6, 7);
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geom.setIndex(indices);
+    geom.computeVertexNormals();
+
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x8B7355,
+      roughness: 0.9,
+    });
+
+    return new THREE.Mesh(geom, material);
   }
 
   /**

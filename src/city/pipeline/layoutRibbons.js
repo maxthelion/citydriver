@@ -117,6 +117,7 @@ function _clipStreetToGrid(street, map) {
   if (street.length < 2) return [];
 
   const roadGrid = map.hasLayer ? map.getLayer('roadGrid') : map.roadGrid;
+  const railwayGrid = map.railwayGrid || null;
   const waterMask = map.hasLayer ? map.getLayer('waterMask') : map.waterMask;
   const cs = map.cellSize;
   const ox = map.originX, oz = map.originZ;
@@ -138,11 +139,26 @@ function _clipStreetToGrid(street, map) {
   samples.push(street[street.length - 1]);
 
   // Classify each sample as clear or blocked
+  const RAILWAY_BUFFER = 2; // cells beyond stamped track
+  const WATER_BANK_BUFFER = 1; // cells beyond water edge
   const clear = samples.map(p => {
     const gx = Math.round((p.x - ox) / cs);
     const gz = Math.round((p.z - oz) / cs);
     if (gx < 0 || gz < 0 || gx >= map.width || gz >= map.height) return false;
-    if (waterMask && waterMask.get(gx, gz) > 0) return false;
+
+    // Water + bank buffer
+    if (waterMask) {
+      for (let dz = -WATER_BANK_BUFFER; dz <= WATER_BANK_BUFFER; dz++) {
+        for (let dx = -WATER_BANK_BUFFER; dx <= WATER_BANK_BUFFER; dx++) {
+          const nx = gx + dx, nz = gz + dz;
+          if (nx >= 0 && nz >= 0 && nx < map.width && nz < map.height) {
+            if (waterMask.get(nx, nz) > 0) return false;
+          }
+        }
+      }
+    }
+
+    // Road buffer
     const r = Math.ceil(roadHalf / cs);
     for (let dz = -r; dz <= r; dz++) {
       for (let dx = -r; dx <= r; dx++) {
@@ -151,6 +167,19 @@ function _clipStreetToGrid(street, map) {
         if (roadGrid && roadGrid.get(nx, nz) > 0) return false;
       }
     }
+
+    // Railway buffer (wider than roads)
+    if (railwayGrid) {
+      for (let dz = -RAILWAY_BUFFER; dz <= RAILWAY_BUFFER; dz++) {
+        for (let dx = -RAILWAY_BUFFER; dx <= RAILWAY_BUFFER; dx++) {
+          const nx = gx + dx, nz = gz + dz;
+          if (nx >= 0 && nz >= 0 && nx < map.width && nz < map.height) {
+            if (railwayGrid.get(nx, nz) > 0) return false;
+          }
+        }
+      }
+    }
+
     return true;
   });
 

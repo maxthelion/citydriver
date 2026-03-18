@@ -207,6 +207,45 @@ export function buildRegionRoads(layers) {
 }
 
 /**
+ * Build 3D line meshes for railway network.
+ */
+export function buildRegionRailways(layers) {
+  const railways = layers.getData('railways');
+  const elevation = layers.getGrid('elevation');
+  if (!railways || !elevation) return new THREE.Group();
+
+  const group = new THREE.Group();
+  const cs = elevation.cellSize;
+  const halfW = (elevation.width - 1) * cs / 2;
+  const halfH = (elevation.height - 1) * cs / 2;
+
+  const hierarchyColors = { trunk: 0x000000, main: 0x111111, branch: 0x333333 };
+
+  for (const rail of railways) {
+    const pathData = rail.rawPath || rail.path;
+    if (!pathData || pathData.length < 2) continue;
+
+    const color = hierarchyColors[rail.hierarchy] || 0x111111;
+    const points = pathData.map(p => {
+      const gx = Math.min(Math.max(0, p.gx), elevation.width - 1);
+      const gz = Math.min(Math.max(0, p.gz), elevation.height - 1);
+      const elev = elevation.get(gx, gz);
+      return new THREE.Vector3(
+        p.gx * cs - halfW,
+        elev + 5,
+        p.gz * cs - halfH,
+      );
+    });
+
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({ color, linewidth: 1 });
+    group.add(new THREE.Line(geometry, material));
+  }
+
+  return group;
+}
+
+/**
  * Chaikin's corner-cutting: smooths a polyline of {x, z, accumulation} points.
  */
 function smoothPolyline(points, iterations = 3) {
