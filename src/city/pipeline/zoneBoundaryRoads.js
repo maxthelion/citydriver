@@ -19,7 +19,7 @@ const ARTERIAL_SNAP_DIST_M = 25;  // metres — max distance to snap to arterial
 const MIN_ZONE_CELLS = 1000;       // skip tiny zones
 const MIN_ROAD_LENGTH_M = 40;      // metres — skip very short segments
 const CLIP_SAMPLE_STEP = 2;        // metres — densify step for clipping
-const ROAD_HALF_WIDTH = 3;         // metres — buffer around existing roads
+const ROAD_HALF_WIDTH = 8;         // metres — buffer around existing roads (wide to prevent parallel duplicates)
 
 /**
  * Create secondary roads from zone boundaries.
@@ -46,7 +46,6 @@ export function createZoneBoundaryRoads(map) {
     if (!zone.boundary || zone.boundary.length < 3) continue;
     if (zone.cells.length < MIN_ZONE_CELLS) continue;
 
-    // Check if any boundary vertex is near an existing road
     let touchesRoad = false;
     for (const pt of zone.boundary) {
       const gx = Math.round((pt.x - map.originX) / cs);
@@ -68,23 +67,17 @@ export function createZoneBoundaryRoads(map) {
 
   if (candidateBoundaries.length === 0) return { segmentsAdded: 0, cellsAdded: 0 };
 
-  // Step 2: Simplify + smooth each boundary
+  // Step 2: Simplify, clip (wide buffer prevents duplicates), and add as roads
+  // The clip buffer (ROAD_HALF_WIDTH=8m) is wide enough that when two adjacent
+  // zones share a boundary, the second zone's boundary will be clipped away
+  // because the first already stamped road cells there.
   const roadsBefore = map.roads.length;
 
   for (const boundary of candidateBoundaries) {
-    // Convert to world-coordinate polyline (already is — zone.boundary is {x, z})
     let pts = [...boundary];
+    pts = simplifyPolyline(pts, cs * 4);
 
-    // Simplify (Ramer-Douglas-Peucker)
-    pts = simplifyPolyline(pts, cs * 4); // higher tolerance to remove staircase jaggies
-
-    // No Chaikin smoothing — it drifts junction vertices and breaks connections.
-    // The RDP simplification with higher tolerance handles raggedness instead.
-
-    // Step 3: Clip against existing roads and water
     const segments = clipStreetToGrid(pts, map);
-
-    // Step 4: Add each surviving segment as a road
     for (const seg of segments) {
       if (seg.length < 2) continue;
       addRoad(map, seg, 'collector', 6);
