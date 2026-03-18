@@ -8,10 +8,15 @@ export class FlyCamera {
   /**
    * @param {THREE.PerspectiveCamera} camera
    * @param {HTMLElement} domElement
+   * @param {object} [options]
+   * @param {Function} [options.getTerrainHeight] - (x, z) => y, for floor clamping
+   * @param {number} [options.minHeightAboveTerrain=3] - never go below this above terrain
    */
-  constructor(camera, domElement) {
+  constructor(camera, domElement, options = {}) {
     this.camera = camera;
     this.domElement = domElement;
+    this._getTerrainHeight = options.getTerrainHeight || null;
+    this._minAboveTerrain = options.minHeightAboveTerrain ?? 3;
 
     this._pos = new THREE.Vector3(0, 50, 0);
     this._yaw = 0;
@@ -25,10 +30,10 @@ export class FlyCamera {
       left: false,
       right: false,
       up: false,
-      down: false,
     };
 
     this._locked = false;
+    this._lastClickTime = 0;
     this._boundKeyDown = this._onKeyDown.bind(this);
     this._boundKeyUp = this._onKeyUp.bind(this);
     this._boundMouseMove = this._onMouseMove.bind(this);
@@ -51,9 +56,19 @@ export class FlyCamera {
   }
 
   _onClick() {
-    if (!this._locked) {
+    const now = performance.now();
+    if (this._locked) {
+      // Double-click while locked: drop to near terrain level
+      if (now - this._lastClickTime < 400) {
+        if (this._getTerrainHeight) {
+          const terrainY = this._getTerrainHeight(this._pos.x, this._pos.z);
+          this._pos.y = terrainY + this._minAboveTerrain + 5;
+        }
+      }
+    } else {
       this.domElement.requestPointerLock();
     }
+    this._lastClickTime = now;
   }
 
   _onLockChange() {
@@ -67,7 +82,6 @@ export class FlyCamera {
       case 'KeyA': case 'ArrowLeft':  this._keys.left = true; break;
       case 'KeyD': case 'ArrowRight': this._keys.right = true; break;
       case 'Space':                   this._keys.up = true; break;
-      case 'ShiftLeft': case 'ShiftRight': this._keys.down = true; break;
     }
   }
 
@@ -78,7 +92,6 @@ export class FlyCamera {
       case 'KeyA': case 'ArrowLeft':  this._keys.left = false; break;
       case 'KeyD': case 'ArrowRight': this._keys.right = false; break;
       case 'Space':                   this._keys.up = false; break;
-      case 'ShiftLeft': case 'ShiftRight': this._keys.down = false; break;
     }
   }
 
@@ -118,7 +131,13 @@ export class FlyCamera {
     if (this._keys.left)     { this._pos.x -= rightX * speed; this._pos.z -= rightZ * speed; }
     if (this._keys.right)    { this._pos.x += rightX * speed; this._pos.z += rightZ * speed; }
     if (this._keys.up)       { this._pos.y += speed; }
-    if (this._keys.down)     { this._pos.y -= speed; }
+
+    // Never fall through the terrain
+    if (this._getTerrainHeight) {
+      const terrainY = this._getTerrainHeight(this._pos.x, this._pos.z);
+      const minY = terrainY + this._minAboveTerrain;
+      if (this._pos.y < minY) this._pos.y = minY;
+    }
 
     this.camera.position.copy(this._pos);
 

@@ -142,7 +142,15 @@ export class CityScreen {
     // Camera + fly controls
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.5, 10000);
     this._camera = camera;
-    this._flyCamera = new FlyCamera(camera, renderer.domElement);
+    this._flyCamera = new FlyCamera(camera, renderer.domElement, {
+      getTerrainHeight: (x, z) => {
+        const gx = Math.round(x / map.cellSize);
+        const gz = Math.round(z / map.cellSize);
+        if (gx < 0 || gx >= map.width || gz < 0 || gz >= map.height) return 0;
+        return map.elevation.get(gx, gz);
+      },
+      minHeightAboveTerrain: 3,
+    });
 
     // Position camera: 100m above ground, 200m from city center
     const cityW = map.width * map.cellSize;
@@ -264,7 +272,7 @@ export class CityScreen {
     // Instructions
     const info = document.createElement('div');
     info.style.cssText = 'position:fixed;bottom:10px;left:10px;color:white;font-family:monospace;font-size:13px;pointer-events:none;text-shadow:1px 1px 2px black;z-index:100';
-    info.textContent = 'Click to capture mouse. WASD move, Mouse look, Space/Shift up/down, Scroll speed.';
+    info.textContent = 'Click to capture mouse. WASD move, Mouse look, Space up, Double-click drop, Scroll speed.';
     document.body.appendChild(info);
     this._hud.push(info);
   }
