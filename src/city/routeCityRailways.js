@@ -14,7 +14,6 @@
 import { railwayCostFunction } from '../core/railwayCost.js';
 import { findPath, simplifyPath } from '../core/pathfinding.js';
 import { distance2D } from '../core/math.js';
-import { chaikinSmooth } from '../core/math.js';
 
 const CONE_HALF_ANGLE = Math.PI / 3;
 const ENTRY_MERGE_ANGLE = Math.PI / 6;
@@ -175,17 +174,13 @@ export function routeCityRailways(railways, elevation, waterMask, landValue, bou
     // Stamp temp grid so later paths share corridor
     for (const p of result.path) tempGrid.set(p.gx, p.gz, 1);
 
-    // Simplify to remove grid zigzag, then Chaikin smooth for curves.
-    // Epsilon 10 keeps enough waypoints to respect terrain; Chaikin adds curvature.
-    const simplified = simplifyPath(result.path, 10);
-    let polyline = simplified.map(p => ({
+    // Simplify the A* path with water-aware check: never create a segment
+    // that crosses water. Simplify aggressively first, then verify each segment.
+    const simplified = _waterAwareSimplify(result.path, waterMask, w, h);
+    const polyline = simplified.map(p => ({
       x: originX + p.gx * cellSize,
       z: originZ + p.gz * cellSize,
     }));
-    for (let i = 0; i < 2; i++) polyline = chaikinSmooth(polyline);
-
-    // After smoothing, check for water collisions and nudge points onto dry land
-    polyline = _nudgeOffWater(polyline, waterMask, cellSize, originX, originZ, w, h);
 
     polylines.push(polyline);
   }
@@ -194,35 +189,63 @@ export function routeCityRailways(railways, elevation, waterMask, landValue, bou
 }
 
 /**
- * After Chaikin smoothing, check each point for water collision.
- * If a point is on water, nudge it toward the nearest dry land.
+ * Simplify a grid path while guaranteeing no segment crosses water.
+ * Uses RDP but rejects any simplification that would create a water crossing.
  */
-function _nudgeOffWater(polyline, waterMask, cellSize, originX, originZ, w, h) {
-  const SEARCH_RADIUS = 10; // cells
+function _waterAwareSimplify(path, waterMask, w, h) {
+  if (path.length <= 2) return path.slice();
+  return _wrdp(path, 0, path.length - 1, 8, waterMask, w, h);
+}
 
-  return polyline.map(p => {
-    const gx = Math.round((p.x - originX) / cellSize);
-    const gz = Math.round((p.z - originZ) / cellSize);
-    if (gx < 0 || gx >= w || gz < 0 || gz >= h) return p;
-    if (waterMask.get(gx, gz) === 0) return p;
+function _wrdp(points, start, end, epsilon, waterMask, w, h) {
+  if (end - start < 1) return [points[start]];
 
-    // Find nearest dry land cell
-    let bestDist = Infinity, bestGx = gx, bestGz = gz;
-    for (let dz = -SEARCH_RADIUS; dz <= SEARCH_RADIUS; dz++) {
-      for (let dx = -SEARCH_RADIUS; dx <= SEARCH_RADIUS; dx++) {
-        const nx = gx + dx, nz = gz + dz;
-        if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
-        if (waterMask.get(nx, nz) > 0) continue;
-        const d = dx * dx + dz * dz;
-        if (d < bestDist) { bestDist = d; bestGx = nx; bestGz = nz; }
-      }
-    }
+  // Check if the straight line from start to end crosses water
+  const a = points[start], b = points[end];
+  if (_segmentCrossesWater(a.gx, a.gz, b.gx, b.gz, waterMask, w, h)) {
+    // Can't simplify this range to a straight line — must keep a midpoint
+    const mid = Math.floor((start + end) / 2);
+    if (mid === start) return [points[start], points[end]];
+    const left = _wrdp(points, start, mid, epsilon, waterMask, w, h);
+    const right = _wrdp(points, mid, end, epsilon, waterMask, w, h);
+    return left.concat(right.slice(1));
+  }
 
-    if (bestDist < Infinity) {
-      return { x: originX + bestGx * cellSize, z: originZ + bestGz * cellSize };
-    }
-    return p;
-  });
+  // Standard RDP: find point farthest from line
+  let maxDist = 0, maxIdx = start;
+  for (let i = start + 1; i < end; i++) {
+    const d = _perpDist(points[i].gx, points[i].gz, a.gx, a.gz, b.gx, b.gz);
+    if (d > maxDist) { maxDist = d; maxIdx = i; }
+  }
+
+  if (maxDist > epsilon) {
+    const left = _wrdp(points, start, maxIdx, epsilon, waterMask, w, h);
+    const right = _wrdp(points, maxIdx, end, epsilon, waterMask, w, h);
+    return left.concat(right.slice(1));
+  }
+
+  // Safe to simplify — the straight line doesn't cross water
+  return [a, b];
+}
+
+function _segmentCrossesWater(gx1, gz1, gx2, gz2, waterMask, w, h) {
+  // Check every cell along the segment (Bresenham-style with fine sampling)
+  const dx = gx2 - gx1, dz = gz2 - gz1;
+  const steps = Math.max(1, Math.max(Math.abs(dx), Math.abs(dz)) * 2);
+  for (let s = 0; s <= steps; s++) {
+    const t = s / steps;
+    const gx = Math.round(gx1 + dx * t);
+    const gz = Math.round(gz1 + dz * t);
+    if (gx >= 0 && gx < w && gz >= 0 && gz < h && waterMask.get(gx, gz) > 0) return true;
+  }
+  return false;
+}
+
+function _perpDist(px, pz, ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az;
+  const lenSq = dx * dx + dz * dz;
+  if (lenSq === 0) return Math.sqrt((px - ax) ** 2 + (pz - az) ** 2);
+  return Math.abs((px - ax) * dz - (pz - az) * dx) / Math.sqrt(lenSq);
 }
 
 /**

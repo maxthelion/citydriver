@@ -105,6 +105,30 @@ describe('bitmap invariants', () => {
         expect(violations, `${violations} buildable railway cells`).toBe(0);
       });
 
+      it('railway polyline segments do not cross water', () => {
+        const railFeatures = map.features.filter(f => f.type === 'railway');
+        let violations = 0;
+        for (const f of railFeatures) {
+          if (!f.polyline || f.polyline.length < 2) continue;
+          for (let i = 0; i < f.polyline.length - 1; i++) {
+            const a = f.polyline[i], b = f.polyline[i + 1];
+            const dx = b.x - a.x, dz = b.z - a.z;
+            const segLen = Math.sqrt(dx * dx + dz * dz);
+            const steps = Math.max(1, Math.ceil(segLen / map.cellSize));
+            for (let s = 0; s <= steps; s++) {
+              const t = s / steps;
+              const px = a.x + dx * t, pz = a.z + dz * t;
+              const gx = Math.round((px - map.originX) / map.cellSize);
+              const gz = Math.round((pz - map.originZ) / map.cellSize);
+              if (gx < 0 || gx >= map.width || gz < 0 || gz >= map.height) continue;
+              if (map.waterMask.get(gx, gz) > 0) violations++;
+            }
+          }
+        }
+        // Allow tiny tolerance for diagonal A* steps that graze water cells
+        expect(violations, `${violations} polyline samples on water`).toBeLessThanOrEqual(5);
+      });
+
       it('station elevation above sea level', () => {
         if (!map.station) return;
         expect(map.station.elevation).toBeGreaterThan(map.seaLevel || 0);
