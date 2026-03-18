@@ -89,10 +89,10 @@ export function subdivideLargeZones(map, options = {}) {
     // Bounds check start only
     if (startGx < 0 || startGx >= w || startGz < 0 || startGz >= h) continue;
 
-    // Step 4: Pathfind from midpoint toward target, stopping at any road
-    // Simple grid walk — follow direction, stop when hitting road or water or out of zone
-    const path = walkTowardTarget(startGx, startGz, endGx, endGz, roadGrid, waterMask, w, h);
-    if (path.length < 5) continue; // too short
+    // Step 4: Walk from midpoint toward projected point, stop when hitting a road
+    const { path, hitRoad } = walkTowardTarget(startGx, startGz, endGx, endGz, roadGrid, waterMask, w, h);
+    if (!hitRoad) continue; // only keep cuts that connect to another road
+    if (path.length < 10) continue;
 
     // Convert to world polyline
     const polyline = path.map(p => ({ x: ox + p.gx * cs, z: oz + p.gz * cs }));
@@ -148,10 +148,11 @@ export function subdivideLargeZones(map, options = {}) {
  */
 function walkTowardTarget(sx, sz, tx, tz, roadGrid, waterMask, w, h) {
   const path = [];
-  let x = sx, z = sz;
   const dx = tx - sx, dz = tz - sz;
   const steps = Math.max(Math.abs(dx), Math.abs(dz));
-  if (steps === 0) return path;
+  if (steps === 0) return { path, hitRoad: false };
+
+  let hitRoad = false;
 
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
@@ -162,8 +163,7 @@ function walkTowardTarget(sx, sz, tx, tz, roadGrid, waterMask, w, h) {
     if (waterMask && waterMask.get(gx, gz) > 0) break;
 
     // Stop when near a road — but only after walking far enough to leave
-    // the starting road behind. We need at least ~20 cells of clear ground
-    // before we start looking for the destination road.
+    // the starting road behind (~100m)
     if (i > 20) {
       let nearRoad = false;
       for (let dz2 = -2; dz2 <= 2 && !nearRoad; dz2++) {
@@ -176,6 +176,7 @@ function walkTowardTarget(sx, sz, tx, tz, roadGrid, waterMask, w, h) {
       }
       if (nearRoad) {
         path.push({ gx, gz });
+        hitRoad = true;
         break;
       }
     }
@@ -183,7 +184,7 @@ function walkTowardTarget(sx, sz, tx, tz, roadGrid, waterMask, w, h) {
     path.push({ gx, gz });
   }
 
-  return path;
+  return { path, hitRoad };
 }
 
 function simplifyGridPath(pts, tolerance) {
