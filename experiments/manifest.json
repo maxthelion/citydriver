@@ -116,5 +116,48 @@
         "tick": null
       }
     ]
+  },
+  {
+    "num": "005",
+    "slug": "zone-subdivision",
+    "md": "005-zone-subdivision.md",
+    "images": [
+      {
+        "path": "005-output/zones-after-seed42.png",
+        "layer": "zones-after",
+        "seed": "42",
+        "tick": null
+      },
+      {
+        "path": "005-output/zones-before-seed42.png",
+        "layer": "zones-before",
+        "seed": "42",
+        "tick": null
+      },
+      {
+        "path": "005-output/roads-seed42.png",
+        "layer": "roads",
+        "seed": "42",
+        "tick": null
+      },
+      {
+        "path": "005-output/zones-before-seed884469.png",
+        "layer": "zones-before",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "005-output/roads-seed884469.png",
+        "layer": "roads",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "005-output/zones-after-seed884469.png",
+        "layer": "zones-after",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
   }
 ]
