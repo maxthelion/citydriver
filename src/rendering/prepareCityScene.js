@@ -103,7 +103,7 @@ function prepareRailways(map, ox, oz, cs) {
       if (localPts.length < 2) return null;
     }
 
-    return { localPts, halfWidth: 4, hierarchy: rail.hierarchy || 'branch' };
+    return { localPts, halfWidth: 7, hierarchy: rail.hierarchy || 'branch' };
   }).filter(Boolean);
 }
 

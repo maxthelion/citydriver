@@ -334,7 +334,7 @@ export class FeatureMap {
     const polyline = feature.polyline;
     if (!polyline || polyline.length < 2) return;
 
-    const halfWidth = 4; // 4m half-width (8m total — double track)
+    const halfWidth = 7; // 7m half-width (14m total — track + embankment shoulders)
 
     for (let i = 0; i < polyline.length - 1; i++) {
       const ax = polyline[i].x, az = polyline[i].z;
