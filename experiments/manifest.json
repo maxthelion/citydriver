@@ -1,0 +1,108 @@
+[
+  {
+    "num": "001",
+    "slug": "baseline",
+    "md": "001-baseline.md",
+    "images": [
+      {
+        "path": "001-output/reservations-seed12345-tick25.png",
+        "layer": "reservations",
+        "seed": "12345",
+        "tick": "25"
+      },
+      {
+        "path": "001-output/reservations-seed42-tick27.png",
+        "layer": "reservations",
+        "seed": "42",
+        "tick": "27"
+      },
+      {
+        "path": "001-output/reservations-seed884469-tick27.png",
+        "layer": "reservations",
+        "seed": "884469",
+        "tick": "27"
+      }
+    ]
+  },
+  {
+    "num": "002",
+    "slug": "throttled-ribbon-roads",
+    "md": "002-throttled-ribbon-roads.md",
+    "images": [
+      {
+        "path": "002-output/reservations-seed884469-tick27.png",
+        "layer": "reservations",
+        "seed": "884469",
+        "tick": "27"
+      }
+    ]
+  },
+  {
+    "num": "003",
+    "slug": "zone-visualisation",
+    "md": "003-zone-visualisation.md",
+    "images": [
+      {
+        "path": "003-output/commercialValue-seed884469-tick27.png",
+        "layer": "commercialValue",
+        "seed": "884469",
+        "tick": "27"
+      },
+      {
+        "path": "003-output/developmentProximity-seed884469-tick27.png",
+        "layer": "developmentProximity",
+        "seed": "884469",
+        "tick": "27"
+      },
+      {
+        "path": "003-output/reservations-seed884469-tick27.png",
+        "layer": "reservations",
+        "seed": "884469",
+        "tick": "27"
+      },
+      {
+        "path": "003-output/zones-seed884469-tick27.png",
+        "layer": "zones",
+        "seed": "884469",
+        "tick": "27"
+      },
+      {
+        "path": "003-output/zones-seed884469.png",
+        "layer": "zones",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "004",
+    "slug": "zone-boundary-roads",
+    "md": "004-zone-boundary-roads.md",
+    "images": [
+      {
+        "path": "004-output/zone-roads-seed42.png",
+        "layer": "zone-roads",
+        "seed": "42",
+        "tick": null
+      },
+      {
+        "path": "004-output/roads-only-seed884469.png",
+        "layer": "roads-only",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "004-output/zone-roads-seed884469.png",
+        "layer": "zone-roads",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "004-output/roads-only-seed42.png",
+        "layer": "roads-only",
+        "seed": "42",
+        "tick": null
+      }
+    ]
+  }
+]

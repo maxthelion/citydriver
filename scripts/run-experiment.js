@@ -115,3 +115,30 @@ const manifest = {
 
 writeFileSync(`${outDir}/manifest.json`, JSON.stringify(manifest, null, 2));
 console.log(`\nManifest written: ${outDir}/manifest.json (${images.length} images)`);
+
+// Update root experiments/manifest.json
+const rootManifestPath = 'experiments/manifest.json';
+let rootManifest = [];
+try {
+  rootManifest = JSON.parse(require('fs').readFileSync(rootManifestPath, 'utf-8'));
+} catch (e) {}
+
+// Find or create entry for this experiment
+const mdFile = readdirSync('experiments').find(f => f.startsWith(`${num}-`) && f.endsWith('.md'));
+const existingIdx = rootManifest.findIndex(e => e.num === num);
+const entry = {
+  num,
+  slug: mdFile ? mdFile.replace(`${num}-`, '').replace('.md', '') : 'unknown',
+  md: mdFile || null,
+  images: images.map(img => ({ path: img.path, layer: img.layer, seed: img.seed, tick: img.tick })),
+};
+
+if (existingIdx >= 0) {
+  rootManifest[existingIdx] = entry;
+} else {
+  rootManifest.push(entry);
+  rootManifest.sort((a, b) => a.num.localeCompare(b.num));
+}
+
+writeFileSync(rootManifestPath, JSON.stringify(rootManifest, null, 2));
+console.log(`Root manifest updated: ${rootManifest.length} experiments`);

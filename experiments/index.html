@@ -79,82 +79,58 @@
       { label: 'Res. Quality', color: 'rgb(180,120,220)' },
       { label: 'Port', color: 'rgb(0,180,180)' },
       { label: 'Skeleton Road', color: 'rgb(255,255,255)' },
+      { label: 'Zone Boundary Road', color: 'rgb(0,255,255)' },
       { label: 'Growth Road', color: 'rgb(255,220,100)' },
-      { label: 'Junction', color: 'rgb(255,0,0)' },
+      { label: 'Junction', color: 'rgb(255,50,50)' },
     ];
 
-    const experiments = [];
+    let experiments = [];
 
-    async function scanExperiments() {
-      for (let i = 1; i <= 100; i++) {
-        const num = String(i).padStart(3, '0');
-        const result = await loadExperiment(num);
-        if (!result) break;
-        experiments.push(result);
+    async function init() {
+      // Load the root manifest — single source of truth
+      try {
+        const resp = await fetch('manifest.json');
+        if (!resp.ok) { document.getElementById('main').textContent = 'No manifest.json found'; return; }
+        const entries = await resp.json();
+
+        for (const entry of entries) {
+          const exp = await loadExperiment(entry);
+          if (exp) experiments.push(exp);
+        }
+      } catch (e) {
+        document.getElementById('main').textContent = 'Error loading manifest: ' + e.message;
+        return;
       }
-      experiments.reverse();
+
+      experiments.reverse(); // newest first
       renderList();
       if (experiments.length > 0) showExperiment(0);
     }
 
-    async function loadExperiment(num) {
-      // Try manifest first
-      let manifest = null;
-      let images = [];
-      try {
-        const resp = await fetch(`${num}-output/manifest.json`);
-        if (resp.ok) {
-          manifest = await resp.json();
-          images = (manifest.images || []).map(img => ({
-            path: img.path,
-            seed: img.seed,
-            tick: img.tick ? `tick${img.tick}` : '',
-            layer: img.layer,
-          }));
-        }
-      } catch (e) {}
+    async function loadExperiment(entry) {
+      const { num, slug, md } = entry;
 
-      // Try to find the markdown file
-      let text = '', title = `Experiment ${num}`;
-      const slugs = [
-        'baseline', 'throttled-ribbon-roads', 'zone-visualisation',
-        'zone-boundary-roads', 'block-fill-residential', 'road-extension',
-        'reduced-road-spread', 'balanced-allocation', 'terrain-contours',
-        'influence-tuning', 'residential-fill', 'value-tuning',
-      ];
-      for (const slug of slugs) {
+      // Images come directly from root manifest
+      const images = (entry.images || []).map(img => ({
+        path: img.path,
+        seed: img.seed,
+        tick: img.tick ? `tick${img.tick}` : '',
+        layer: img.layer,
+      }));
+
+      // Load markdown
+      let text = '', title = slug;
+      if (md) {
         try {
-          const resp = await fetch(`${num}-${slug}.md`);
+          const resp = await fetch(md);
           if (resp.ok) {
             text = await resp.text();
             title = text.match(/^# Experiment \d+: (.+)/m)?.[1] || slug;
-            break;
           }
         } catch (e) {}
       }
 
-      // If no manifest and no markdown, check if output dir has any PNGs (fallback scan)
-      if (!manifest && !text) {
-        // Minimal scan — just check if the output dir exists
-        try {
-          const resp = await fetch(`${num}-output/`, { method: 'HEAD' });
-          if (!resp.ok && !text) return null;
-        } catch (e) {
-          if (!text) return null;
-        }
-      }
-
-      if (images.length === 0 && !text) return null;
-
-      return {
-        num, title, text, images,
-        meta: manifest ? {
-          generated: manifest.generated,
-          archetype: manifest.archetype,
-          ticks: manifest.ticks,
-          script: manifest.script,
-        } : null,
-      };
+      return { num, slug, title, text, images, meta: null };
     }
 
     function renderList() {
@@ -247,7 +223,7 @@
       `;
     }
 
-    scanExperiments();
+    init();
   </script>
 </body>
 </html>
