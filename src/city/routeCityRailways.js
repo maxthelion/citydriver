@@ -181,13 +181,16 @@ export function routeCityRailways(railways, elevation, waterMask, landValue, bou
 
     for (const p of result.path) railGrid.set(p.gx, p.gz, 1);
 
-    const simplified = simplifyPath(result.path, 4);
+    // Aggressive simplification for rendering — city grid is ~1200 cells wide,
+    // need very few waypoints for sweeping curves
+    const simplified = simplifyPath(result.path, 40);
     const polyline = simplified.map(p => ({
       x: originX + p.gx * cellSize,
       z: originZ + p.gz * cellSize,
     }));
 
-    paths.push({ path: simplified, polyline });
+    // Keep raw path for grading (needs every cell)
+    paths.push({ path: simplified, rawPath: result.path, polyline });
   }
 
   return { paths, station, railGrid, entries };
@@ -197,45 +200,51 @@ export function routeCityRailways(railways, elevation, waterMask, landValue, bou
  * Apply gentle grading to the railway corridor.
  */
 export function gradeRailwayCorridor(paths, entries, station, elevation, railGrid, cellSize) {
-  const CORRIDOR_RADIUS = 2;
-  const BLEND_RADIUS = 3;
+  const BLEND_RADIUS = 3; // cells beyond rail corridor to blend
 
+  // For each path, build a distance-along-path lookup for every rail cell,
+  // then set elevation to the interpolated grade.
   for (let pi = 0; pi < paths.length; pi++) {
-    const path = paths[pi].path;
-    if (path.length < 2) continue;
+    const rawPath = paths[pi].rawPath || paths[pi].path;
+    if (rawPath.length < 2) continue;
 
-    const entryElev = entries[pi]?.elevation ?? elevation.get(path[0].gx, path[0].gz);
+    const entryElev = entries[pi]?.elevation ?? elevation.get(rawPath[0].gx, rawPath[0].gz);
     const stationElev = station.elevation;
 
+    // Build cumulative distance along raw path
     const dists = [0];
-    for (let i = 1; i < path.length; i++) {
-      const dx = (path[i].gx - path[i-1].gx) * cellSize;
-      const dz = (path[i].gz - path[i-1].gz) * cellSize;
-      dists.push(dists[i-1] + Math.sqrt(dx*dx + dz*dz));
+    for (let i = 1; i < rawPath.length; i++) {
+      const dx = (rawPath[i].gx - rawPath[i - 1].gx) * cellSize;
+      const dz = (rawPath[i].gz - rawPath[i - 1].gz) * cellSize;
+      dists.push(dists[i - 1] + Math.sqrt(dx * dx + dz * dz));
     }
     const totalDist = dists[dists.length - 1] || 1;
 
-    for (let i = 0; i < path.length; i++) {
+    // Grade every cell along the raw path
+    for (let i = 0; i < rawPath.length; i++) {
       const t = dists[i] / totalDist;
       const desiredElev = entryElev + (stationElev - entryElev) * t;
+      const { gx, gz } = rawPath[i];
 
-      for (let ddz = -CORRIDOR_RADIUS; ddz <= CORRIDOR_RADIUS; ddz++) {
-        for (let ddx = -CORRIDOR_RADIUS; ddx <= CORRIDOR_RADIUS; ddx++) {
-          const gx = path[i].gx + ddx, gz = path[i].gz + ddz;
-          if (gx < 0 || gx >= elevation.width || gz < 0 || gz >= elevation.height) continue;
-          elevation.set(gx, gz, desiredElev);
+      // Set the track cell and immediate neighbours to desired elevation
+      for (let ddz = -1; ddz <= 1; ddz++) {
+        for (let ddx = -1; ddx <= 1; ddx++) {
+          const nx = gx + ddx, nz = gz + ddz;
+          if (nx < 0 || nx >= elevation.width || nz < 0 || nz >= elevation.height) continue;
+          elevation.set(nx, nz, desiredElev);
         }
       }
 
+      // Blend edges back to natural terrain
       for (let ddz = -BLEND_RADIUS; ddz <= BLEND_RADIUS; ddz++) {
         for (let ddx = -BLEND_RADIUS; ddx <= BLEND_RADIUS; ddx++) {
-          const r = Math.sqrt(ddx*ddx + ddz*ddz);
-          if (r <= CORRIDOR_RADIUS || r > BLEND_RADIUS) continue;
-          const gx = path[i].gx + ddx, gz = path[i].gz + ddz;
-          if (gx < 0 || gx >= elevation.width || gz < 0 || gz >= elevation.height) continue;
-          const blendT = (r - CORRIDOR_RADIUS) / (BLEND_RADIUS - CORRIDOR_RADIUS);
-          const natural = elevation.get(gx, gz);
-          elevation.set(gx, gz, desiredElev + (natural - desiredElev) * blendT);
+          const r = Math.sqrt(ddx * ddx + ddz * ddz);
+          if (r <= 1.5 || r > BLEND_RADIUS) continue;
+          const nx = gx + ddx, nz = gz + ddz;
+          if (nx < 0 || nx >= elevation.width || nz < 0 || nz >= elevation.height) continue;
+          const blendT = (r - 1.5) / (BLEND_RADIUS - 1.5);
+          const natural = elevation.get(nx, nz);
+          elevation.set(nx, nz, desiredElev + (natural - desiredElev) * blendT);
         }
       }
     }
