@@ -102,17 +102,55 @@ export function createZoneBoundaryRoads(map) {
     }
   }
 
-  // Step 5: Simplify, smooth, and stamp onto roadGrid
+  // Step 5: Simplify, smooth (pinning junctions), and stamp onto roadGrid
   const stampedCells = [];
   for (let segment of placedSegments) {
     // Simplify: remove nearly-collinear vertices (reduces tight zigzags)
     let pts = segment.map(p => ({ x: p.gx, z: p.gz }));
-    pts = simplifyPolyline(pts, 2.0); // tolerance of 2 cells
+    pts = simplifyPolyline(pts, 2.0);
 
-    // Chaikin smooth (2 passes)
+    // Mark which vertices are pinned (near a junction or arterial)
+    const pinned = pts.map(p => {
+      const gp = { gx: Math.round(p.x), gz: Math.round(p.z) };
+      return isNearJunction(gp, clusters, CLUSTER_RADIUS + 2);
+    });
+
+    // Chaikin smooth with pinned vertices held in place (2 passes)
     for (let pass = 0; pass < 2; pass++) {
-      if (pts.length >= 3) pts = chaikinSmooth(pts);
+      if (pts.length < 3) break;
+      const smoothed = [pts[0]];
+      const newPinned = [pinned[0]];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i], b = pts[i + 1];
+        if (pinned[i] || pinned[i + 1]) {
+          // Don't smooth across pinned vertices — keep them exact
+          if (!pinned[i]) {
+            smoothed.push({ x: a.x * 0.75 + b.x * 0.25, z: a.z * 0.75 + b.z * 0.25 });
+            newPinned.push(false);
+          }
+          if (pinned[i + 1]) {
+            smoothed.push(b);
+            newPinned.push(true);
+          } else {
+            smoothed.push({ x: a.x * 0.25 + b.x * 0.75, z: a.z * 0.25 + b.z * 0.75 });
+            newPinned.push(false);
+          }
+        } else {
+          smoothed.push({ x: a.x * 0.75 + b.x * 0.25, z: a.z * 0.75 + b.z * 0.25 });
+          newPinned.push(false);
+          smoothed.push({ x: a.x * 0.25 + b.x * 0.75, z: a.z * 0.25 + b.z * 0.75 });
+          newPinned.push(false);
+        }
+      }
+      if (!pinned[pts.length - 1]) {
+        smoothed.push(pts[pts.length - 1]);
+        newPinned.push(pinned[pts.length - 1]);
+      }
+      pts = smoothed;
+      pinned.length = 0;
+      pinned.push(...newPinned);
     }
+
     segment = pts.map(p => ({ gx: Math.round(p.x), gz: Math.round(p.z) }));
 
     for (let i = 0; i < segment.length - 1; i++) {
