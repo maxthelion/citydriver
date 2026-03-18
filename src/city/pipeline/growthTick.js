@@ -190,8 +190,10 @@ export function runGrowthTick(map, archetype, state) {
   // Phase 4 ROADS: grow streets from ribbon results
   if (roadGrid && (allRibbonGaps.length > 0 || allRibbonEndpoints.length > 0)) {
     const roadConfig = growth.roadGrowth || {};
+    const waterMask = map.hasLayer('waterMask') ? map.getLayer('waterMask') : null;
     growRoads({
       roadGrid,
+      waterMask,
       ribbonGaps: allRibbonGaps,
       ribbonEndpoints: allRibbonEndpoints,
       w, h,
