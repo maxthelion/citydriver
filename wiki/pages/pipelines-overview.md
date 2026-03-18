@@ -103,3 +103,9 @@ Each archetype defines a set of starting variables and eligibility rules that de
 **Eligibility:** Favours higher-tier settlements (tier 1-2). Benefits from road count.
 
 **Starting variables:** Civic 18%, open space 14% — largest non-residential allocation. Industrial minimal (4%) and pushed far downwind.
+
+## 5. Pipeline Integrity
+
+The pipeline produces multiple grid layers that must maintain invariant relationships — water cells can't be road cells, buildings can't sit on railways, etc.
+
+See [[bitmap-invariants]] for the full list of layer relationships, and [[pipeline-invariant-tests]] for the integration test strategy that checks these at every pipeline step across multiple seeds.
