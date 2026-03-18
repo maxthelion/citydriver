@@ -89,12 +89,15 @@ export function createZoneBoundaryRoads(map) {
     }
   }
 
-  // Compact graph to merge nearby nodes (e.g. two zone boundary roads
-  // approaching the same arterial from opposite sides create split nodes
-  // that are close together but not identical)
+  // Compact graph to merge nearby nodes
   if (map.graph) {
-    const compactDist = map.cellSize * 8; // ~40m — wide enough to merge paired junction nodes
+    const nodesBefore = map.graph.nodes.size;
+    const edgesBefore = map.graph.edges.size;
+    const compactDist = map.cellSize * 12; // ~60m — wide enough for paired nodes on opposite sides of arterial
     map.graph.compact(compactDist);
+    const nodesAfter = map.graph.nodes.size;
+    const edgesAfter = map.graph.edges.size;
+    console.log(`[zoneBoundaryRoads] graph.compact(${compactDist.toFixed(0)}m): nodes ${nodesBefore}→${nodesAfter}, edges ${edgesBefore}→${edgesAfter}`);
   }
 
   const segmentsAdded = map.roads.length - roadsBefore;
@@ -207,8 +210,22 @@ function findOrCreateNodeOnEdge(map, x, z, snapDist) {
   }
 
   if (bestEdgeId !== null) {
-    // Split the edge and return the new junction node
-    return graph.splitEdge(bestEdgeId, x, z);
+    // Project point onto the nearest position on the edge
+    // (so the split node is ON the edge, not offset to one side)
+    const poly = graph.edgePolyline(bestEdgeId);
+    let projX = x, projZ = z, projBest = Infinity;
+    for (let i = 0; i < poly.length - 1; i++) {
+      const ax = poly[i].x, az = poly[i].z;
+      const bx = poly[i+1].x, bz = poly[i+1].z;
+      const dx = bx - ax, dz = bz - az;
+      const lenSq = dx * dx + dz * dz;
+      if (lenSq < 0.001) continue;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lenSq));
+      const px = ax + t * dx, pz = az + t * dz;
+      const d = (x - px) * (x - px) + (z - pz) * (z - pz);
+      if (d < projBest) { projBest = d; projX = px; projZ = pz; }
+    }
+    return graph.splitEdge(bestEdgeId, projX, projZ);
   }
 
   // Fallback: create a new isolated node
