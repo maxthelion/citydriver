@@ -111,14 +111,12 @@
       const { num, slug, md } = entry;
 
       // Images come directly from root manifest
-      console.log(`Entry ${num} raw:`, JSON.stringify(entry).slice(0, 200));
       const images = (entry.images || []).map(img => ({
         path: img.path,
         seed: img.seed,
         tick: img.tick ? `tick${img.tick}` : '',
         layer: img.layer,
       }));
-      console.log(`Experiment ${num}: ${images.length} images`, images.map(i => i.path));
 
       // Load markdown
       let text = '', title = slug;
