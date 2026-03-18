@@ -162,8 +162,8 @@ function addRoad(map, polyline, hierarchy, width) {
     const snapDist = map.cellSize * 3;
     const startPt = polyline[0];
     const endPt = polyline[polyline.length - 1];
-    const startNode = findOrCreateNode(map, startPt.x, startPt.z, snapDist);
-    const endNode = findOrCreateNode(map, endPt.x, endPt.z, snapDist);
+    const startNode = findOrCreateNodeOnEdge(map, startPt.x, startPt.z, snapDist);
+    const endNode = findOrCreateNodeOnEdge(map, endPt.x, endPt.z, snapDist);
 
     if (startNode !== endNode) {
       const points = polyline.slice(1, -1).map(p => ({ x: p.x, z: p.z }));
@@ -172,11 +172,57 @@ function addRoad(map, polyline, hierarchy, width) {
   }
 }
 
-function findOrCreateNode(map, x, z, snapDist) {
+/**
+ * Find or create a graph node at (x, z).
+ * First checks for nearby existing nodes (snap).
+ * If no node nearby, checks if the point is near an existing edge
+ * and splits that edge to create a junction. This handles the case
+ * where a zone boundary road meets the middle of an arterial.
+ */
+function findOrCreateNodeOnEdge(map, x, z, snapDist) {
   const graph = map.graph;
+
+  // First: try snapping to existing node
   const nearest = graph.nearestNode(x, z);
   if (nearest && nearest.dist < snapDist) return nearest.id;
+
+  // Second: check if near an existing edge — split it to create junction
+  const snapDistSq = snapDist * snapDist;
+  let bestEdgeId = null;
+  let bestDist = snapDistSq;
+
+  for (const [edgeId, edge] of graph.edges) {
+    const poly = graph.edgePolyline(edgeId);
+    for (let i = 0; i < poly.length - 1; i++) {
+      const d = pointToSegDistSq(x, z, poly[i].x, poly[i].z, poly[i + 1].x, poly[i + 1].z);
+      if (d < bestDist) {
+        bestDist = d;
+        bestEdgeId = edgeId;
+      }
+    }
+  }
+
+  if (bestEdgeId !== null) {
+    // Split the edge and return the new junction node
+    return graph.splitEdge(bestEdgeId, x, z);
+  }
+
+  // Fallback: create a new isolated node
   return graph.addNode(x, z);
+}
+
+/** Squared distance from point (px,pz) to line segment (ax,az)-(bx,bz) */
+function pointToSegDistSq(px, pz, ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az;
+  const lenSq = dx * dx + dz * dz;
+  if (lenSq < 0.001) {
+    const ex = px - ax, ez = pz - az;
+    return ex * ex + ez * ez;
+  }
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / lenSq));
+  const projX = ax + t * dx, projZ = az + t * dz;
+  const ex = px - projX, ez = pz - projZ;
+  return ex * ex + ez * ez;
 }
 
 function clipStreetToGrid(street, map) {
