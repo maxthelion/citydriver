@@ -177,5 +177,24 @@
         "tick": null
       }
     ]
+  },
+  {
+    "num": "006",
+    "slug": "ribbon-in-subdivided-zone",
+    "md": "006-ribbon-in-subdivided-zone.md",
+    "images": [
+      {
+        "path": "006-output/ribbon-zone-seed884469.png",
+        "layer": "ribbon-zone",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "006-output/ribbon-zone-seed42.png",
+        "layer": "ribbon-zone",
+        "seed": "42",
+        "tick": null
+      }
+    ]
   }
 ]

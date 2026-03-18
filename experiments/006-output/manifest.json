@@ -1,0 +1,28 @@
+{
+  "experiment": "006",
+  "generated": "2026-03-18T19:44:16.385Z",
+  "seeds": [
+    "884469",
+    "42"
+  ],
+  "layers": null,
+  "archetype": null,
+  "ticks": null,
+  "script": "render-ribbon-in-zone.js",
+  "images": [
+    {
+      "file": "ribbon-zone-seed884469.png",
+      "path": "006-output/ribbon-zone-seed884469.png",
+      "layer": "ribbon-zone",
+      "seed": "884469",
+      "tick": null
+    },
+    {
+      "file": "ribbon-zone-seed42.png",
+      "path": "006-output/ribbon-zone-seed42.png",
+      "layer": "ribbon-zone",
+      "seed": "42",
+      "tick": null
+    }
+  ]
+}
