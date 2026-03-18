@@ -81,9 +81,10 @@ export function createZoneBoundaryRoads(map) {
     const segments = clipStreetToGrid(pts, map);
     for (const seg of segments) {
       if (seg.length < 2) continue;
-      // Snap endpoints to nearest existing road cell to ensure connection
-      snapEndpointToRoad(seg, 0, map);
-      snapEndpointToRoad(seg, seg.length - 1, map);
+      // Note: endpoint snapping removed — it was pulling polyline starts
+      // onto arterials, causing zone boundary roads to overlap arterials.
+      // The graph's node snapping (snapDist = cellSize * 3) in addRoad
+      // handles junction connection at the topology level instead.
       addRoad(map, seg, 'collector', 6);
     }
   }
