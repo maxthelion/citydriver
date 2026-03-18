@@ -17,7 +17,8 @@
 
 const ARTERIAL_SNAP_DIST_M = 25;  // metres — max distance to snap to arterial
 const MIN_ZONE_CELLS = 1000;       // skip tiny zones
-const MIN_ROAD_LENGTH_M = 40;      // metres — skip very short segments
+const MIN_ROAD_LENGTH_M = 60;      // metres — skip very short segments
+const SNAP_TO_ROAD_DIST_M = 15;   // metres — snap endpoints to nearby roads
 const CLIP_SAMPLE_STEP = 2;        // metres — densify step for clipping
 const ROAD_HALF_WIDTH = 8;         // metres — buffer around existing roads (wide to prevent parallel duplicates)
 
@@ -80,6 +81,9 @@ export function createZoneBoundaryRoads(map) {
     const segments = clipStreetToGrid(pts, map);
     for (const seg of segments) {
       if (seg.length < 2) continue;
+      // Snap endpoints to nearest existing road cell to ensure connection
+      snapEndpointToRoad(seg, 0, map);
+      snapEndpointToRoad(seg, seg.length - 1, map);
       addRoad(map, seg, 'collector', 6);
     }
   }
@@ -93,6 +97,45 @@ export function createZoneBoundaryRoads(map) {
 
   console.log(`[zoneBoundaryRoads] ${candidateBoundaries.length} boundaries → ${segmentsAdded} road segments`);
   return { segmentsAdded, cellsAdded };
+}
+
+/**
+ * Snap a polyline endpoint to the nearest existing road cell.
+ * If the endpoint is within SNAP_TO_ROAD_DIST_M of a road cell,
+ * move it to that cell's world position so the road connects.
+ */
+function snapEndpointToRoad(polyline, idx, map) {
+  const pt = polyline[idx];
+  const cs = map.cellSize;
+  const gx = Math.round((pt.x - map.originX) / cs);
+  const gz = Math.round((pt.z - map.originZ) / cs);
+  const searchR = Math.ceil(SNAP_TO_ROAD_DIST_M / cs);
+  const roadGrid = map.hasLayer('roadGrid') ? map.getLayer('roadGrid') : null;
+  if (!roadGrid) return;
+
+  let bestDist = Infinity;
+  let bestX = gx, bestZ = gz;
+
+  for (let dz = -searchR; dz <= searchR; dz++) {
+    for (let dx = -searchR; dx <= searchR; dx++) {
+      const nx = gx + dx, nz = gz + dz;
+      if (nx < 0 || nx >= map.width || nz < 0 || nz >= map.height) continue;
+      if (roadGrid.get(nx, nz) === 0) continue;
+      const d = dx * dx + dz * dz;
+      if (d < bestDist) {
+        bestDist = d;
+        bestX = nx;
+        bestZ = nz;
+      }
+    }
+  }
+
+  if (bestDist < searchR * searchR && bestDist > 0) {
+    polyline[idx] = {
+      x: map.originX + bestX * cs,
+      z: map.originZ + bestZ * cs,
+    };
+  }
 }
 
 // ── Shared road utilities (same as layoutRibbons.js) ──────────────
