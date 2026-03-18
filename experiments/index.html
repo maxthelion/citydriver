@@ -7,7 +7,7 @@
     body { font-family: monospace; background: #1a1a2e; color: #ccc; display: flex; height: 100vh; }
 
     .sidebar {
-      width: 300px; min-width: 300px; border-right: 1px solid #333;
+      width: 280px; min-width: 280px; border-right: 1px solid #333;
       overflow-y: auto; padding: 12px; background: #16162a;
     }
     .sidebar h2 { color: #88aaff; font-size: 14px; margin-bottom: 12px; }
@@ -24,23 +24,38 @@
 
     .main { flex: 1; overflow-y: auto; padding: 16px; }
 
-    .description {
-      max-width: 800px; margin-bottom: 16px; padding: 12px;
-      background: #222240; border-radius: 4px; font-size: 12px; line-height: 1.6;
-      white-space: pre-wrap;
+    .legend {
+      display: flex; flex-wrap: wrap; gap: 8px 16px;
+      padding: 10px 12px; background: #222240; border-radius: 4px;
+      margin-bottom: 16px; font-size: 11px;
     }
-    .description h3 { color: #88aaff; margin-bottom: 8px; }
+    .legend-item { display: flex; align-items: center; gap: 5px; }
+    .legend-swatch {
+      width: 14px; height: 14px; border-radius: 2px; border: 1px solid #444;
+      display: inline-block;
+    }
 
-    .images { display: flex; flex-wrap: wrap; gap: 12px; }
+    .images { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
     .image-card {
-      background: #222240; border-radius: 4px; padding: 8px; max-width: 600px;
+      background: #222240; border-radius: 4px; padding: 8px; max-width: 500px;
     }
     .image-card img {
-      width: 100%; image-rendering: pixelated; border: 1px solid #333;
+      width: 100%; image-rendering: pixelated; border: 1px solid #333; cursor: zoom-in;
+    }
+    .image-card img.zoomed {
+      max-width: none; width: auto; max-height: none; cursor: zoom-out;
     }
     .image-card .label {
       font-size: 11px; color: #888; margin-top: 4px; text-align: center;
     }
+
+    .description {
+      max-width: 800px; padding: 12px;
+      background: #222240; border-radius: 4px; font-size: 12px; line-height: 1.6;
+      white-space: pre-wrap;
+    }
+    .description h3 { color: #88aaff; margin-bottom: 6px; margin-top: 10px; }
+    .description h3:first-child { margin-top: 0; }
   </style>
 </head>
 <body>
@@ -51,44 +66,41 @@
   <div class="main" id="main"></div>
 
   <script>
-    async function loadExperiments() {
-      // Scan for experiment markdown files by trying sequential numbers
-      const experiments = [];
-      for (let i = 1; i <= 100; i++) {
-        const num = String(i).padStart(3, '0');
-        try {
-          const resp = await fetch(`${num}-${await findSlug(num)}`);
-          if (!resp.ok) break;
-        } catch (e) { /* try another way */ }
-      }
-
-      // Simpler approach: fetch a manifest or scan known files
-      // We'll build the list from what we know and make it self-updating
-      await scanExperiments();
-    }
+    const LEGEND_ITEMS = [
+      { label: 'Commercial', color: 'rgb(255,165,0)' },
+      { label: 'Industrial', color: 'rgb(128,128,128)' },
+      { label: 'Civic', color: 'rgb(0,100,255)' },
+      { label: 'Open Space', color: 'rgb(0,200,0)' },
+      { label: 'Agriculture', color: 'rgb(120,90,30)' },
+      { label: 'Res. Fine', color: 'rgb(230,200,120)' },
+      { label: 'Res. Estate', color: 'rgb(200,60,60)' },
+      { label: 'Res. Quality', color: 'rgb(180,120,220)' },
+      { label: 'Port', color: 'rgb(0,180,180)' },
+      { label: 'Skeleton Road', color: 'rgb(255,255,255)' },
+      { label: 'Growth Road', color: 'rgb(255,220,100)' },
+    ];
 
     const experiments = [];
 
     async function scanExperiments() {
-      // Try fetching experiment files by number
       for (let i = 1; i <= 100; i++) {
         const num = String(i).padStart(3, '0');
-        // Try to fetch the output directory listing
-        const mdFiles = await tryFetchMd(num);
-        if (!mdFiles) break;
-        experiments.push(mdFiles);
+        const result = await tryFetchMd(num);
+        if (!result) break;
+        experiments.push(result);
       }
+      experiments.reverse(); // most recent first
       renderList();
-      if (experiments.length > 0) showExperiment(experiments.length - 1);
+      if (experiments.length > 0) showExperiment(0);
     }
 
     async function tryFetchMd(num) {
-      // Try common slug patterns
       const slugs = [
         'baseline', 'throttled-ribbon-roads', 'block-fill-residential',
         'reduced-road-spread', 'balanced-allocation', 'terrain-contours',
         'influence-tuning', 'port-zones', 'industrial-placement',
         'civic-typed-plots', 'agriculture-belt', 'cross-streets',
+        'residential-bfs-fill', 'road-throttle', 'value-tuning',
       ];
 
       for (const slug of slugs) {
@@ -103,23 +115,17 @@
         } catch (e) {}
       }
 
-      // Try fetching any file starting with the number
-      try {
-        // Fallback: try to find by listing (won't work on static server)
-        // Instead, try to find the output directory
-        const images = await findImages(num);
-        if (images.length > 0) {
-          return { num, slug: 'unknown', title: `Experiment ${num}`, text: '', images };
-        }
-      } catch (e) {}
-
+      const images = await findImages(num);
+      if (images.length > 0) {
+        return { num, slug: 'unknown', title: `Experiment ${num}`, text: '', images };
+      }
       return null;
     }
 
     async function findImages(num) {
       const images = [];
       const seeds = ['884469', '42', '12345'];
-      const ticks = ['tick25', 'tick27', 'tick28', 'tick30'];
+      const ticks = ['tick20', 'tick23', 'tick25', 'tick27', 'tick28', 'tick30', 'tick35', 'tick40', 'tick50'];
 
       for (const seed of seeds) {
         for (const tick of ticks) {
@@ -150,7 +156,6 @@
     }
 
     function showExperiment(idx) {
-      // Update active state
       document.querySelectorAll('.experiment').forEach((el, i) => {
         el.classList.toggle('active', i === idx);
       });
@@ -158,31 +163,44 @@
       const exp = experiments[idx];
       const main = document.getElementById('main');
 
-      // Parse markdown into sections
+      // Build legend
+      let legendHtml = '<div class="legend">';
+      for (const item of LEGEND_ITEMS) {
+        legendHtml += `<div class="legend-item"><span class="legend-swatch" style="background:${item.color}"></span>${item.label}</div>`;
+      }
+      legendHtml += '</div>';
+
+      // Build images (above text)
+      let imagesHtml = '<div class="images">';
+      if (exp.images.length === 0) {
+        imagesHtml += '<div style="color:#666">No images found</div>';
+      }
+      for (const img of exp.images) {
+        imagesHtml += `
+          <div class="image-card">
+            <img src="${img.path}" alt="seed ${img.seed}" onclick="this.classList.toggle('zoomed')">
+            <div class="label">seed ${img.seed} @ ${img.tick}</div>
+          </div>
+        `;
+      }
+      imagesHtml += '</div>';
+
+      // Parse markdown into description sections
       const sections = exp.text.split(/^## /m).filter(Boolean);
       let descHtml = '';
       for (const section of sections) {
         const lines = section.trim().split('\n');
         const heading = lines[0];
         const body = lines.slice(1).join('\n').trim();
-        if (heading.startsWith('# ')) continue; // skip title
+        if (heading.startsWith('# ')) continue;
         descHtml += `<h3>${heading}</h3>\n${body}\n\n`;
-      }
-
-      let imagesHtml = '';
-      for (const img of exp.images) {
-        imagesHtml += `
-          <div class="image-card">
-            <img src="${img.path}" alt="seed ${img.seed}">
-            <div class="label">seed ${img.seed} @ ${img.tick}</div>
-          </div>
-        `;
       }
 
       main.innerHTML = `
         <h2 style="color:#88aaff; margin-bottom:12px;">Experiment ${exp.num}: ${exp.title}</h2>
+        ${legendHtml}
+        ${imagesHtml}
         ${descHtml ? `<div class="description">${descHtml}</div>` : ''}
-        <div class="images">${imagesHtml || '<div style="color:#666">No images found</div>'}</div>
       `;
     }
 
