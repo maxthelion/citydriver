@@ -161,10 +161,21 @@ function walkTowardTarget(sx, sz, tx, tz, roadGrid, waterMask, w, h) {
     if (gx < 0 || gx >= w || gz < 0 || gz >= h) break;
     if (waterMask && waterMask.get(gx, gz) > 0) break;
 
-    // If we hit a road (and we've walked at least a few cells), stop
-    if (i > 3 && roadGrid.get(gx, gz) > 0) {
-      path.push({ gx, gz });
-      break;
+    // If we're near a road (within 3 cells) and we've walked at least a few cells, stop
+    if (i > 3) {
+      let nearRoad = false;
+      for (let dz2 = -3; dz2 <= 3 && !nearRoad; dz2++) {
+        for (let dx2 = -3; dx2 <= 3 && !nearRoad; dx2++) {
+          const nx = gx + dx2, nz = gz + dz2;
+          if (nx >= 0 && nx < w && nz >= 0 && nz < h && roadGrid.get(nx, nz) > 0) {
+            nearRoad = true;
+          }
+        }
+      }
+      if (nearRoad) {
+        path.push({ gx, gz });
+        break;
+      }
     }
 
     path.push({ gx, gz });

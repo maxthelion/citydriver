@@ -123,15 +123,33 @@
     "md": "005-zone-subdivision.md",
     "images": [
       {
+        "path": "005-output/zones-after-seed12345.png",
+        "layer": "zones-after",
+        "seed": "12345",
+        "tick": null
+      },
+      {
         "path": "005-output/zones-after-seed42.png",
         "layer": "zones-after",
         "seed": "42",
         "tick": null
       },
       {
+        "path": "005-output/zones-before-seed12345.png",
+        "layer": "zones-before",
+        "seed": "12345",
+        "tick": null
+      },
+      {
         "path": "005-output/zones-before-seed42.png",
         "layer": "zones-before",
         "seed": "42",
+        "tick": null
+      },
+      {
+        "path": "005-output/roads-seed12345.png",
+        "layer": "roads",
+        "seed": "12345",
         "tick": null
       },
       {
