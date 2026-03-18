@@ -89,15 +89,17 @@ export function createZoneBoundaryRoads(map) {
     }
   }
 
-  const segmentsAdded = map.roads.length - roadsBefore;
-  // Count new road cells (approximate)
-  let cellsAdded = 0;
-  for (let z = 0; z < h; z++)
-    for (let x = 0; x < w; x++)
-      if (roadGrid.get(x, z) > 0) cellsAdded++;
+  // Compact graph to merge nearby nodes (e.g. two zone boundary roads
+  // approaching the same arterial from opposite sides create split nodes
+  // that are close together but not identical)
+  if (map.graph) {
+    const compactDist = map.cellSize * 8; // ~40m — wide enough to merge paired junction nodes
+    map.graph.compact(compactDist);
+  }
 
+  const segmentsAdded = map.roads.length - roadsBefore;
   console.log(`[zoneBoundaryRoads] ${candidateBoundaries.length} boundaries → ${segmentsAdded} road segments`);
-  return { segmentsAdded, cellsAdded };
+  return { segmentsAdded };
 }
 
 /**
@@ -159,7 +161,7 @@ function addRoad(map, polyline, hierarchy, width) {
   }
 
   if (polyline.length >= 2 && map.graph) {
-    const snapDist = map.cellSize * 3;
+    const snapDist = map.cellSize * 5; // wider snap to bridge clip buffer gap
     const startPt = polyline[0];
     const endPt = polyline[polyline.length - 1];
     const startNode = findOrCreateNodeOnEdge(map, startPt.x, startPt.z, snapDist);
@@ -182,9 +184,11 @@ function addRoad(map, polyline, hierarchy, width) {
 function findOrCreateNodeOnEdge(map, x, z, snapDist) {
   const graph = map.graph;
 
-  // First: try snapping to existing node
+  // First: try snapping to existing node (including nodes from previous splits)
   const nearest = graph.nearestNode(x, z);
-  if (nearest && nearest.dist < snapDist) return nearest.id;
+  if (nearest && nearest.dist < snapDist) {
+    return nearest.id;
+  }
 
   // Second: check if near an existing edge — split it to create junction
   const snapDistSq = snapDist * snapDist;
