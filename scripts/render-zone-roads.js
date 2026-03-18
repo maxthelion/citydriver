@@ -122,16 +122,20 @@ if (roadGrid) {
       }
 }
 
-// Junction candidates (red dots, 5px)
-for (const j of result.junctions) {
-  for (let dz = -2; dz <= 2; dz++)
-    for (let dx = -2; dx <= 2; dx++) {
-      const px = j.gx + dx, pz = j.gz + dz;
-      if (px >= 0 && px < w && pz >= 0 && pz < h) {
-        const idx = (pz * w + px) * 3;
-        pixels[idx] = 255; pixels[idx + 1] = 0; pixels[idx + 2] = 0;
+// Graph nodes as red dots (5px) — shows where road system registered junctions
+if (map.graph) {
+  for (const [, node] of map.graph.nodes) {
+    const gx = Math.round((node.x - map.originX) / map.cellSize);
+    const gz = Math.round((node.z - map.originZ) / map.cellSize);
+    for (let dz = -2; dz <= 2; dz++)
+      for (let dx = -2; dx <= 2; dx++) {
+        const px = gx + dx, pz = gz + dz;
+        if (px >= 0 && px < w && pz >= 0 && pz < h) {
+          const idx = (pz * w + px) * 3;
+          pixels[idx] = 255; pixels[idx + 1] = 0; pixels[idx + 2] = 0;
+        }
       }
-    }
+  }
 }
 
 const { execSync } = require('child_process');
@@ -190,16 +194,20 @@ if (roadGrid) {
           }
       }
 }
-// Junctions (red, 5px)
-for (const j of result.junctions) {
-  for (let dz = -2; dz <= 2; dz++)
-    for (let dx = -2; dx <= 2; dx++) {
-      const px = j.gx + dx, pz = j.gz + dz;
-      if (px >= 0 && px < w && pz >= 0 && pz < h) {
-        const idx = (pz * w + px) * 3;
-        roadsPixels[idx] = 255; roadsPixels[idx + 1] = 50; roadsPixels[idx + 2] = 50;
+// Graph nodes (red, 3px)
+if (map.graph) {
+  for (const [, node] of map.graph.nodes) {
+    const gx = Math.round((node.x - map.originX) / map.cellSize);
+    const gz = Math.round((node.z - map.originZ) / map.cellSize);
+    for (let dz = -1; dz <= 1; dz++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const px = gx + dx, pz = gz + dz;
+        if (px >= 0 && px < w && pz >= 0 && pz < h) {
+          const idx = (pz * w + px) * 3;
+          roadsPixels[idx] = 255; roadsPixels[idx + 1] = 50; roadsPixels[idx + 2] = 50;
+        }
       }
-    }
+  }
 }
 const roadsPpmPath = `${outDir}/roads-only-seed${seed}.ppm`;
 const roadsPngPath = `${outDir}/roads-only-seed${seed}.png`;

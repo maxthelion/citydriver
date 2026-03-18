@@ -1,121 +1,97 @@
 /**
  * Create secondary roads from zone boundary geometry.
  *
+ * Uses the existing road system (_clipStreetToGrid + _addRoad) to properly
+ * integrate with the road grid, planar graph, and deduplication.
+ *
  * Algorithm:
- * 1. Collect all zone polygon vertices
- * 2. Cluster nearby vertices into junction candidates
- * 3. Find which candidates are near arterial road cells → confirmed junctions
- * 4. Walk zone boundary segments between confirmed junctions → mark as roads
+ * 1. Collect zone boundary polygons (world coordinates)
+ * 2. Filter: only zones that touch an arterial road
+ * 3. Filter: skip tiny zones
+ * 4. Simplify + smooth boundary polylines (pinning junction vertices)
+ * 5. Clip against existing roads/water (reuse _clipStreetToGrid)
+ * 6. Add as roads via _addRoad (stamps grid, updates graph, snaps nodes)
  */
 
 import { chaikinSmooth } from '../../core/math.js';
 
-const CLUSTER_RADIUS = 3;       // cells — merge vertices within this distance
-const ARTERIAL_SNAP_DIST = 5;   // cells — max distance to snap to a road cell
-const MIN_SEGMENT_LENGTH = 5;   // cells — skip very short boundary segments
-const MIN_ZONE_CELLS = 1000;    // skip tiny zones — their boundaries make stub roads
+const ARTERIAL_SNAP_DIST_M = 25;  // metres — max distance to snap to arterial
+const MIN_ZONE_CELLS = 1000;       // skip tiny zones
+const MIN_ROAD_LENGTH_M = 40;      // metres — skip very short segments
+const CLIP_SAMPLE_STEP = 2;        // metres — densify step for clipping
+const ROAD_HALF_WIDTH = 3;         // metres — buffer around existing roads
 
 /**
  * Create secondary roads from zone boundaries.
  *
- * @param {object} map - FeatureMap with developmentZones, roadGrid, waterMask, originX, originZ, cellSize
- * @returns {{ junctions: Array<{gx,gz}>, segments: Array<Array<{gx,gz}>> }} placed junctions and road segments
+ * @param {object} map - FeatureMap
+ * @returns {{ segmentsAdded: number, cellsAdded: number }}
  */
 export function createZoneBoundaryRoads(map) {
   const zones = map.developmentZones;
-  if (!zones || zones.length === 0) return { junctions: [], segments: [] };
+  if (!zones || zones.length === 0) return { segmentsAdded: 0, cellsAdded: 0 };
 
   const roadGrid = map.hasLayer('roadGrid') ? map.getLayer('roadGrid') : null;
   const waterMask = map.hasLayer('waterMask') ? map.getLayer('waterMask') : null;
-  if (!roadGrid) return { junctions: [], segments: [] };
+  if (!roadGrid) return { segmentsAdded: 0, cellsAdded: 0 };
 
   const w = map.width, h = map.height;
   const cs = map.cellSize;
-  const ox = map.originX, oz = map.originZ;
+  const snapDist = ARTERIAL_SNAP_DIST_M / cs; // in cells
 
-  // Step 1: Collect all zone polygon vertices as grid coordinates
-  const allVertices = [];
+  // Step 1: Find zone boundaries that touch arterial roads
+  const candidateBoundaries = [];
+
   for (const zone of zones) {
     if (!zone.boundary || zone.boundary.length < 3) continue;
+    if (zone.cells.length < MIN_ZONE_CELLS) continue;
+
+    // Check if any boundary vertex is near an existing road
+    let touchesRoad = false;
     for (const pt of zone.boundary) {
-      const gx = Math.round((pt.x - ox) / cs);
-      const gz = Math.round((pt.z - oz) / cs);
-      if (gx >= 0 && gx < w && gz >= 0 && gz < h) {
-        allVertices.push({ gx, gz });
-      }
-    }
-  }
-
-  if (allVertices.length === 0) return { junctions: [], segments: [] };
-
-  // Step 2: Cluster nearby vertices
-  const clusters = clusterVertices(allVertices, CLUSTER_RADIUS);
-
-  // Step 3: Find which clusters are near arterial road cells
-  const confirmedJunctions = [];
-  const otherJunctions = [];
-
-  for (const cluster of clusters) {
-    let nearRoad = false;
-    for (let dz = -ARTERIAL_SNAP_DIST; dz <= ARTERIAL_SNAP_DIST && !nearRoad; dz++) {
-      for (let dx = -ARTERIAL_SNAP_DIST; dx <= ARTERIAL_SNAP_DIST && !nearRoad; dx++) {
-        const nx = cluster.gx + dx, nz = cluster.gz + dz;
-        if (nx >= 0 && nx < w && nz >= 0 && nz < h && roadGrid.get(nx, nz) > 0) {
-          nearRoad = true;
+      const gx = Math.round((pt.x - map.originX) / cs);
+      const gz = Math.round((pt.z - map.originZ) / cs);
+      for (let dz = -snapDist; dz <= snapDist && !touchesRoad; dz++) {
+        for (let dx = -snapDist; dx <= snapDist && !touchesRoad; dx++) {
+          const nx = gx + dx, nz = gz + dz;
+          if (nx >= 0 && nx < w && nz >= 0 && nz < h && roadGrid.get(nx, nz) > 0) {
+            touchesRoad = true;
+          }
         }
       }
     }
-    if (nearRoad) {
-      confirmedJunctions.push(cluster);
-    } else {
-      otherJunctions.push(cluster);
+
+    if (touchesRoad) {
+      candidateBoundaries.push(zone.boundary);
     }
   }
 
-  // Step 4: For each zone boundary, collect the full polygon as grid points.
-  // Then for each boundary segment (vertex to next vertex), if EITHER end is
-  // near a confirmed junction, mark the whole boundary polygon as a candidate road.
-  // This is simpler: any zone that touches an arterial gets its boundary marked as road.
-  const placedSegments = [];
-  const confirmedSet = new Set(confirmedJunctions.map(j => key(j.gx, j.gz)));
+  if (candidateBoundaries.length === 0) return { segmentsAdded: 0, cellsAdded: 0 };
 
-  for (const zone of zones) {
-    if (!zone.boundary || zone.boundary.length < 3) continue;
-    if (zone.cells.length < MIN_ZONE_CELLS) continue; // skip tiny zones
+  // Step 2: Simplify + smooth each boundary
+  const roadsBefore = map.roads.length;
 
-    const boundary = zone.boundary.map(pt => ({
-      gx: Math.round((pt.x - ox) / cs),
-      gz: Math.round((pt.z - oz) / cs),
-    }));
+  for (const boundary of candidateBoundaries) {
+    // Convert to world-coordinate polyline (already is — zone.boundary is {x, z})
+    let pts = [...boundary];
 
-    // Check if any vertex of this zone's boundary is near a confirmed junction
-    let touchesArterial = false;
-    for (const pt of boundary) {
-      if (isNearJunction(pt, confirmedJunctions, ARTERIAL_SNAP_DIST)) {
-        touchesArterial = true;
-        break;
-      }
-    }
+    // Simplify (Ramer-Douglas-Peucker)
+    pts = simplifyPolyline(pts, cs * 2);
 
-    if (touchesArterial) {
-      placedSegments.push(boundary);
-    }
-  }
-
-  // Step 5: Simplify, smooth (pinning junctions), and stamp onto roadGrid
-  const stampedCells = [];
-  for (let segment of placedSegments) {
-    // Simplify: remove nearly-collinear vertices (reduces tight zigzags)
-    let pts = segment.map(p => ({ x: p.gx, z: p.gz }));
-    pts = simplifyPolyline(pts, 2.0);
-
-    // Mark which vertices are pinned (near a junction or arterial)
+    // Identify junction vertices (near existing roads) — pin during smoothing
     const pinned = pts.map(p => {
-      const gp = { gx: Math.round(p.x), gz: Math.round(p.z) };
-      return isNearJunction(gp, clusters, CLUSTER_RADIUS + 2);
+      const gx = Math.round((p.x - map.originX) / cs);
+      const gz = Math.round((p.z - map.originZ) / cs);
+      for (let dz = -3; dz <= 3; dz++) {
+        for (let dx = -3; dx <= 3; dx++) {
+          const nx = gx + dx, nz = gz + dz;
+          if (nx >= 0 && nx < w && nz >= 0 && nz < h && roadGrid.get(nx, nz) > 0) return true;
+        }
+      }
+      return false;
     });
 
-    // Chaikin smooth with pinned vertices held in place (2 passes)
+    // Chaikin smooth with pinned junctions (2 passes)
     for (let pass = 0; pass < 2; pass++) {
       if (pts.length < 3) break;
       const smoothed = [pts[0]];
@@ -123,7 +99,6 @@ export function createZoneBoundaryRoads(map) {
       for (let i = 0; i < pts.length - 1; i++) {
         const a = pts[i], b = pts[i + 1];
         if (pinned[i] || pinned[i + 1]) {
-          // Don't smooth across pinned vertices — keep them exact
           if (!pinned[i]) {
             smoothed.push({ x: a.x * 0.75 + b.x * 0.25, z: a.z * 0.75 + b.z * 0.25 });
             newPinned.push(false);
@@ -151,92 +126,140 @@ export function createZoneBoundaryRoads(map) {
       pinned.push(...newPinned);
     }
 
-    segment = pts.map(p => ({ gx: Math.round(p.x), gz: Math.round(p.z) }));
+    // Step 3: Clip against existing roads and water
+    const segments = clipStreetToGrid(pts, map);
 
-    for (let i = 0; i < segment.length - 1; i++) {
-      const cells = bresenham(segment[i].gx, segment[i].gz, segment[i + 1].gx, segment[i + 1].gz);
-      for (const c of cells) {
-        if (c.gx >= 0 && c.gx < w && c.gz >= 0 && c.gz < h) {
-          // Skip map edges — not real road corridors
-          const edgeMargin = 3;
-          if (c.gx < edgeMargin || c.gx >= w - edgeMargin || c.gz < edgeMargin || c.gz >= h - edgeMargin) continue;
-          if (waterMask && waterMask.get(c.gx, c.gz) > 0) continue;
-          if (roadGrid.get(c.gx, c.gz) > 0) continue; // already a road
-          // Skip cells near existing roads (avoid parallel duplicates)
-          let nearExisting = false;
-          for (const [dx, dz] of [[2,0],[-2,0],[0,2],[0,-2],[1,1],[-1,-1],[1,-1],[-1,1]]) {
-            const nx = c.gx + dx, nz = c.gz + dz;
-            if (nx >= 0 && nx < w && nz >= 0 && nz < h && roadGrid.get(nx, nz) > 0) {
-              nearExisting = true; break;
-            }
-          }
-          if (!nearExisting) {
-            roadGrid.set(c.gx, c.gz, 1);
-            stampedCells.push(c);
-          }
-        }
-      }
+    // Step 4: Add each surviving segment as a road
+    for (const seg of segments) {
+      if (seg.length < 2) continue;
+      addRoad(map, seg, 'collector', 6);
     }
   }
 
-  console.log(`[zoneBoundaryRoads] ${allVertices.length} vertices → ${clusters.length} clusters (${confirmedJunctions.length} near roads) → ${placedSegments.length} segments → ${stampedCells.length} new road cells`);
+  const segmentsAdded = map.roads.length - roadsBefore;
+  // Count new road cells (approximate)
+  let cellsAdded = 0;
+  for (let z = 0; z < h; z++)
+    for (let x = 0; x < w; x++)
+      if (roadGrid.get(x, z) > 0) cellsAdded++;
 
-  return {
-    junctions: confirmedJunctions,
-    segments: placedSegments,
+  console.log(`[zoneBoundaryRoads] ${candidateBoundaries.length} boundaries → ${segmentsAdded} road segments`);
+  return { segmentsAdded, cellsAdded };
+}
+
+// ── Shared road utilities (same as layoutRibbons.js) ──────────────
+
+function addRoad(map, polyline, hierarchy, width) {
+  const roadData = {
+    type: 'road',
+    polyline,
+    width,
+    hierarchy,
+    importance: hierarchy === 'collector' ? 0.5 : 0.2,
+    source: 'zone-boundary',
+    id: map.roads ? map.roads.length : 0,
   };
-}
 
-/**
- * Cluster nearby vertices into single junction points.
- */
-function clusterVertices(vertices, radius) {
-  const clusters = [];
-  const used = new Set();
-  const radiusSq = radius * radius;
+  if (map.addFeature) {
+    map.addFeature('road', roadData);
+  } else {
+    map.roads.push(roadData);
+  }
 
-  for (let i = 0; i < vertices.length; i++) {
-    if (used.has(i)) continue;
-    let sumX = vertices[i].gx, sumZ = vertices[i].gz, count = 1;
-    used.add(i);
+  if (polyline.length >= 2 && map.graph) {
+    const snapDist = map.cellSize * 3;
+    const startPt = polyline[0];
+    const endPt = polyline[polyline.length - 1];
+    const startNode = findOrCreateNode(map, startPt.x, startPt.z, snapDist);
+    const endNode = findOrCreateNode(map, endPt.x, endPt.z, snapDist);
 
-    for (let j = i + 1; j < vertices.length; j++) {
-      if (used.has(j)) continue;
-      const dx = vertices[j].gx - vertices[i].gx;
-      const dz = vertices[j].gz - vertices[i].gz;
-      if (dx * dx + dz * dz <= radiusSq) {
-        sumX += vertices[j].gx;
-        sumZ += vertices[j].gz;
-        count++;
-        used.add(j);
-      }
+    if (startNode !== endNode) {
+      const points = polyline.slice(1, -1).map(p => ({ x: p.x, z: p.z }));
+      map.graph.addEdge(startNode, endNode, { points, width, hierarchy });
     }
-
-    clusters.push({
-      gx: Math.round(sumX / count),
-      gz: Math.round(sumZ / count),
-      count,
-    });
   }
-
-  return clusters;
 }
 
-function isNearJunction(pt, junctions, radius) {
-  const radiusSq = radius * radius;
-  for (const j of junctions) {
-    const dx = pt.gx - j.gx, dz = pt.gz - j.gz;
-    if (dx * dx + dz * dz <= radiusSq) return true;
-  }
-  return false;
+function findOrCreateNode(map, x, z, snapDist) {
+  const graph = map.graph;
+  const nearest = graph.nearestNode(x, z);
+  if (nearest && nearest.dist < snapDist) return nearest.id;
+  return graph.addNode(x, z);
 }
 
-function key(gx, gz) { return gx | (gz << 16); }
+function clipStreetToGrid(street, map) {
+  if (street.length < 2) return [];
 
-/**
- * Ramer-Douglas-Peucker polyline simplification.
- * Removes vertices that deviate less than `tolerance` from the line between their neighbours.
- */
+  const roadGrid = map.hasLayer ? map.getLayer('roadGrid') : map.roadGrid;
+  const waterMask = map.hasLayer ? map.getLayer('waterMask') : map.waterMask;
+  const cs = map.cellSize;
+  const ox = map.originX, oz = map.originZ;
+
+  // Densify
+  const samples = [];
+  for (let i = 0; i < street.length - 1; i++) {
+    const ax = street[i].x, az = street[i].z;
+    const bx = street[i + 1].x, bz = street[i + 1].z;
+    const dx = bx - ax, dz = bz - az;
+    const segLen = Math.sqrt(dx * dx + dz * dz);
+    const steps = Math.max(1, Math.ceil(segLen / CLIP_SAMPLE_STEP));
+    for (let s = 0; s < steps; s++) {
+      const t = s / steps;
+      samples.push({ x: ax + dx * t, z: az + dz * t });
+    }
+  }
+  samples.push(street[street.length - 1]);
+
+  // Classify
+  const r = Math.ceil(ROAD_HALF_WIDTH / cs);
+  const clear = samples.map(p => {
+    const gx = Math.round((p.x - ox) / cs);
+    const gz = Math.round((p.z - oz) / cs);
+    if (gx < 3 || gz < 3 || gx >= map.width - 3 || gz >= map.height - 3) return false;
+    if (waterMask) {
+      for (let dz = -1; dz <= 1; dz++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = gx + dx, nz = gz + dz;
+          if (nx >= 0 && nz >= 0 && nx < map.width && nz < map.height && waterMask.get(nx, nz) > 0) return false;
+        }
+    }
+    if (roadGrid) {
+      for (let dz = -r; dz <= r; dz++)
+        for (let dx = -r; dx <= r; dx++) {
+          const nx = gx + dx, nz = gz + dz;
+          if (nx >= 0 && nz >= 0 && nx < map.width && nz < map.height && roadGrid.get(nx, nz) > 0) return false;
+        }
+    }
+    return true;
+  });
+
+  // Split into clear segments
+  const segments = [];
+  let current = null;
+  for (let i = 0; i < samples.length; i++) {
+    if (clear[i]) {
+      if (!current) current = [];
+      current.push(samples[i]);
+    } else {
+      if (current && current.length >= 2) segments.push(current);
+      current = null;
+    }
+  }
+  if (current && current.length >= 2) segments.push(current);
+
+  // Filter short
+  return segments.filter(seg => {
+    let len = 0;
+    for (let i = 1; i < seg.length; i++) {
+      const dx = seg[i].x - seg[i - 1].x, dz = seg[i].z - seg[i - 1].z;
+      len += Math.sqrt(dx * dx + dz * dz);
+    }
+    return len >= MIN_ROAD_LENGTH_M;
+  });
+}
+
+// ── Geometry utilities ──────────────────────────────────────────────
+
 function simplifyPolyline(pts, tolerance) {
   if (pts.length < 3) return pts;
   const tolSq = tolerance * tolerance;
@@ -266,19 +289,4 @@ function simplifyPolyline(pts, tolerance) {
     return left.slice(0, -1).concat(right);
   }
   return [first, last];
-}
-
-function bresenham(x0, y0, x1, y1) {
-  const cells = [];
-  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
-  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
-  let err = dx - dy, x = x0, y = y0;
-  for (let i = 0; i < dx + dy + 2; i++) {
-    cells.push({ gx: x, gz: y });
-    if (x === x1 && y === y1) break;
-    const e2 = 2 * err;
-    if (e2 > -dy) { err -= dy; x += sx; }
-    if (e2 < dx) { err += dx; y += sy; }
-  }
-  return cells;
 }
