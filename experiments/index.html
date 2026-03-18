@@ -89,7 +89,7 @@
     async function init() {
       // Load the root manifest — single source of truth
       try {
-        const resp = await fetch('manifest.json');
+        const resp = await fetch('manifest.json?t=' + Date.now());
         if (!resp.ok) { document.getElementById('main').textContent = 'No manifest.json found'; return; }
         const entries = await resp.json();
 
