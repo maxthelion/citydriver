@@ -105,20 +105,27 @@ if (roadGrid) {
       }
 }
 
-// New zone boundary roads (yellow)
+// New zone boundary roads (bright cyan, 3px wide for visibility)
 if (roadGrid) {
   for (let z = 0; z < h; z++)
     for (let x = 0; x < w; x++)
       if (roadGrid.get(x, z) > 0 && roadGridBefore[z * w + x] === 0) {
-        const idx = (z * w + x) * 3;
-        pixels[idx] = 255; pixels[idx + 1] = 220; pixels[idx + 2] = 0;
+        // Draw 3x3 block for visibility
+        for (let dz = -1; dz <= 1; dz++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const px = x + dx, pz = z + dz;
+            if (px >= 0 && px < w && pz >= 0 && pz < h) {
+              const idx = (pz * w + px) * 3;
+              pixels[idx] = 0; pixels[idx + 1] = 255; pixels[idx + 2] = 255;
+            }
+          }
       }
 }
 
-// Junction candidates (red dots)
+// Junction candidates (red dots, 5px)
 for (const j of result.junctions) {
-  for (let dz = -1; dz <= 1; dz++)
-    for (let dx = -1; dx <= 1; dx++) {
+  for (let dz = -2; dz <= 2; dz++)
+    for (let dx = -2; dx <= 2; dx++) {
       const px = j.gx + dx, pz = j.gz + dz;
       if (px >= 0 && px < w && pz >= 0 && pz < h) {
         const idx = (pz * w + px) * 3;
@@ -131,9 +138,71 @@ const { execSync } = require('child_process');
 const { mkdirSync, existsSync } = require('fs');
 if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
+const header = `P6\n${w} ${h}\n255\n`;
+
+// Write combined image
 const ppmPath = `${outDir}/zone-roads-seed${seed}.ppm`;
 const pngPath = `${outDir}/zone-roads-seed${seed}.png`;
-const header = `P6\n${w} ${h}\n255\n`;
 writeFileSync(ppmPath, Buffer.concat([Buffer.from(header), Buffer.from(pixels)]));
 try { execSync(`convert "${ppmPath}" "${pngPath}" 2>/dev/null`); } catch {}
 console.log(`Written to ${pngPath}`);
+
+// Write roads-only image (dark background, just roads)
+const roadsPixels = new Uint8Array(w * h * 3);
+// Dark background
+for (let i = 0; i < w * h * 3; i += 3) {
+  roadsPixels[i] = 20; roadsPixels[i + 1] = 20; roadsPixels[i + 2] = 30;
+}
+// Water hint
+if (waterMask) {
+  for (let z = 0; z < h; z++)
+    for (let x = 0; x < w; x++)
+      if (waterMask.get(x, z) > 0) {
+        const idx = (z * w + x) * 3;
+        roadsPixels[idx] = 10; roadsPixels[idx + 1] = 15; roadsPixels[idx + 2] = 35;
+      }
+}
+// Arterial roads (white, 2px)
+for (let z = 0; z < h; z++)
+  for (let x = 0; x < w; x++)
+    if (roadGridBefore[z * w + x] > 0) {
+      for (let dz = 0; dz <= 1; dz++)
+        for (let dx = 0; dx <= 1; dx++) {
+          const px = x + dx, pz = z + dz;
+          if (px < w && pz < h) {
+            const idx = (pz * w + px) * 3;
+            roadsPixels[idx] = 255; roadsPixels[idx + 1] = 255; roadsPixels[idx + 2] = 255;
+          }
+        }
+    }
+// New zone boundary roads (cyan, 3px)
+if (roadGrid) {
+  for (let z = 0; z < h; z++)
+    for (let x = 0; x < w; x++)
+      if (roadGrid.get(x, z) > 0 && roadGridBefore[z * w + x] === 0) {
+        for (let dz = -1; dz <= 1; dz++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const px = x + dx, pz = z + dz;
+            if (px >= 0 && px < w && pz >= 0 && pz < h) {
+              const idx = (pz * w + px) * 3;
+              roadsPixels[idx] = 0; roadsPixels[idx + 1] = 255; roadsPixels[idx + 2] = 255;
+            }
+          }
+      }
+}
+// Junctions (red, 5px)
+for (const j of result.junctions) {
+  for (let dz = -2; dz <= 2; dz++)
+    for (let dx = -2; dx <= 2; dx++) {
+      const px = j.gx + dx, pz = j.gz + dz;
+      if (px >= 0 && px < w && pz >= 0 && pz < h) {
+        const idx = (pz * w + px) * 3;
+        roadsPixels[idx] = 255; roadsPixels[idx + 1] = 50; roadsPixels[idx + 2] = 50;
+      }
+    }
+}
+const roadsPpmPath = `${outDir}/roads-only-seed${seed}.ppm`;
+const roadsPngPath = `${outDir}/roads-only-seed${seed}.png`;
+writeFileSync(roadsPpmPath, Buffer.concat([Buffer.from(header), Buffer.from(roadsPixels)]));
+try { execSync(`convert "${roadsPpmPath}" "${roadsPngPath}" 2>/dev/null`); } catch {}
+console.log(`Written to ${roadsPngPath}`);

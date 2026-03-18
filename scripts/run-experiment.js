@@ -60,8 +60,10 @@ if (customScript) {
 console.log('');
 
 // Run renders
+const totalStart = performance.now();
 for (const { seed, gx, gz } of seeds) {
   console.log(`--- seed ${seed} ---`);
+  const seedStart = performance.now();
   if (customScript) {
     const cmd = `bun scripts/${customScript} ${seed} ${gx} ${gz} ${outDir}`;
     try {
@@ -79,7 +81,9 @@ for (const { seed, gx, gz } of seeds) {
       console.error(`Failed: ${e.message}`);
     }
   }
+  console.log(`  seed ${seed}: ${((performance.now() - seedStart) / 1000).toFixed(1)}s\n`);
 }
+console.log(`Total: ${((performance.now() - totalStart) / 1000).toFixed(1)}s\n`);
 
 // Scan output directory for PNGs and build manifest
 const files = readdirSync(outDir).filter(f => f.endsWith('.png'));
