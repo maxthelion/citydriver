@@ -56,6 +56,8 @@
     }
     .description h3 { color: #88aaff; margin-bottom: 6px; margin-top: 10px; }
     .description h3:first-child { margin-top: 0; }
+
+    .meta { font-size: 10px; color: #555; margin-bottom: 12px; }
   </style>
 </head>
 <body>
@@ -78,6 +80,7 @@
       { label: 'Port', color: 'rgb(0,180,180)' },
       { label: 'Skeleton Road', color: 'rgb(255,255,255)' },
       { label: 'Growth Road', color: 'rgb(255,220,100)' },
+      { label: 'Junction', color: 'rgb(255,0,0)' },
     ];
 
     const experiments = [];
@@ -85,73 +88,73 @@
     async function scanExperiments() {
       for (let i = 1; i <= 100; i++) {
         const num = String(i).padStart(3, '0');
-        const result = await tryFetchMd(num);
+        const result = await loadExperiment(num);
         if (!result) break;
         experiments.push(result);
       }
-      experiments.reverse(); // most recent first
+      experiments.reverse();
       renderList();
       if (experiments.length > 0) showExperiment(0);
     }
 
-    async function tryFetchMd(num) {
-      // Try to fetch the directory listing for this experiment's output
-      const images = await findImages(num);
+    async function loadExperiment(num) {
+      // Try manifest first
+      let manifest = null;
+      let images = [];
+      try {
+        const resp = await fetch(`${num}-output/manifest.json`);
+        if (resp.ok) {
+          manifest = await resp.json();
+          images = (manifest.images || []).map(img => ({
+            path: img.path,
+            seed: img.seed,
+            tick: img.tick ? `tick${img.tick}` : '',
+            layer: img.layer,
+          }));
+        }
+      } catch (e) {}
 
-      // Try to find the markdown file — scan common slugs + try directory listing
-      const slugsToTry = [
-        'baseline', 'throttled-ribbon-roads', 'block-fill-residential',
+      // Try to find the markdown file
+      let text = '', title = `Experiment ${num}`;
+      const slugs = [
+        'baseline', 'throttled-ribbon-roads', 'zone-visualisation',
+        'zone-boundary-roads', 'block-fill-residential', 'road-extension',
         'reduced-road-spread', 'balanced-allocation', 'terrain-contours',
-        'influence-tuning', 'port-zones', 'industrial-placement',
-        'civic-typed-plots', 'agriculture-belt', 'cross-streets',
-        'residential-bfs-fill', 'road-throttle', 'value-tuning',
-        'zone-visualisation', 'zone-visualization', 'road-extension',
-        'residential-fill', 'layout-ribbons', 'incremental-roads',
+        'influence-tuning', 'residential-fill', 'value-tuning',
       ];
-
-      for (const slug of slugsToTry) {
+      for (const slug of slugs) {
         try {
           const resp = await fetch(`${num}-${slug}.md`);
           if (resp.ok) {
-            const text = await resp.text();
-            const title = text.match(/^# Experiment \d+: (.+)/m)?.[1] || slug;
-            return { num, slug, title, text, images };
+            text = await resp.text();
+            title = text.match(/^# Experiment \d+: (.+)/m)?.[1] || slug;
+            break;
           }
         } catch (e) {}
       }
 
-      if (images.length > 0) {
-        return { num, slug: 'unknown', title: `Experiment ${num}`, text: '', images };
-      }
-      return null;
-    }
-
-    async function findImages(num) {
-      const images = [];
-      const seeds = ['884469', '42', '12345'];
-      const ticks = ['tick20', 'tick23', 'tick25', 'tick27', 'tick28', 'tick30', 'tick35', 'tick40', 'tick50'];
-      const prefixes = ['reservations', 'zones', 'roadGrid', 'elevation', 'landValue',
-                        'commercialValue', 'industrialValue', 'civicValue', 'developmentProximity',
-                        'residentialFineValue', 'openSpaceValue', 'zoneGrid'];
-
-      for (const prefix of prefixes) {
-        for (const seed of seeds) {
-          for (const tick of ticks) {
-            const path = `${num}-output/${prefix}-seed${seed}-${tick}.png`;
-            try {
-              const resp = await fetch(path, { method: 'HEAD' });
-              if (resp.ok) images.push({ path, seed, tick, layer: prefix });
-            } catch (e) {}
-          }
-          // Also try without tick (e.g. zones-seed884469.png)
-          const noTickPath = `${num}-output/${prefix}-seed${seed}.png`;
-          try {
-            const resp = await fetch(noTickPath, { method: 'HEAD' });
-            if (resp.ok) images.push({ path: noTickPath, seed, tick: '', layer: prefix });
-          } catch (e) {}
+      // If no manifest and no markdown, check if output dir has any PNGs (fallback scan)
+      if (!manifest && !text) {
+        // Minimal scan — just check if the output dir exists
+        try {
+          const resp = await fetch(`${num}-output/`, { method: 'HEAD' });
+          if (!resp.ok && !text) return null;
+        } catch (e) {
+          if (!text) return null;
         }
       }
-      return images;
+
+      if (images.length === 0 && !text) return null;
+
+      return {
+        num, title, text, images,
+        meta: manifest ? {
+          generated: manifest.generated,
+          archetype: manifest.archetype,
+          ticks: manifest.ticks,
+          script: manifest.script,
+        } : null,
+      };
     }
 
     function renderList() {
@@ -178,31 +181,53 @@
       const exp = experiments[idx];
       const main = document.getElementById('main');
 
-      // Build legend
+      // Legend
       let legendHtml = '<div class="legend">';
       for (const item of LEGEND_ITEMS) {
         legendHtml += `<div class="legend-item"><span class="legend-swatch" style="background:${item.color}"></span>${item.label}</div>`;
       }
       legendHtml += '</div>';
 
-      // Build images (above text)
-      let imagesHtml = '<div class="images">';
-      if (exp.images.length === 0) {
-        imagesHtml += '<div style="color:#666">No images found</div>';
+      // Meta
+      let metaHtml = '';
+      if (exp.meta) {
+        const parts = [];
+        if (exp.meta.archetype) parts.push(`archetype: ${exp.meta.archetype}`);
+        if (exp.meta.ticks) parts.push(`ticks: ${exp.meta.ticks}`);
+        if (exp.meta.script) parts.push(`script: ${exp.meta.script}`);
+        if (exp.meta.generated) parts.push(`generated: ${new Date(exp.meta.generated).toLocaleString()}`);
+        metaHtml = `<div class="meta">${parts.join(' · ')}</div>`;
       }
-      for (const img of exp.images) {
-        const layerLabel = img.layer || 'reservations';
-        const tickLabel = img.tick ? ` @ ${img.tick}` : '';
-        imagesHtml += `
-          <div class="image-card">
-            <img src="${img.path}" alt="${layerLabel} seed ${img.seed}" onclick="this.classList.toggle('zoomed')">
-            <div class="label">${layerLabel} — seed ${img.seed}${tickLabel}</div>
-          </div>
-        `;
-      }
-      imagesHtml += '</div>';
 
-      // Parse markdown into description sections
+      // Images grouped by seed
+      const seedGroups = {};
+      for (const img of exp.images) {
+        const key = img.seed || 'unknown';
+        if (!seedGroups[key]) seedGroups[key] = [];
+        seedGroups[key].push(img);
+      }
+
+      let imagesHtml = '';
+      for (const [seed, imgs] of Object.entries(seedGroups)) {
+        imagesHtml += '<div class="images">';
+        for (const img of imgs) {
+          const tickLabel = img.tick ? ` @ ${img.tick}` : '';
+          const layerLabel = img.layer || 'output';
+          imagesHtml += `
+            <div class="image-card">
+              <img src="${img.path}" alt="${layerLabel} seed ${seed}" onclick="this.classList.toggle('zoomed')">
+              <div class="label">${layerLabel} — seed ${seed}${tickLabel}</div>
+            </div>
+          `;
+        }
+        imagesHtml += '</div>';
+      }
+
+      if (exp.images.length === 0) {
+        imagesHtml = '<div style="color:#666; margin-bottom:16px;">No images — run: bun scripts/run-experiment.js --experiment ' + exp.num + '</div>';
+      }
+
+      // Description from markdown
       const sections = exp.text.split(/^## /m).filter(Boolean);
       let descHtml = '';
       for (const section of sections) {
@@ -214,7 +239,8 @@
       }
 
       main.innerHTML = `
-        <h2 style="color:#88aaff; margin-bottom:12px;">Experiment ${exp.num}: ${exp.title}</h2>
+        <h2 style="color:#88aaff; margin-bottom:8px;">Experiment ${exp.num}: ${exp.title}</h2>
+        ${metaHtml}
         ${legendHtml}
         ${imagesHtml}
         ${descHtml ? `<div class="description">${descHtml}</div>` : ''}

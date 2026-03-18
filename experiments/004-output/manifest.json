@@ -1,0 +1,28 @@
+{
+  "experiment": "004",
+  "generated": "2026-03-18T13:36:52.045Z",
+  "seeds": [
+    "884469",
+    "42"
+  ],
+  "layers": null,
+  "archetype": null,
+  "ticks": null,
+  "script": "render-zone-roads.js",
+  "images": [
+    {
+      "file": "zone-roads-seed42.png",
+      "path": "004-output/zone-roads-seed42.png",
+      "layer": "zone-roads",
+      "seed": "42",
+      "tick": null
+    },
+    {
+      "file": "zone-roads-seed884469.png",
+      "path": "004-output/zone-roads-seed884469.png",
+      "layer": "zone-roads",
+      "seed": "884469",
+      "tick": null
+    }
+  ]
+}
