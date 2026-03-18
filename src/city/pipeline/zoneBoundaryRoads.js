@@ -68,10 +68,10 @@ export function createZoneBoundaryRoads(map) {
 
   if (candidateBoundaries.length === 0) return { segmentsAdded: 0, cellsAdded: 0 };
 
+  // Capture skeleton node IDs before adding zone boundary roads
+  const skeletonNodeIds = new Set(map.graph ? [...map.graph.nodes.keys()] : []);
+
   // Step 2: Simplify, clip (wide buffer prevents duplicates), and add as roads
-  // The clip buffer (ROAD_HALF_WIDTH=8m) is wide enough that when two adjacent
-  // zones share a boundary, the second zone's boundary will be clipped away
-  // because the first already stamped road cells there.
   const roadsBefore = map.roads.length;
 
   for (const boundary of candidateBoundaries) {
@@ -89,15 +89,63 @@ export function createZoneBoundaryRoads(map) {
     }
   }
 
-  // Compact graph to merge nearby nodes
+  // Walk skeleton roads and merge nearby zone boundary nodes onto them.
+  // For each skeleton edge, sample points along it. If a zone boundary
+  // node is nearby, split the skeleton edge at that point and merge the
+  // zone boundary node into the split node.
   if (map.graph) {
-    const nodesBefore = map.graph.nodes.size;
-    const edgesBefore = map.graph.edges.size;
-    const compactDist = map.cellSize * 12; // ~60m — wide enough for paired nodes on opposite sides of arterial
-    map.graph.compact(compactDist);
-    const nodesAfter = map.graph.nodes.size;
-    const edgesAfter = map.graph.edges.size;
-    console.log(`[zoneBoundaryRoads] graph.compact(${compactDist.toFixed(0)}m): nodes ${nodesBefore}→${nodesAfter}, edges ${edgesBefore}→${edgesAfter}`);
+    const mergeDist = map.cellSize * 6; // ~30m search radius
+    const mergeDistSq = mergeDist * mergeDist;
+
+    // Collect zone boundary node IDs (the ones we just added)
+    const zbNodes = new Set();
+    for (const id of map.graph.nodes.keys()) {
+      if (!skeletonNodeIds.has(id)) zbNodes.add(id);
+    }
+
+    // Walk each skeleton edge
+    const skeletonEdgeIds = [...map.graph.edges.keys()].filter(eid => {
+      const e = map.graph.edges.get(eid);
+      return e && (e.hierarchy === 'arterial' || e.hierarchy === 'collector' || e.source === 'skeleton');
+    });
+
+    let mergeCount = 0;
+    for (const edgeId of skeletonEdgeIds) {
+      if (!map.graph.edges.has(edgeId)) continue; // may have been removed by a previous split
+      const poly = map.graph.edgePolyline(edgeId);
+
+      // For each zone boundary node, check distance to this edge
+      for (const zbId of [...zbNodes]) {
+        if (!map.graph.nodes.has(zbId)) { zbNodes.delete(zbId); continue; }
+        const zbNode = map.graph.nodes.get(zbId);
+
+        // Find closest point on this skeleton edge to the zb node
+        let bestDistSq = Infinity, bestProjX = 0, bestProjZ = 0;
+        for (let i = 0; i < poly.length - 1; i++) {
+          const ax = poly[i].x, az = poly[i].z;
+          const bx = poly[i+1].x, bz = poly[i+1].z;
+          const dx = bx - ax, dz = bz - az;
+          const lenSq = dx * dx + dz * dz;
+          if (lenSq < 0.001) continue;
+          const t = Math.max(0, Math.min(1, ((zbNode.x - ax) * dx + (zbNode.z - az) * dz) / lenSq));
+          const px = ax + t * dx, pz = az + t * dz;
+          const d = (zbNode.x - px) * (zbNode.x - px) + (zbNode.z - pz) * (zbNode.z - pz);
+          if (d < bestDistSq) { bestDistSq = d; bestProjX = px; bestProjZ = pz; }
+        }
+
+        if (bestDistSq < mergeDistSq) {
+          // Split the skeleton edge at the projected point
+          const splitNodeId = map.graph.splitEdge(edgeId, bestProjX, bestProjZ);
+          // Merge the zone boundary node into the split node
+          map.graph.mergeNodes(zbId, splitNodeId);
+          zbNodes.delete(zbId);
+          mergeCount++;
+          break; // edge was split, move to next edge iteration
+        }
+      }
+    }
+
+    console.log(`[zoneBoundaryRoads] skeleton-walk merge: ${mergeCount} zone boundary nodes merged onto skeleton`);
   }
 
   const segmentsAdded = map.roads.length - roadsBefore;
@@ -167,8 +215,8 @@ function addRoad(map, polyline, hierarchy, width) {
     const snapDist = map.cellSize * 5; // wider snap to bridge clip buffer gap
     const startPt = polyline[0];
     const endPt = polyline[polyline.length - 1];
-    const startNode = findOrCreateNodeOnEdge(map, startPt.x, startPt.z, snapDist);
-    const endNode = findOrCreateNodeOnEdge(map, endPt.x, endPt.z, snapDist);
+    const startNode = findOrCreateNode(map, startPt.x, startPt.z, snapDist);
+    const endNode = findOrCreateNode(map, endPt.x, endPt.z, snapDist);
 
     if (startNode !== endNode) {
       const points = polyline.slice(1, -1).map(p => ({ x: p.x, z: p.z }));
@@ -177,73 +225,11 @@ function addRoad(map, polyline, hierarchy, width) {
   }
 }
 
-/**
- * Find or create a graph node at (x, z).
- * First checks for nearby existing nodes (snap).
- * If no node nearby, checks if the point is near an existing edge
- * and splits that edge to create a junction. This handles the case
- * where a zone boundary road meets the middle of an arterial.
- */
-function findOrCreateNodeOnEdge(map, x, z, snapDist) {
+function findOrCreateNode(map, x, z, snapDist) {
   const graph = map.graph;
-
-  // First: try snapping to existing node (including nodes from previous splits)
   const nearest = graph.nearestNode(x, z);
-  if (nearest && nearest.dist < snapDist) {
-    return nearest.id;
-  }
-
-  // Second: check if near an existing edge — split it to create junction
-  const snapDistSq = snapDist * snapDist;
-  let bestEdgeId = null;
-  let bestDist = snapDistSq;
-
-  for (const [edgeId, edge] of graph.edges) {
-    const poly = graph.edgePolyline(edgeId);
-    for (let i = 0; i < poly.length - 1; i++) {
-      const d = pointToSegDistSq(x, z, poly[i].x, poly[i].z, poly[i + 1].x, poly[i + 1].z);
-      if (d < bestDist) {
-        bestDist = d;
-        bestEdgeId = edgeId;
-      }
-    }
-  }
-
-  if (bestEdgeId !== null) {
-    // Project point onto the nearest position on the edge
-    // (so the split node is ON the edge, not offset to one side)
-    const poly = graph.edgePolyline(bestEdgeId);
-    let projX = x, projZ = z, projBest = Infinity;
-    for (let i = 0; i < poly.length - 1; i++) {
-      const ax = poly[i].x, az = poly[i].z;
-      const bx = poly[i+1].x, bz = poly[i+1].z;
-      const dx = bx - ax, dz = bz - az;
-      const lenSq = dx * dx + dz * dz;
-      if (lenSq < 0.001) continue;
-      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lenSq));
-      const px = ax + t * dx, pz = az + t * dz;
-      const d = (x - px) * (x - px) + (z - pz) * (z - pz);
-      if (d < projBest) { projBest = d; projX = px; projZ = pz; }
-    }
-    return graph.splitEdge(bestEdgeId, projX, projZ);
-  }
-
-  // Fallback: create a new isolated node
+  if (nearest && nearest.dist < snapDist) return nearest.id;
   return graph.addNode(x, z);
-}
-
-/** Squared distance from point (px,pz) to line segment (ax,az)-(bx,bz) */
-function pointToSegDistSq(px, pz, ax, az, bx, bz) {
-  const dx = bx - ax, dz = bz - az;
-  const lenSq = dx * dx + dz * dz;
-  if (lenSq < 0.001) {
-    const ex = px - ax, ez = pz - az;
-    return ex * ex + ez * ez;
-  }
-  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / lenSq));
-  const projX = ax + t * dx, projZ = az + t * dz;
-  const ex = px - projX, ez = pz - projZ;
-  return ex * ex + ez * ez;
 }
 
 function clipStreetToGrid(street, map) {
