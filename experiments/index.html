@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Experiments</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: monospace; background: #1a1a2e; color: #ccc; display: flex; height: 100vh; }
+
+    .sidebar {
+      width: 300px; min-width: 300px; border-right: 1px solid #333;
+      overflow-y: auto; padding: 12px; background: #16162a;
+    }
+    .sidebar h2 { color: #88aaff; font-size: 14px; margin-bottom: 12px; }
+
+    .experiment {
+      margin-bottom: 8px; cursor: pointer; padding: 8px;
+      border: 1px solid #333; border-radius: 4px;
+    }
+    .experiment:hover { border-color: #88aaff; }
+    .experiment.active { border-color: #88aaff; background: #222244; }
+    .experiment .num { color: #88aaff; font-weight: bold; }
+    .experiment .title { font-size: 12px; margin-top: 2px; }
+    .experiment .stats { font-size: 10px; color: #666; margin-top: 4px; }
+
+    .main { flex: 1; overflow-y: auto; padding: 16px; }
+
+    .description {
+      max-width: 800px; margin-bottom: 16px; padding: 12px;
+      background: #222240; border-radius: 4px; font-size: 12px; line-height: 1.6;
+      white-space: pre-wrap;
+    }
+    .description h3 { color: #88aaff; margin-bottom: 8px; }
+
+    .images { display: flex; flex-wrap: wrap; gap: 12px; }
+    .image-card {
+      background: #222240; border-radius: 4px; padding: 8px; max-width: 600px;
+    }
+    .image-card img {
+      width: 100%; image-rendering: pixelated; border: 1px solid #333;
+    }
+    .image-card .label {
+      font-size: 11px; color: #888; margin-top: 4px; text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <h2>Experiments</h2>
+    <div id="experiment-list"></div>
+  </div>
+  <div class="main" id="main"></div>
+
+  <script>
+    async function loadExperiments() {
+      // Scan for experiment markdown files by trying sequential numbers
+      const experiments = [];
+      for (let i = 1; i <= 100; i++) {
+        const num = String(i).padStart(3, '0');
+        try {
+          const resp = await fetch(`${num}-${await findSlug(num)}`);
+          if (!resp.ok) break;
+        } catch (e) { /* try another way */ }
+      }
+
+      // Simpler approach: fetch a manifest or scan known files
+      // We'll build the list from what we know and make it self-updating
+      await scanExperiments();
+    }
+
+    const experiments = [];
+
+    async function scanExperiments() {
+      // Try fetching experiment files by number
+      for (let i = 1; i <= 100; i++) {
+        const num = String(i).padStart(3, '0');
+        // Try to fetch the output directory listing
+        const mdFiles = await tryFetchMd(num);
+        if (!mdFiles) break;
+        experiments.push(mdFiles);
+      }
+      renderList();
+      if (experiments.length > 0) showExperiment(experiments.length - 1);
+    }
+
+    async function tryFetchMd(num) {
+      // Try common slug patterns
+      const slugs = [
+        'baseline', 'throttled-ribbon-roads', 'block-fill-residential',
+        'reduced-road-spread', 'balanced-allocation', 'terrain-contours',
+        'influence-tuning', 'port-zones', 'industrial-placement',
+        'civic-typed-plots', 'agriculture-belt', 'cross-streets',
+      ];
+
+      for (const slug of slugs) {
+        try {
+          const resp = await fetch(`${num}-${slug}.md`);
+          if (resp.ok) {
+            const text = await resp.text();
+            const title = text.match(/^# Experiment \d+: (.+)/m)?.[1] || slug;
+            const images = await findImages(num);
+            return { num, slug, title, text, images };
+          }
+        } catch (e) {}
+      }
+
+      // Try fetching any file starting with the number
+      try {
+        // Fallback: try to find by listing (won't work on static server)
+        // Instead, try to find the output directory
+        const images = await findImages(num);
+        if (images.length > 0) {
+          return { num, slug: 'unknown', title: `Experiment ${num}`, text: '', images };
+        }
+      } catch (e) {}
+
+      return null;
+    }
+
+    async function findImages(num) {
+      const images = [];
+      const seeds = ['884469', '42', '12345'];
+      const ticks = ['tick25', 'tick27', 'tick28', 'tick30'];
+
+      for (const seed of seeds) {
+        for (const tick of ticks) {
+          const path = `${num}-output/reservations-seed${seed}-${tick}.png`;
+          try {
+            const resp = await fetch(path, { method: 'HEAD' });
+            if (resp.ok) images.push({ path, seed, tick });
+          } catch (e) {}
+        }
+      }
+      return images;
+    }
+
+    function renderList() {
+      const list = document.getElementById('experiment-list');
+      list.innerHTML = '';
+      experiments.forEach((exp, idx) => {
+        const div = document.createElement('div');
+        div.className = 'experiment';
+        div.innerHTML = `
+          <div class="num">${exp.num}</div>
+          <div class="title">${exp.title}</div>
+          <div class="stats">${exp.images.length} image${exp.images.length !== 1 ? 's' : ''}</div>
+        `;
+        div.onclick = () => showExperiment(idx);
+        list.appendChild(div);
+      });
+    }
+
+    function showExperiment(idx) {
+      // Update active state
+      document.querySelectorAll('.experiment').forEach((el, i) => {
+        el.classList.toggle('active', i === idx);
+      });
+
+      const exp = experiments[idx];
+      const main = document.getElementById('main');
+
+      // Parse markdown into sections
+      const sections = exp.text.split(/^## /m).filter(Boolean);
+      let descHtml = '';
+      for (const section of sections) {
+        const lines = section.trim().split('\n');
+        const heading = lines[0];
+        const body = lines.slice(1).join('\n').trim();
+        if (heading.startsWith('# ')) continue; // skip title
+        descHtml += `<h3>${heading}</h3>\n${body}\n\n`;
+      }
+
+      let imagesHtml = '';
+      for (const img of exp.images) {
+        imagesHtml += `
+          <div class="image-card">
+            <img src="${img.path}" alt="seed ${img.seed}">
+            <div class="label">seed ${img.seed} @ ${img.tick}</div>
+          </div>
+        `;
+      }
+
+      main.innerHTML = `
+        <h2 style="color:#88aaff; margin-bottom:12px;">Experiment ${exp.num}: ${exp.title}</h2>
+        ${descHtml ? `<div class="description">${descHtml}</div>` : ''}
+        <div class="images">${imagesHtml || '<div style="color:#666">No images found</div>'}</div>
+      `;
+    }
+
+    scanExperiments();
+  </script>
+</body>
+</html>
