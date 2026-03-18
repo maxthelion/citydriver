@@ -86,6 +86,8 @@ function _mergeNearbyEntries(entries) {
 export function scoreStationLocation(entries, elevation, waterMask, landValue, w, h, cs, originX, originZ) {
   if (entries.length === 0) return null;
   const targetElev = entries.reduce((s, e) => s + e.elevation, 0) / entries.length;
+  const cx = w / 2, cz = h / 2;
+  const maxDist = Math.sqrt(cx * cx + cz * cz);
 
   let bestScore = -1, best = null;
   for (let gz = 5; gz < h - 5; gz++) {
@@ -111,7 +113,11 @@ export function scoreStationLocation(entries, elevation, waterMask, landValue, w
       const dez = (gz > 0 && gz < h - 1) ? elevation.get(gx, gz + 1) - elevation.get(gx, gz - 1) : 0;
       const flatness = 1 - Math.min(1, Math.sqrt(dex * dex + dez * dez) / (2 * cs) / 0.1);
 
-      const score = lv * elevMatch * flatness;
+      // Strongly prefer locations near the city centre
+      const distFromCentre = Math.sqrt((gx - cx) ** 2 + (gz - cz) ** 2);
+      const centrality = 1 - distFromCentre / maxDist;
+
+      const score = lv * elevMatch * flatness * centrality * centrality;
       if (score > bestScore) {
         bestScore = score;
         let be = entries[0], bd = Infinity;
@@ -151,8 +157,9 @@ export function routeCityRailways(railways, elevation, waterMask, landValue, bou
   const tempGrid = new Grid2D(w, h, { type: 'uint8', cellSize });
 
   const railCost = (fromGx, fromGz, toGx, toGz) => {
-    // Water is impassable at city scale — no railway in water
-    if (waterMask.get(toGx, toGz) > 0) return Infinity;
+    // Water is very expensive (bridge required) but not impassable —
+    // river cities need railways to cross via bridges
+    if (waterMask.get(toGx, toGz) > 0) return baseCostFn(fromGx, fromGz, toGx, toGz) + 500;
 
     const base = baseCostFn(fromGx, fromGz, toGx, toGz);
     if (!isFinite(base)) return base;
@@ -165,8 +172,24 @@ export function routeCityRailways(railways, elevation, waterMask, landValue, bou
 
   const polylines = [];
   for (const entry of entries) {
-    const egx = Math.max(0, Math.min(w - 1, Math.round((entry.x - originX) / cellSize)));
-    const egz = Math.max(0, Math.min(h - 1, Math.round((entry.z - originZ) / cellSize)));
+    let egx = Math.max(0, Math.min(w - 1, Math.round((entry.x - originX) / cellSize)));
+    let egz = Math.max(0, Math.min(h - 1, Math.round((entry.z - originZ) / cellSize)));
+
+    // Nudge entry to nearest dry land if on water or at grid edge
+    if (waterMask.get(egx, egz) > 0 || egx <= 0 || egz <= 0 || egx >= w - 1 || egz >= h - 1) {
+      let bestD = Infinity;
+      const searchR = 30;
+      for (let dz = -searchR; dz <= searchR; dz++) {
+        for (let dx = -searchR; dx <= searchR; dx++) {
+          const nx = egx + dx, nz = egz + dz;
+          if (nx < 1 || nx >= w - 1 || nz < 1 || nz >= h - 1) continue;
+          if (waterMask.get(nx, nz) > 0) continue;
+          const d = dx * dx + dz * dz;
+          if (d < bestD) { bestD = d; egx = nx; egz = nz; }
+        }
+      }
+      if (bestD === Infinity) continue; // no dry land found, skip this entry
+    }
 
     const result = findPath(egx, egz, station.gx, station.gz, w, h, railCost);
     if (!result) continue;
