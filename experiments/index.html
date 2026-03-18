@@ -95,27 +95,31 @@
     }
 
     async function tryFetchMd(num) {
-      const slugs = [
+      // Try to fetch the directory listing for this experiment's output
+      const images = await findImages(num);
+
+      // Try to find the markdown file — scan common slugs + try directory listing
+      const slugsToTry = [
         'baseline', 'throttled-ribbon-roads', 'block-fill-residential',
         'reduced-road-spread', 'balanced-allocation', 'terrain-contours',
         'influence-tuning', 'port-zones', 'industrial-placement',
         'civic-typed-plots', 'agriculture-belt', 'cross-streets',
         'residential-bfs-fill', 'road-throttle', 'value-tuning',
+        'zone-visualisation', 'zone-visualization', 'road-extension',
+        'residential-fill', 'layout-ribbons', 'incremental-roads',
       ];
 
-      for (const slug of slugs) {
+      for (const slug of slugsToTry) {
         try {
           const resp = await fetch(`${num}-${slug}.md`);
           if (resp.ok) {
             const text = await resp.text();
             const title = text.match(/^# Experiment \d+: (.+)/m)?.[1] || slug;
-            const images = await findImages(num);
             return { num, slug, title, text, images };
           }
         } catch (e) {}
       }
 
-      const images = await findImages(num);
       if (images.length > 0) {
         return { num, slug: 'unknown', title: `Experiment ${num}`, text: '', images };
       }
@@ -126,13 +130,24 @@
       const images = [];
       const seeds = ['884469', '42', '12345'];
       const ticks = ['tick20', 'tick23', 'tick25', 'tick27', 'tick28', 'tick30', 'tick35', 'tick40', 'tick50'];
+      const prefixes = ['reservations', 'zones', 'roadGrid', 'elevation', 'landValue',
+                        'commercialValue', 'industrialValue', 'civicValue', 'developmentProximity',
+                        'residentialFineValue', 'openSpaceValue', 'zoneGrid'];
 
-      for (const seed of seeds) {
-        for (const tick of ticks) {
-          const path = `${num}-output/reservations-seed${seed}-${tick}.png`;
+      for (const prefix of prefixes) {
+        for (const seed of seeds) {
+          for (const tick of ticks) {
+            const path = `${num}-output/${prefix}-seed${seed}-${tick}.png`;
+            try {
+              const resp = await fetch(path, { method: 'HEAD' });
+              if (resp.ok) images.push({ path, seed, tick, layer: prefix });
+            } catch (e) {}
+          }
+          // Also try without tick (e.g. zones-seed884469.png)
+          const noTickPath = `${num}-output/${prefix}-seed${seed}.png`;
           try {
-            const resp = await fetch(path, { method: 'HEAD' });
-            if (resp.ok) images.push({ path, seed, tick });
+            const resp = await fetch(noTickPath, { method: 'HEAD' });
+            if (resp.ok) images.push({ path: noTickPath, seed, tick: '', layer: prefix });
           } catch (e) {}
         }
       }
@@ -176,10 +191,12 @@
         imagesHtml += '<div style="color:#666">No images found</div>';
       }
       for (const img of exp.images) {
+        const layerLabel = img.layer || 'reservations';
+        const tickLabel = img.tick ? ` @ ${img.tick}` : '';
         imagesHtml += `
           <div class="image-card">
-            <img src="${img.path}" alt="seed ${img.seed}" onclick="this.classList.toggle('zoomed')">
-            <div class="label">seed ${img.seed} @ ${img.tick}</div>
+            <img src="${img.path}" alt="${layerLabel} seed ${img.seed}" onclick="this.classList.toggle('zoomed')">
+            <div class="label">${layerLabel} — seed ${img.seed}${tickLabel}</div>
           </div>
         `;
       }
