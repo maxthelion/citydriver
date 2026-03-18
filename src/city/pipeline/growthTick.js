@@ -16,6 +16,7 @@ import { allocateFromValueBitmap } from './allocate.js';
 import { allocateFrontage } from './allocateFrontage.js';
 import { allocateRibbon } from './allocateRibbon.js';
 import { growRoads } from './growRoads.js';
+import { layoutRibbons } from './layoutRibbons.js';
 
 /**
  * Initialize growth state for a map.
@@ -108,6 +109,46 @@ export function runGrowthTick(map, archetype, state) {
   for (let i = 0; i < w * h; i++) {
     if (resGrid.data[i] === RESERVATION.AGRICULTURE && devProximity[i] >= DEV_PROXIMITY_THRESHOLD) {
       resGrid.data[i] = RESERVATION.NONE;
+    }
+  }
+
+  // Phase 2.5 ROADS: extend street network into high-value areas (throttled layoutRibbons)
+  // Only process zones near existing development. Cap zones per tick.
+  if (map.developmentZones && map.developmentZones.length > 0) {
+    const maxZonesPerTick = growth.roadGrowth?.zonesPerTick || 5;
+    const processedZones = state._processedRibbonZones || new Set();
+
+    // Score zones by average devProximity of their cells — develop near existing city first
+    const zoneScores = [];
+    for (let zi = 0; zi < map.developmentZones.length; zi++) {
+      if (processedZones.has(zi)) continue;
+      const zone = map.developmentZones[zi];
+      let dpSum = 0;
+      const sampleStep = Math.max(1, Math.floor(zone.cells.length / 50)); // sample for speed
+      let count = 0;
+      for (let ci = 0; ci < zone.cells.length; ci += sampleStep) {
+        const c = zone.cells[ci];
+        dpSum += devProximity[c.gz * w + c.gx];
+        count++;
+      }
+      const avgDp = count > 0 ? dpSum / count : 0;
+      if (avgDp > DEV_PROXIMITY_THRESHOLD) {
+        zoneScores.push({ zi, avgDp });
+      }
+    }
+    zoneScores.sort((a, b) => b.avgDp - a.avgDp);
+
+    // Process top N zones — layoutRibbons on a subset
+    const zonesToProcess = zoneScores.slice(0, maxZonesPerTick);
+    if (zonesToProcess.length > 0) {
+      // Temporarily set developmentZones to just the selected zones
+      const allZones = map.developmentZones;
+      map.developmentZones = zonesToProcess.map(z => allZones[z.zi]);
+      layoutRibbons(map);
+      map.developmentZones = allZones;
+
+      for (const z of zonesToProcess) processedZones.add(z.zi);
+      state._processedRibbonZones = processedZones;
     }
   }
 
