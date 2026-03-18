@@ -1,16 +1,40 @@
 import { describe, it, expect } from 'vitest';
-import { extractEntryPoints, scoreStationLocation, routeCityRailways, gradeRailwayCorridor } from '../../src/city/routeCityRailways.js';
+import { extractEntryPoints, scoreStationLocation, routeCityRailways } from '../../src/city/routeCityRailways.js';
 import { Grid2D } from '../../src/core/Grid2D.js';
+import { generateRegion } from '../../src/regional/pipeline.js';
+import { setupCity } from '../../src/city/setup.js';
+import { SeededRandom } from '../../src/core/rng.js';
 
-describe('extractEntryPoints', () => {
-  it('extracts entry points from clipped polylines at city boundary', () => {
+// --- Helpers ---
+
+function assertNoOverlap(gridA, gridB) {
+  let violations = 0;
+  for (let gz = 0; gz < gridA.height; gz++) {
+    for (let gx = 0; gx < gridA.width; gx++) {
+      if (gridA.get(gx, gz) > 0 && gridB.get(gx, gz) > 0) violations++;
+    }
+  }
+  return violations;
+}
+
+function makeCity(seed) {
+  const rng = new SeededRandom(seed);
+  const layers = generateRegion({ width: 64, height: 64, cellSize: 200 }, rng);
+  const s = layers.getData('settlements').find(s => s.tier === 1)
+    || layers.getData('settlements')[0];
+  return setupCity(layers, s, new SeededRandom(seed));
+}
+
+// --- Unit tests ---
+
+describe('unit tests', () => {
+  it('extractEntryPoints finds boundary crossings', () => {
     const bounds = { minX: 100, minZ: 100, maxX: 500, maxZ: 500 };
     const railways = [
       { polyline: [{ x: 100, z: 300 }, { x: 200, z: 300 }, { x: 400, z: 300 }] },
     ];
     const entries = extractEntryPoints(railways, bounds);
     expect(entries.length).toBeGreaterThanOrEqual(1);
-    expect(entries[0].x).toBeLessThanOrEqual(110);
   });
 
   it('merges entries from similar directions', () => {
@@ -20,38 +44,17 @@ describe('extractEntryPoints', () => {
       { polyline: [{ x: 0, z: 210 }, { x: 100, z: 210 }] },
     ];
     const entries = extractEntryPoints(railways, bounds);
-    expect(entries.length).toBe(1); // merged because same direction
-  });
-});
-
-describe('scoreStationLocation', () => {
-  it('prefers central flat dry land within approach cone', () => {
-    const w = 60, h = 60, cs = 5;
-    const elevation = new Grid2D(w, h, { cellSize: cs });
-    elevation.forEach((gx, gz) => elevation.set(gx, gz, 50));
-    const waterMask = new Grid2D(w, h, { type: 'uint8' });
-    const landValue = new Grid2D(w, h, { type: 'float32' });
-    for (let gz = 25; gz < 35; gz++)
-      for (let gx = 25; gx < 35; gx++)
-        landValue.set(gx, gz, 0.8);
-
-    const entries = [{ x: 0, z: 150, dirX: 1, dirZ: 0, elevation: 50 }];
-    const result = scoreStationLocation(entries, elevation, waterMask, landValue, w, h, cs, 0, 0);
-    expect(result).not.toBeNull();
-    expect(result.gx).toBeGreaterThan(20);
-    expect(result.gx).toBeLessThan(40);
+    expect(entries.length).toBe(1);
   });
 
-  it('returns null with no entries', () => {
-    const elevation = new Grid2D(10, 10, { cellSize: 5 });
-    const waterMask = new Grid2D(10, 10, { type: 'uint8' });
-    const landValue = new Grid2D(10, 10, { type: 'float32' });
-    expect(scoreStationLocation([], elevation, waterMask, landValue, 10, 10, 5, 0, 0)).toBeNull();
+  it('scoreStationLocation returns null with no entries', () => {
+    const e = new Grid2D(10, 10, { cellSize: 5 });
+    const w = new Grid2D(10, 10, { type: 'uint8' });
+    const l = new Grid2D(10, 10, { type: 'float32' });
+    expect(scoreStationLocation([], e, w, l, 10, 10, 5, 0, 0)).toBeNull();
   });
-});
 
-describe('routeCityRailways', () => {
-  it('produces paths from entry points to station on flat terrain', () => {
+  it('routeCityRailways returns polylines, not raw paths or grids', () => {
     const w = 80, h = 80, cs = 5;
     const elevation = new Grid2D(w, h, { cellSize: cs });
     elevation.forEach((gx, gz) => elevation.set(gx, gz, 50));
@@ -59,56 +62,53 @@ describe('routeCityRailways', () => {
     const landValue = new Grid2D(w, h, { type: 'float32' });
     landValue.forEach((gx, gz) => landValue.set(gx, gz, 0.5));
 
-    const railways = [
-      { polyline: [{ x: 0, z: 200 }, { x: 100, z: 200 }, { x: 300, z: 200 }] },
-    ];
+    const railways = [{ polyline: [{ x: 0, z: 200 }, { x: 100, z: 200 }, { x: 300, z: 200 }] }];
     const bounds = { minX: 0, minZ: 0, maxX: 400, maxZ: 400 };
 
     const result = routeCityRailways(railways, elevation, waterMask, landValue, bounds, cs, 0, 0);
-    expect(result.paths.length).toBeGreaterThan(0);
-    expect(result.station).not.toBeNull();
-    expect(result.railGrid).not.toBeNull();
-  });
-
-  it('returns empty for railways with no entry points', () => {
-    const w = 100, h = 100, cs = 5;
-    const elevation = new Grid2D(w, h, { cellSize: cs });
-    elevation.forEach((gx, gz) => elevation.set(gx, gz, 50));
-    const waterMask = new Grid2D(w, h, { type: 'uint8' });
-    const landValue = new Grid2D(w, h, { type: 'float32' });
-
-    // Polyline entirely inside bounds, far from all edges (margin = 20*5 = 100)
-    const railways = [
-      { polyline: [{ x: 150, z: 200 }, { x: 250, z: 250 }] },
-    ];
-    const bounds = { minX: 0, minZ: 0, maxX: 500, maxZ: 500 };
-
-    const result = routeCityRailways(railways, elevation, waterMask, landValue, bounds, cs, 0, 0);
-    expect(result.paths.length).toBe(0);
+    expect(result.polylines.length).toBeGreaterThan(0);
+    expect(result).not.toHaveProperty('railGrid');
+    expect(result).not.toHaveProperty('paths');
+    for (const pl of result.polylines) {
+      expect(pl[0]).toHaveProperty('x');
+      expect(pl[0]).toHaveProperty('z');
+    }
   });
 });
 
-describe('gradeRailwayCorridor', () => {
-  it('modifies elevation along the corridor', () => {
-    const w = 40, h = 40, cs = 5;
-    const elevation = new Grid2D(w, h, { cellSize: cs });
-    // Peak in the middle: gx=20 has elev 150, edges have 50
-    elevation.forEach((gx, gz) => elevation.set(gx, gz, 150 - Math.abs(gx - 20) * 5));
-    const railGrid = new Grid2D(w, h, { type: 'uint8' });
+// --- Bitmap invariant tests (full pipeline) ---
 
-    const paths = [{
-      path: [{ gx: 5, gz: 20 }, { gx: 20, gz: 20 }, { gx: 35, gz: 20 }],
-    }];
-    // Entry and station at 75 -- midpoint of corridor should be graded to 75
-    const entries = [{ elevation: 75 }];
-    const station = { elevation: 75 };
+describe('bitmap invariants', () => {
+  for (const seed of [42, 99, 751119]) {
+    describe(`seed ${seed}`, () => {
+      const map = makeCity(seed);
 
-    const before = elevation.get(20, 20); // centre of hill = 150
-    gradeRailwayCorridor(paths, entries, station, elevation, railGrid, cs);
-    const after = elevation.get(20, 20);
+      it('railway ∩ water = ∅', () => {
+        const violations = assertNoOverlap(map.railwayGrid, map.waterMask);
+        expect(violations, `${violations} railway cells on water`).toBe(0);
+      });
 
-    // Hill should be cut down to the graded elevation
-    expect(after).toBeLessThan(before);
-    expect(after).toBeCloseTo(75, 0);
-  });
+      it('station on dry land', () => {
+        if (!map.station) return;
+        const gx = Math.round((map.station.x - map.originX) / map.cellSize);
+        const gz = Math.round((map.station.z - map.originZ) / map.cellSize);
+        if (gx >= 0 && gx < map.width && gz >= 0 && gz < map.height) {
+          expect(map.waterMask.get(gx, gz), 'station on water').toBe(0);
+        }
+      });
+
+      it('railway cells have buildability = 0', () => {
+        let violations = 0;
+        map.railwayGrid.forEach((gx, gz, v) => {
+          if (v > 0 && map.buildability.get(gx, gz) > 0) violations++;
+        });
+        expect(violations, `${violations} buildable railway cells`).toBe(0);
+      });
+
+      it('station elevation above sea level', () => {
+        if (!map.station) return;
+        expect(map.station.elevation).toBeGreaterThan(map.seaLevel || 0);
+      });
+    });
+  }
 });

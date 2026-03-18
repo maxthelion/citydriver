@@ -361,6 +361,8 @@ export class FeatureMap {
             const cellCenterZ = this.originZ + gz * this.cellSize;
             const distSq = (cellCenterX - px) ** 2 + (cellCenterZ - pz) ** 2;
             if (distSq <= halfWidth * halfWidth) {
+              // Never stamp railway on water cells
+              if (this.waterMask.get(gx, gz) > 0) continue;
               this.railwayGrid.set(gx, gz, 1);
               this.buildability.set(gx, gz, 0);
             }

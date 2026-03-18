@@ -214,6 +214,7 @@ export function setupCity(layers, settlement, rng) {
 
   // Import and re-route railways at city resolution.
   // Done here (after terrain/water/landValue) so routing can use the city grid.
+  // Polyline is the single source of truth — grid is derived from it by addFeature.
   const railways = layers.getData('railways');
   if (railways) {
     const cityRailways = inheritRailways(railways, bounds, {
@@ -224,29 +225,22 @@ export function setupCity(layers, settlement, rng) {
     if (cityRailways.length > 0) {
       const railResult = routeCityRailways(
         cityRailways, elevation, map.waterMask, map.landValue,
-        bounds, cityCellSize, originX, originZ,
+        bounds, cityCellSize, originX, originZ, seaLevel,
       );
 
-      // Apply grading (cut/fill terrain along corridor)
-      if (railResult.paths.length > 0 && railResult.station) {
+      // Grade terrain along polylines BEFORE adding features.
+      // Grading modifies elevation; _stampRailway then reads correct terrain.
+      if (railResult.polylines.length > 0 && railResult.station) {
         gradeRailwayCorridor(
-          railResult.paths, railResult.entries, railResult.station,
-          elevation, railResult.railGrid, cityCellSize,
+          railResult.polylines, railResult.entries, railResult.station,
+          elevation, cityCellSize, originX, originZ,
         );
       }
 
-      // Add re-routed railways as features (stamps railwayGrid + buildability)
-      for (const rp of railResult.paths) {
-        map.addFeature('railway', { polyline: rp.polyline });
-      }
-
-      // Copy railGrid onto the map
-      if (railResult.railGrid) {
-        for (let gz = 0; gz < map.height; gz++) {
-          for (let gx = 0; gx < map.width; gx++) {
-            if (railResult.railGrid.get(gx, gz) > 0) map.railwayGrid.set(gx, gz, 1);
-          }
-        }
+      // Add as features — _stampRailway stamps railwayGrid from the polyline.
+      // No separate grid copy needed.
+      for (const polyline of railResult.polylines) {
+        map.addFeature('railway', { polyline });
       }
 
       if (railResult.station) map.station = railResult.station;
