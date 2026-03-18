@@ -12,6 +12,7 @@ import { FeatureMap } from '../core/FeatureMap.js';
 import { PerlinNoise } from '../core/noise.js';
 import { inheritRivers } from '../core/inheritRivers.js';
 import { inheritRailways } from '../core/inheritRailways.js';
+import { routeCityRailways, extractEntryPoints, gradeRailwayCorridor } from './routeCityRailways.js';
 import { distance2D } from '../core/math.js';
 import { CITY_CELL_SIZE, CITY_RADIUS } from './constants.js';
 import { computeTerrainSuitability, computeFloodZone } from '../core/terrainSuitability.js';
@@ -148,60 +149,8 @@ export function setupCity(layers, settlement, rng) {
     }
   }
 
-  // Import railways as features
-  const railways = layers.getData('railways');
-  if (railways) {
-    const cityRailways = inheritRailways(railways, bounds, {
-      chaikinPasses: 2,
-      margin: cityCellSize,
-    });
-    for (const rail of cityRailways) {
-      map.addFeature('railway', {
-        polyline: rail.polyline,
-        hierarchy: rail.hierarchy,
-        phase: rail.phase,
-      });
-    }
-
-    // Place station near the city centre, on dry land, aligned with nearest track.
-    // The settlement position itself may be on water (river cities), so search
-    // outward from centre for the closest point that's on a railway polyline
-    // and not underwater.
-    if (cityRailways.length > 0) {
-      let bestDist = Infinity;
-      let bestX = centerX, bestZ = centerZ, bestAngle = 0;
-
-      for (const rail of cityRailways) {
-        for (let i = 0; i < rail.polyline.length - 1; i++) {
-          const a = rail.polyline[i], b = rail.polyline[i + 1];
-          // Sample points along this segment
-          const dx = b.x - a.x, dz = b.z - a.z;
-          const segLen = Math.sqrt(dx * dx + dz * dz);
-          const steps = Math.max(1, Math.ceil(segLen / cityCellSize));
-          for (let s = 0; s <= steps; s++) {
-            const t = s / steps;
-            const px = a.x + dx * t, pz = a.z + dz * t;
-            // Check if this point is on dry land
-            const gx = Math.round((px - originX) / cityCellSize);
-            const gz = Math.round((pz - originZ) / cityCellSize);
-            if (gx < 0 || gx >= cityGridW || gz < 0 || gz >= cityGridH) continue;
-            if (map.waterMask.get(gx, gz) > 0) continue;
-            const d = (px - centerX) ** 2 + (pz - centerZ) ** 2;
-            if (d < bestDist) {
-              bestDist = d;
-              bestX = px;
-              bestZ = pz;
-              bestAngle = Math.atan2(dz, dx);
-            }
-          }
-        }
-      }
-
-      if (bestDist < Infinity) {
-        map.station = { x: bestX, z: bestZ, angle: bestAngle };
-      }
-    }
-  }
+  // Railway import is deferred until after terrain/water/landValue are ready
+  // (see below, after computeLandValue)
 
   // Set terrain (computes initial buildability, which needs waterMask first)
   map.setTerrain(elevation, slope);
@@ -262,6 +211,47 @@ export function setupCity(layers, settlement, rng) {
   // Compute initial land value from terrain features
   map.computeLandValue();
   map.setLayer('landValue', map.landValue);
+
+  // Import and re-route railways at city resolution.
+  // Done here (after terrain/water/landValue) so routing can use the city grid.
+  const railways = layers.getData('railways');
+  if (railways) {
+    const cityRailways = inheritRailways(railways, bounds, {
+      chaikinPasses: 0, // no smoothing — re-routing on city grid
+      margin: cityCellSize,
+    });
+
+    if (cityRailways.length > 0) {
+      const railResult = routeCityRailways(
+        cityRailways, elevation, map.waterMask, map.landValue,
+        bounds, cityCellSize, originX, originZ,
+      );
+
+      // Apply grading (cut/fill terrain along corridor)
+      if (railResult.paths.length > 0 && railResult.station) {
+        gradeRailwayCorridor(
+          railResult.paths, railResult.entries, railResult.station,
+          elevation, railResult.railGrid, cityCellSize,
+        );
+      }
+
+      // Add re-routed railways as features (stamps railwayGrid + buildability)
+      for (const rp of railResult.paths) {
+        map.addFeature('railway', { polyline: rp.polyline });
+      }
+
+      // Copy railGrid onto the map
+      if (railResult.railGrid) {
+        for (let gz = 0; gz < map.height; gz++) {
+          for (let gx = 0; gx < map.width; gx++) {
+            if (railResult.railGrid.get(gx, gz) > 0) map.railwayGrid.set(gx, gz, 1);
+          }
+        }
+      }
+
+      if (railResult.station) map.station = railResult.station;
+    }
+  }
 
   // Place nuclei (shared across all growth strategies)
   const tier = settlement.tier || 3;
