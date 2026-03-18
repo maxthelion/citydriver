@@ -13,6 +13,7 @@ import { chaikinSmooth } from '../../core/math.js';
 const CLUSTER_RADIUS = 3;       // cells — merge vertices within this distance
 const ARTERIAL_SNAP_DIST = 5;   // cells — max distance to snap to a road cell
 const MIN_SEGMENT_LENGTH = 5;   // cells — skip very short boundary segments
+const MIN_ZONE_CELLS = 1000;    // skip tiny zones — their boundaries make stub roads
 
 /**
  * Create secondary roads from zone boundaries.
@@ -80,6 +81,7 @@ export function createZoneBoundaryRoads(map) {
 
   for (const zone of zones) {
     if (!zone.boundary || zone.boundary.length < 3) continue;
+    if (zone.cells.length < MIN_ZONE_CELLS) continue; // skip tiny zones
 
     const boundary = zone.boundary.map(pt => ({
       gx: Math.round((pt.x - ox) / cs),
@@ -100,12 +102,14 @@ export function createZoneBoundaryRoads(map) {
     }
   }
 
-  // Step 5: Smooth boundaries and stamp onto roadGrid
+  // Step 5: Simplify, smooth, and stamp onto roadGrid
   const stampedCells = [];
   for (let segment of placedSegments) {
-    // Chaikin smooth to remove staircase jaggies (2 passes)
-    // Convert gx/gz to x/z for chaikinSmooth, then back
+    // Simplify: remove nearly-collinear vertices (reduces tight zigzags)
     let pts = segment.map(p => ({ x: p.gx, z: p.gz }));
+    pts = simplifyPolyline(pts, 2.0); // tolerance of 2 cells
+
+    // Chaikin smooth (2 passes)
     for (let pass = 0; pass < 2; pass++) {
       if (pts.length >= 3) pts = chaikinSmooth(pts);
     }
@@ -190,6 +194,41 @@ function isNearJunction(pt, junctions, radius) {
 }
 
 function key(gx, gz) { return gx | (gz << 16); }
+
+/**
+ * Ramer-Douglas-Peucker polyline simplification.
+ * Removes vertices that deviate less than `tolerance` from the line between their neighbours.
+ */
+function simplifyPolyline(pts, tolerance) {
+  if (pts.length < 3) return pts;
+  const tolSq = tolerance * tolerance;
+
+  let maxDist = 0, maxIdx = 0;
+  const first = pts[0], last = pts[pts.length - 1];
+  const dx = last.x - first.x, dz = last.z - first.z;
+  const lenSq = dx * dx + dz * dz;
+
+  for (let i = 1; i < pts.length - 1; i++) {
+    let dist;
+    if (lenSq < 0.001) {
+      const ex = pts[i].x - first.x, ez = pts[i].z - first.z;
+      dist = ex * ex + ez * ez;
+    } else {
+      const t = Math.max(0, Math.min(1, ((pts[i].x - first.x) * dx + (pts[i].z - first.z) * dz) / lenSq));
+      const px = first.x + t * dx, pz = first.z + t * dz;
+      const ex = pts[i].x - px, ez = pts[i].z - pz;
+      dist = ex * ex + ez * ez;
+    }
+    if (dist > maxDist) { maxDist = dist; maxIdx = i; }
+  }
+
+  if (maxDist > tolSq) {
+    const left = simplifyPolyline(pts.slice(0, maxIdx + 1), tolerance);
+    const right = simplifyPolyline(pts.slice(maxIdx), tolerance);
+    return left.slice(0, -1).concat(right);
+  }
+  return [first, last];
+}
 
 function bresenham(x0, y0, x1, y1) {
   const cells = [];
