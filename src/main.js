@@ -5,6 +5,7 @@ import { CompareScreen } from './ui/CompareScreen.js';
 import { CompareArchetypesScreen } from './ui/CompareArchetypesScreen.js';
 import { BuildingStyleScreen } from './ui/BuildingStyleScreen.js';
 import { TerracedRowScreen } from './ui/TerracedRowScreen.js';
+import { RailwayScreen } from './ui/RailwayScreen.js';
 import { generateRegionFromSeed } from './ui/regionHelper.js';
 import { SeededRandom } from './core/rng.js';
 
@@ -16,6 +17,7 @@ let compareScreen = null;
 let compareArchetypesScreen = null;
 let buildingScreen = null;
 let terracedScreen = null;
+let railwayScreen = null;
 
 function disposeAll() {
   if (regionScreen) { regionScreen.dispose(); regionScreen = null; }
@@ -25,6 +27,7 @@ function disposeAll() {
   if (compareArchetypesScreen) { compareArchetypesScreen.dispose(); compareArchetypesScreen = null; }
   if (buildingScreen) { buildingScreen.dispose(); buildingScreen = null; }
   if (terracedScreen) { terracedScreen.dispose(); terracedScreen = null; }
+  if (railwayScreen) { railwayScreen.dispose(); railwayScreen = null; }
   container.innerHTML = '';
 }
 
@@ -69,6 +72,11 @@ function showRegion(initialSeed) {
       history.pushState(null, '', '?mode=terraced');
       terracedScreen = new TerracedRowScreen(container, goBack);
     },
+    onRailways(layers, seed) {
+      disposeAll();
+      history.pushState(null, '', `?seed=${seed}&mode=railway`);
+      railwayScreen = new RailwayScreen(container, layers, seed, goBack);
+    },
   }, initialSeed);
 }
 
@@ -86,6 +94,12 @@ window.addEventListener('popstate', () => {
 
   if (mode === 'terraced') {
     terracedScreen = new TerracedRowScreen(container, goBack);
+    return;
+  }
+
+  if (mode === 'railway' && seed != null) {
+    const { layers } = generateRegionFromSeed(seed);
+    railwayScreen = new RailwayScreen(container, layers, seed, goBack);
     return;
   }
 
@@ -119,6 +133,11 @@ if (urlMode === 'buildings') {
   buildingScreen = new BuildingStyleScreen(container, goBack);
 } else if (urlMode === 'terraced') {
   terracedScreen = new TerracedRowScreen(container, goBack);
+} else if (urlMode === 'railway' && urlSeed != null) {
+  const { layers } = generateRegionFromSeed(urlSeed);
+  history.replaceState(null, '', `?seed=${urlSeed}`);
+  history.pushState(null, '', `?seed=${urlSeed}&mode=railway`);
+  railwayScreen = new RailwayScreen(container, layers, urlSeed, goBack);
 } else if ((urlMode === 'debug' || urlMode === 'city' || urlMode === 'compare' || urlMode === 'compare-archetypes') && urlSeed != null) {
   const gx = parseInt(urlParams.get('gx'));
   const gz = parseInt(urlParams.get('gz'));

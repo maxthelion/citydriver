@@ -22,6 +22,8 @@ import { computeFloodZone } from '../core/terrainSuitability.js';
 import { generateMarketTowns } from './generateMarketTowns.js';
 import { growSettlements } from './growSettlements.js';
 import { carveRiverProfiles } from './carveRiverProfiles.js';
+import { generateOffMapCities } from './generateOffMapCities.js';
+import { generateRailways } from './generateRailways.js';
 
 /**
  * @param {object} params
@@ -213,6 +215,22 @@ export function generateRegion(params, rng) {
 
   // A6d. Growth pass (promote busy settlements)
   growSettlements(allSettlements, roadsB.roads);
+
+  // A8a. Off-map cities (railway destinations beyond region)
+  const offMapCities = generateOffMapCities({ width, height, cellSize }, rng.fork('offMapCities'));
+  layers.setData('offMapCities', offMapCities);
+
+  // A8b. Railway network (phased construction)
+  const railResult = generateRailways(
+    { width, height, cellSize },
+    allSettlements,
+    offMapCities,
+    terrain.elevation,
+    terrain.slope,
+    hydrology.waterMask,
+  );
+  layers.setData('railways', railResult.railways);
+  layers.setGrid('railGrid', railResult.railGrid);
 
   layers.setData('settlements', allSettlements);
   layers.setData('roads', roadsB.roads);
