@@ -30,14 +30,25 @@ const map = setupCity(layers, settlement, rng.fork('city'));
 const archetype = ARCHETYPES.marketTown;
 const strategy = new LandFirstDevelopment(map, { archetype });
 
-// Run ticks
+// Run ticks, capturing skeleton road state after tick 1
 let tick = 0;
+let skeletonRoadSnapshot = null;
 while (tick < maxTicks) {
   const t0 = performance.now();
   const more = strategy.tick();
   tick++;
   const elapsed = (performance.now() - t0).toFixed(0);
   console.log(`  tick ${tick}: ${elapsed}ms${more ? '' : ' (done)'}`);
+
+  // Snapshot skeleton roads after tick 1 (before growth ticks add more)
+  if (tick === 4 && !skeletonRoadSnapshot) {
+    const rg = map.hasLayer('roadGrid') ? map.getLayer('roadGrid') : null;
+    if (rg) {
+      skeletonRoadSnapshot = new Uint8Array(rg.data.length);
+      skeletonRoadSnapshot.set(rg.data);
+    }
+  }
+
   if (!more) break;
 }
 
@@ -71,11 +82,24 @@ const colors = {
 const header = `P6\n${w} ${h}\n255\n`;
 const pixels = new Uint8Array(w * h * 3);
 
+const roadGrid = map.hasLayer('roadGrid') ? map.getLayer('roadGrid') : null;
+
 for (let gz = 0; gz < h; gz++) {
   for (let gx = 0; gx < w; gx++) {
+    const i = gz * w + gx;
     const v = resGrid.get(gx, gz);
-    const [r, g, b] = colors[v] || colors[0];
-    const idx = (gz * w + gx) * 3;
+    let [r, g, b] = colors[v] || colors[0];
+
+    // Overlay roads: skeleton roads in white, growth roads in yellow
+    if (roadGrid && roadGrid.get(gx, gz) > 0) {
+      if (skeletonRoadSnapshot && skeletonRoadSnapshot[i] > 0) {
+        r = 255; g = 255; b = 255; // skeleton — white
+      } else {
+        r = 255; g = 220; b = 100; // growth tick roads — yellow
+      }
+    }
+
+    const idx = i * 3;
     pixels[idx] = r;
     pixels[idx + 1] = g;
     pixels[idx + 2] = b;

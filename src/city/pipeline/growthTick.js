@@ -200,45 +200,30 @@ export function runGrowthTick(map, archetype, state) {
     });
   }
 
-  // Agriculture fill: unclaimed cells just beyond the development frontier
+  // Agriculture fill: contiguous belt just beyond the development frontier
   const agriConfig = (growth.agents || {}).agriculture;
   if (agriConfig) {
-    const agriValueLayer = valueLayers.agriculture || new Float32Array(w * h);
     const agriCap = Math.round(agriConfig.share * state.totalZoneCells);
     const agriClaimed = state.claimedCounts.get('agriculture') || 0;
-    const agriTickBudget = agriConfig.budgetPerTick
-      ? Math.round(agriConfig.budgetPerTick * state.totalZoneCells)
-      : agriCap;
-    const agriBudget = Math.min(agriTickBudget, agriCap - agriClaimed);
-
-    if (agriBudget > 0) {
-      // Agriculture fills cells that are outside the active frontier
-      // (devProximity is small but nonzero — just beyond the settled fringe)
-      // Build a custom value layer for agriculture: eligible only beyond frontier
-      const agriMask = new Float32Array(w * h);
-      for (let i = 0; i < w * h; i++) {
-        const dp = devProximity[i];
-        if (resGrid.data[i] === RESERVATION.NONE && dp < DEV_PROXIMITY_THRESHOLD && dp > 0.001) {
-          agriMask[i] = agriValueLayer[i] > 0 ? agriValueLayer[i] : 0.5;
+    if (agriClaimed < agriCap) {
+      // Simple fill: all zone cells that are beyond the frontier but near it
+      let newAgriCount = 0;
+      for (let gz = 0; gz < h; gz++) {
+        for (let gx = 0; gx < w; gx++) {
+          if (newAgriCount + agriClaimed >= agriCap) break;
+          if (zoneGrid.get(gx, gz) === 0) continue;
+          if (resGrid.get(gx, gz) !== RESERVATION.NONE) continue;
+          const dp = devProximity[gz * w + gx];
+          // Beyond the active frontier but within the blur radius (near development)
+          if (dp < DEV_PROXIMITY_THRESHOLD && dp > 0.0005) {
+            resGrid.set(gx, gz, RESERVATION.AGRICULTURE);
+            newAgriCount++;
+          }
         }
       }
-
-      // Direct fill without devProximity filter (we've already filtered via agriMask)
-      const newAgriCells = allocateFromValueBitmap({
-        valueLayer: agriMask,
-        resGrid,
-        zoneGrid,
-        devProximity: null, // already encoded in agriMask
-        resType: RESERVATION.AGRICULTURE,
-        budget: agriBudget,
-        minFootprint: agriConfig.minFootprint || 1,
-        w,
-        h,
-      });
-
-      if (newAgriCells.length > 0) {
+      if (newAgriCount > 0) {
         anyAllocated = true;
-        state.claimedCounts.set('agriculture', agriClaimed + newAgriCells.length);
+        state.claimedCounts.set('agriculture', agriClaimed + newAgriCount);
       }
     }
   }

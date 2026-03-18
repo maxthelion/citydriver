@@ -114,7 +114,9 @@ export function allocateRibbon({
 
   // Pick spaced seeds
   const selectedSeeds = [];
-  const minSpacingSq = maxRibbonLength * maxRibbonLength;
+  // Seeds need to be at least maxRibbonLength/2 apart to avoid overlapping ribbons
+  const spacing = Math.max(5, Math.floor(maxRibbonLength / 2));
+  const minSpacingSq = spacing * spacing;
   for (const s of seeds) {
     if (selectedSeeds.length >= seedCount) break;
     let tooClose = false;
@@ -154,7 +156,8 @@ export function allocateRibbon({
         let d = 1; // start 1 cell from road
         let stripCount = 0;
 
-        while (d < 20) { // reasonable max distance
+        const maxDist = plotDepth * 8 + gapWidth * 7; // up to 8 strips
+        while (d < maxDist) {
           // Claim plotDepth cells
           for (let pd = 0; pd < plotDepth; pd++) {
             if (claimed.length >= budget) break;
@@ -189,7 +192,6 @@ export function allocateRibbon({
           d += gapWidth;
 
           stripCount++;
-          if (stripCount >= 3) break; // max 3 strips per side
         }
 
         ribbonLen++;
