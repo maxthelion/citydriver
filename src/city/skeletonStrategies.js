@@ -257,6 +257,8 @@ function _tierWeight(tier) {
  */
 function _straightLineWithAvoidance(map, from, to) {
   const cs = map.cellSize;
+  const waterMask = map.getLayer?.('waterMask') ?? map.waterMask;
+  const buildability = map.getLayer?.('terrainSuitability') ?? map.buildability;
 
   // Walk the line in grid space, check for water crossings
   const dx = to.gx - from.gx;
@@ -276,7 +278,7 @@ function _straightLineWithAvoidance(map, from, to) {
 
     if (gx < 0 || gx >= map.width || gz < 0 || gz >= map.height) continue;
 
-    const isWater = map.waterMask.get(gx, gz) > 0;
+    const isWater = waterMask.get(gx, gz) > 0;
 
     if (isWater && !inWater) {
       waterStart = s;
@@ -318,8 +320,8 @@ function _straightLineWithAvoidance(map, from, to) {
         const wgz = Math.round(midGz + perpZ * offset * sign);
 
         if (wgx < 1 || wgx >= map.width - 1 || wgz < 1 || wgz >= map.height - 1) continue;
-        if (map.waterMask.get(wgx, wgz) > 0) continue;
-        if (map.buildability.get(wgx, wgz) < 0.05) continue;
+        if (waterMask.get(wgx, wgz) > 0) continue;
+        if (buildability.get(wgx, wgz) < 0.05) continue;
 
         bestWaypoint = { gx: wgx, gz: wgz };
         break;
