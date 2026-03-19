@@ -222,5 +222,18 @@
         "tick": null
       }
     ]
+  },
+  {
+    "num": "007c",
+    "slug": "adaptive-spacing",
+    "md": "007c-adaptive-spacing.md",
+    "images": [
+      {
+        "path": "007c-output/ribbon-zone-seed884469.png",
+        "layer": "ribbon-zone",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
   }
 ]
