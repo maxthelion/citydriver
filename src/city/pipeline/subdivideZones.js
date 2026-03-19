@@ -114,27 +114,7 @@ export function subdivideLargeZones(map, options = {}) {
       id: map.roads ? map.roads.length : 0,
     };
 
-    if (map.addFeature) {
-      map.addFeature('road', roadData);
-    } else {
-      map.roads.push(roadData);
-    }
-
-    if (map.graph && simplified.length >= 2) {
-      const snapDist = cs * 3;
-      const graph = map.graph;
-      const startPt = simplified[0];
-      const endPt = simplified[simplified.length - 1];
-      const startNode = findOrCreate(graph, startPt.x, startPt.z, snapDist);
-      const endNode = findOrCreate(graph, endPt.x, endPt.z, snapDist);
-      if (startNode !== endNode) {
-        graph.addEdge(startNode, endNode, {
-          points: simplified.slice(1, -1),
-          width: 6,
-          hierarchy: 'local',
-        });
-      }
-    }
+    map.addFeature('road', roadData);
 
     cutsPlaced++;
   }
@@ -217,10 +197,4 @@ function simplifyGridPath(pts, tolerance) {
     return left.slice(0, -1).concat(right);
   }
   return [first, last];
-}
-
-function findOrCreate(graph, x, z, snapDist) {
-  const nearest = graph.nearestNode(x, z);
-  if (nearest && nearest.dist < snapDist) return nearest.id;
-  return graph.addNode(x, z);
 }

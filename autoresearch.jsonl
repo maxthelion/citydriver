@@ -1,1 +1,2 @@
 {"type":"config","name":"GPU optimisation of composeAllValueLayers","metricName":"mean_ms","metricUnit":"ms","bestDirection":"lower"}
+{"run":1,"commit":"c9a6f5a","metric":570.98,"metrics":{"p50_ms":571.33,"p95_ms":580.43,"total_ms":34259},"status":"keep","description":"Baseline: CPU composeAllValueLayers, 570ms/tick mean, 1200×1200 grid, 8 zones, marketTown archetype","timestamp":1773936443457,"segment":0,"confidence":null}
