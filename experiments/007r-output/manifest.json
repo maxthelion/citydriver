@@ -1,0 +1,20 @@
+{
+  "experiment": "007r",
+  "generated": "2026-03-19T10:47:40.586Z",
+  "seeds": [
+    "884469"
+  ],
+  "layers": null,
+  "archetype": null,
+  "ticks": null,
+  "script": "render-ribbon-angled-roads.js",
+  "images": [
+    {
+      "file": "ribbon-zone-zoomed-seed884469.png",
+      "path": "007r-output/ribbon-zone-zoomed-seed884469.png",
+      "layer": "ribbon-zone-zoomed",
+      "seed": "884469",
+      "tick": null
+    }
+  ]
+}
