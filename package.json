@@ -12,5 +12,8 @@
     "sharp": "^0.34.5",
     "three": "^0.170.0",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "webgpu": "^0.3.10"
   }
 }
