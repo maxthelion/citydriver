@@ -32,17 +32,12 @@ export function wrapZoneWithRoad(map, zone) {
   for (const seg of segments) {
     if (seg.length < 2) continue;
 
-    const roadData = {
-      type: 'road',
-      polyline: seg,
+    map.roadNetwork.add(seg, {
       width: 6,
       hierarchy: 'collector',
       importance: 0.5,
       source: 'zone-wrap',
-      id: map.roads ? map.roads.length : 0,
-    };
-
-    map.addFeature('road', roadData);
+    });
 
     added++;
   }

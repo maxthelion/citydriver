@@ -195,24 +195,19 @@ function snapEndpointToRoad(polyline, idx, map) {
 // ── Shared road utilities (same as layoutRibbons.js) ──────────────
 
 function addRoad(map, polyline, hierarchy, width) {
-  const roadData = {
-    type: 'road',
-    polyline,
+  map.roadNetwork.add(polyline, {
     width,
     hierarchy,
     importance: hierarchy === 'collector' ? 0.5 : 0.2,
     source: 'zone-boundary',
-    id: map.roads ? map.roads.length : 0,
-  };
-
-  map.addFeature('road', roadData);
+  });
 }
 
 function clipStreetToGrid(street, map) {
   if (street.length < 2) return [];
 
-  const roadGrid = map.hasLayer ? map.getLayer('roadGrid') : map.roadGrid;
-  const waterMask = map.hasLayer ? map.getLayer('waterMask') : map.waterMask;
+  const roadGrid = map.getLayer('roadGrid');
+  const waterMask = map.getLayer('waterMask');
   const cs = map.cellSize;
   const ox = map.originX, oz = map.originZ;
 

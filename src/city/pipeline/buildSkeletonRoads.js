@@ -10,16 +10,12 @@
 import { buildSkeletonRoads as buildSkeleton } from '../skeleton.js';
 
 export function buildSkeletonRoads(map) {
-  // skeleton.js currently reads map.buildability, map.waterMask, etc.
-  // directly. It also calls map.addFeature which stamps roadGrid.
-  // Delegate to existing function — will be cleaned up when FeatureMap
-  // side effects are removed (Task 12-13).
   buildSkeleton(map);
 
-  // Mirror the stamped grids into the layer bag so downstream pipeline
-  // functions can find them via getLayer().
-  if (map.roadGrid) map.setLayer('roadGrid', map.roadGrid);
-  if (map.bridgeGrid) map.setLayer('bridgeGrid', map.bridgeGrid);
+  // Set layers to point to the RoadNetwork's grids so downstream
+  // pipeline functions can read them via getLayer().
+  map.setLayer('roadGrid', map.roadNetwork.roadGrid);
+  map.setLayer('bridgeGrid', map.roadNetwork.bridgeGrid);
 
   return map;
 }

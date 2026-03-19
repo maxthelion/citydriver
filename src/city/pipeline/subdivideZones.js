@@ -103,18 +103,13 @@ export function subdivideLargeZones(map, options = {}) {
     const simplified = simplifyGridPath(polyline, cs * 3);
     if (simplified.length < 2) continue;
 
-    // Step 5: Add as road
-    const roadData = {
-      type: 'road',
-      polyline: simplified,
+    // Step 5: Add as road directly to the network
+    map.roadNetwork.add(simplified, {
       width: 6,
       hierarchy: 'local',
       importance: 0.2,
       source: 'zone-subdivide',
-      id: map.roads ? map.roads.length : 0,
-    };
-
-    map.addFeature('road', roadData);
+    });
 
     cutsPlaced++;
   }

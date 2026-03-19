@@ -111,8 +111,10 @@ export function placeBuildings(map, seed) {
         const gx = lx / cs;
         const gz = lz / cs;
         if (gx < 1 || gz < 1 || gx >= map.width - 1 || gz >= map.height - 1) continue;
-        if (map.buildability.sample(gx, gz) < 0.3) continue;
-        if (map.waterMask.get(Math.floor(gx), Math.floor(gz))) continue;
+        const _bld = map.hasLayer('terrainSuitability') ? map.getLayer('terrainSuitability') : map.buildability;
+        const _wm = map.hasLayer('waterMask') ? map.getLayer('waterMask') : map.waterMask;
+        if (_bld.sample(gx, gz) < 0.3) continue;
+        if (_wm.get(Math.floor(gx), Math.floor(gz))) continue;
 
         // Terrain height
         const terrainY = map.elevation.sample(gx, gz);
@@ -428,15 +430,19 @@ export function computePlotPlacements(map) {
 
   if (!zones || zones.length === 0) return { plots, occupancy: null };
 
-  // Build occupancy grid: water + unbuildable + skeleton/collector roads = occupied.
+  // Build occupancy grid: water + roads + unbuildable terrain = occupied.
   // Ribbon (local land-first) roads are excluded — plots are designed to line them.
   const { Grid2D } = _getGrid2D(map);
   const occupancy = new Grid2D(map.width, map.height, { type: 'uint8' });
   const w = map.width, h = map.height;
+  const waterMask = map.hasLayer('waterMask') ? map.getLayer('waterMask') : map.waterMask;
+  const roadGrid = map.hasLayer('roadGrid') ? map.getLayer('roadGrid') : map.roadGrid;
+  const terrainSuitability = map.hasLayer('terrainSuitability') ? map.getLayer('terrainSuitability') : map.buildability;
   for (let gz = 0; gz < h; gz++) {
     for (let gx = 0; gx < w; gx++) {
-      if (map.waterMask.get(gx, gz) > 0) { occupancy.set(gx, gz, 1); continue; }
-      if (map.buildability.get(gx, gz) < 0.15) { occupancy.set(gx, gz, 1); continue; }
+      if (waterMask.get(gx, gz) > 0) { occupancy.set(gx, gz, 1); continue; }
+      if (roadGrid && roadGrid.get(gx, gz) > 0) { occupancy.set(gx, gz, 1); continue; }
+      if (terrainSuitability.get(gx, gz) < 0.15) { occupancy.set(gx, gz, 1); continue; }
     }
   }
 
@@ -444,7 +450,7 @@ export function computePlotPlacements(map) {
   const RIVER_BANK_BUFFER = 1;
   for (let gz = 0; gz < h; gz++) {
     for (let gx = 0; gx < w; gx++) {
-      if (map.waterMask.get(gx, gz) === 0) continue;
+      if (waterMask.get(gx, gz) === 0) continue;
       for (let dz = -RIVER_BANK_BUFFER; dz <= RIVER_BANK_BUFFER; dz++) {
         for (let dx = -RIVER_BANK_BUFFER; dx <= RIVER_BANK_BUFFER; dx++) {
           const nx = gx + dx, nz = gz + dz;
@@ -613,7 +619,8 @@ export function placeTerracedRows(map, _seed) {
 
 /** Extract Grid2D constructor from the map's existing grids. */
 function _getGrid2D(map) {
-  return { Grid2D: map.waterMask.constructor };
+  const wm = map.hasLayer('waterMask') ? map.getLayer('waterMask') : map.waterMask;
+  return { Grid2D: wm.constructor };
 }
 
 /**

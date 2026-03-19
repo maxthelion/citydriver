@@ -95,7 +95,7 @@ export function buildSkeletonRoads(map) {
     }
   } catch (_) { /* ignore in headless/test environments */ }
 
-  // 4. Add merged roads as features
+  // 4. Add merged roads directly to the road network (no addFeature side effects)
   for (const road of builtRoads) {
     if (!road.polyline || road.polyline.length < 2) continue;
 
@@ -103,8 +103,7 @@ export function buildSkeletonRoads(map) {
                        road.hierarchy === 'collector' ? 0.6 : 0.45;
     const width = 6 + importance * 10;
 
-    map.addFeature('road', {
-      polyline: road.polyline,
+    map.roadNetwork.add(road.polyline, {
       width,
       hierarchy: road.hierarchy,
       importance,
@@ -389,7 +388,7 @@ function _connectDisconnectedNuclei(map) {
     const result = findPath(n.gx, n.gz, bestGx, bestGz, map.width, map.height, costFn);
     if (!result || result.path.length < 2) continue;
 
-    // Stamp debug grid (roadGrid stamping handled by addFeature below)
+    // Stamp debug grid
     if (map.debugMstGrid) {
       for (const p of result.path) {
         map.debugMstGrid.set(p.gx, p.gz, 1);
@@ -402,8 +401,7 @@ function _connectDisconnectedNuclei(map) {
     if (smoothed.length < 2) continue;
 
     const width = 6 + 0.3 * 10;
-    map.addFeature('road', {
-      polyline: smoothed,
+    map.roadNetwork.add(smoothed, {
       width,
       hierarchy: 'local',
       importance: 0.3,

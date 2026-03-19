@@ -352,8 +352,7 @@ function _addSparseRoad(map, polyline, hierarchy) {
                      hierarchy === 'collector' ? 0.6 : 0.45;
   const width = 6 + importance * 10;
 
-  map.addFeature('road', {
-    polyline,
+  map.roadNetwork.add(polyline, {
     width,
     hierarchy,
     importance,

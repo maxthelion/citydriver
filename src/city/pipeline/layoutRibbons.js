@@ -72,17 +72,12 @@ export function layoutRibbons(map) {
 }
 
 function _addRoad(map, polyline, hierarchy, width) {
-  const roadData = {
-    type: 'road',
-    polyline,
+  map.roadNetwork.add(polyline, {
     width,
     hierarchy,
     importance: hierarchy === 'collector' ? 0.5 : 0.2,
     source: 'land-first',
-    id: map.roads ? map.roads.length : 0,
-  };
-
-  map.addFeature('road', roadData);
+  });
 }
 
 /**
@@ -91,9 +86,9 @@ function _addRoad(map, polyline, hierarchy, width) {
 function _clipStreetToGrid(street, map) {
   if (street.length < 2) return [];
 
-  const roadGrid = map.hasLayer ? map.getLayer('roadGrid') : map.roadGrid;
+  const roadGrid = map.getLayer('roadGrid');
   const railwayGrid = map.railwayGrid || null;
-  const waterMask = map.hasLayer ? map.getLayer('waterMask') : map.waterMask;
+  const waterMask = map.getLayer('waterMask');
   const cs = map.cellSize;
   const ox = map.originX, oz = map.originZ;
   const roadHalf = 3;

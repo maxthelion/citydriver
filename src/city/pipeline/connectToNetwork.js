@@ -26,7 +26,7 @@ export function connectToNetwork(map) {
 
     // Try connecting both ends of the spine
     for (const endpoint of [spine[0], spine[spine.length - 1]]) {
-      const roadGrid = map.hasLayer ? map.getLayer('roadGrid') : map.roadGrid;
+      const roadGrid = map.getLayer('roadGrid');
       const egx = Math.round((endpoint.x - map.originX) / map.cellSize);
       const egz = Math.round((endpoint.z - map.originZ) / map.cellSize);
       if (roadGrid && roadGrid.get(egx, egz) > 0) continue; // already on road
@@ -68,15 +68,10 @@ export function connectToNetwork(map) {
 }
 
 function _addRoad(map, polyline, hierarchy, width) {
-  const roadData = {
-    type: 'road',
-    polyline,
+  map.roadNetwork.add(polyline, {
     width,
     hierarchy,
     importance: hierarchy === 'collector' ? 0.5 : 0.2,
     source: 'land-first',
-    id: map.roads ? map.roads.length : 0,
-  };
-
-  map.addFeature('road', roadData);
+  });
 }

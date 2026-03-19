@@ -71,18 +71,13 @@ export function connectIslandZones(map) {
     const simplified = simplify(polyline, cs * 3);
     if (simplified.length < 2) continue;
 
-    // Step 4: Add as road
-    const roadData = {
-      type: 'road',
-      polyline: simplified,
+    // Step 4: Add as road directly to the network
+    map.roadNetwork.add(simplified, {
       width: 6,
       hierarchy: 'local',
       importance: 0.2,
       source: 'island-connect',
-      id: map.roads ? map.roads.length : 0,
-    };
-
-    map.addFeature('road', roadData);
+    });
 
     // Wrap the island zone boundary with a road now that it's connected
     wrapZoneWithRoad(map, zone);
