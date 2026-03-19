@@ -201,16 +201,26 @@ export function extractZones(map) {
 
   map.developmentZones = zones;
 
-  // Build zoneGrid
+  // Build zoneGrid (last-write-wins — higher-priority zones overwrite earlier ones).
+  // Zones are sorted by priority descending, so we write in reverse order so that
+  // the highest-priority zone wins each contested cell.
   const zoneGrid = new Grid2D(map.width, map.height, {
     type: 'uint8', cellSize: map.cellSize,
     originX: map.originX, originZ: map.originZ,
   });
-  for (const zone of zones) {
+  for (let i = zones.length - 1; i >= 0; i--) {
+    const zone = zones[i];
     for (const cell of zone.cells) {
       zoneGrid.set(cell.gx, cell.gz, zone.id || 1);
     }
   }
+
+  // Reconcile zone.cells with zoneGrid: each cell belongs to exactly one zone.
+  // Cells that were claimed by a higher-priority zone are removed from lower ones.
+  for (const zone of zones) {
+    zone.cells = zone.cells.filter(c => zoneGrid.get(c.gx, c.gz) === zone.id);
+  }
+
   map.setLayer('zoneGrid', zoneGrid);
 
   return map;
