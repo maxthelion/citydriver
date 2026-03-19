@@ -361,8 +361,8 @@
   },
   {
     "num": "007k3",
-    "slug": "unknown",
-    "md": null,
+    "slug": "dist-index",
+    "md": "007k3-dist-index.md",
     "images": [
       {
         "path": "007k3-output/ribbon-zone-zoomed-seed884469.png",
@@ -387,8 +387,8 @@
   },
   {
     "num": "007m",
-    "slug": "unknown",
-    "md": null,
+    "slug": "from-road",
+    "md": "007m-from-road.md",
     "images": [
       {
         "path": "007m-output/ribbon-zone-zoomed-seed884469.png",
