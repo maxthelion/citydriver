@@ -11,6 +11,7 @@
 
 import { Grid2D } from './Grid2D.js';
 import { PlanarGraph } from './PlanarGraph.js';
+import { RoadNetwork } from './RoadNetwork.js';
 import { riverHalfWidth, channelProfile } from './riverGeometry.js';
 import { RIVER_STAMP_FRACTION, STAMP_STEP_FRACTION } from '../city/constants.js';
 
@@ -61,13 +62,12 @@ export class FeatureMap {
 
     // Feature storage
     this.features = []; // all features in add order
-    this.roads = [];
     this.rivers = [];
     this.plots = [];
     this.buildings = [];
 
-    // Road topology graph
-    this.graph = new PlanarGraph();
+    // Road network — single source of truth for roads, graph, roadGrid, bridgeGrid
+    this.roadNetwork = new RoadNetwork(width, height, cellSize, originX, originZ);
 
     // Terrain grids (set externally after construction)
     this.elevation = null;
@@ -77,8 +77,6 @@ export class FeatureMap {
     const gridOpts = { cellSize, originX, originZ };
     this.buildability = new Grid2D(width, height, { ...gridOpts, type: 'float32' });
     this.waterMask = new Grid2D(width, height, { ...gridOpts, type: 'uint8' });
-    this.bridgeGrid = new Grid2D(width, height, { ...gridOpts, type: 'uint8' });
-    this.roadGrid = new Grid2D(width, height, { ...gridOpts, type: 'uint8' });
     this.railwayGrid = new Grid2D(width, height, { ...gridOpts, type: 'uint8' });
     this.landValue = new Grid2D(width, height, { ...gridOpts, type: 'float32' });
     this.waterType = null; // set by classifyWater
@@ -89,6 +87,13 @@ export class FeatureMap {
     // Nucleus data
     this.nuclei = [];
   }
+
+  // --- Backward-compat getters (delegate to roadNetwork) ---
+
+  get roads() { return this.roadNetwork.roads; }
+  get graph() { return this.roadNetwork.graph; }
+  get roadGrid() { return this.roadNetwork.roadGrid; }
+  get bridgeGrid() { return this.roadNetwork.bridgeGrid; }
 
   setLayer(name, grid) { this.layers.set(name, grid); }
   getLayer(name) { return this.layers.get(name); }
@@ -114,11 +119,19 @@ export class FeatureMap {
     this.features.push(feature);
 
     switch (type) {
-      case 'road':
-        this.roads.push(feature);
-        this._stampRoad(feature);
-        this._stampRoadValue(feature);
+      case 'road': {
+        const road = this.roadNetwork.add(data.polyline, data);
+        // Zero buildability under the new road
+        this._zeroBuildabilityAlongRoad(data.polyline, data.width || 6);
+        // Handle legacy bridge flag — stamp bridgeGrid for water cells
+        if (data.bridge) {
+          this._stampBridgeFlagCells(data.polyline, data.width || 6);
+        }
+        // Return a feature-like object with the Road's id for compatibility
+        feature.id = road.id;
+        feature._road = road;
         break;
+      }
       case 'river':
         this.rivers.push(feature);
         this._stampRiver(feature);
@@ -271,56 +284,83 @@ export class FeatureMap {
     }
   }
 
-  // --- Road stamping ---
+  // --- Legacy bridge flag stamping ---
 
-  _stampRoad(feature) {
-    const polyline = feature.polyline;
+  _stampBridgeFlagCells(polyline, width) {
     if (!polyline || polyline.length < 2) return;
+    const halfWidth = (width || 6) / 2;
+    const stepSize = this.cellSize * STAMP_STEP_FRACTION;
 
-    const halfWidth = (feature.width || 6) / 2;
-
-    // Walk polyline at half-cell steps, stamp roadGrid + zero buildability
     for (let i = 0; i < polyline.length - 1; i++) {
-      const ax = polyline[i].x;
-      const az = polyline[i].z;
-      const bx = polyline[i + 1].x;
-      const bz = polyline[i + 1].z;
-
-      const dx = bx - ax;
-      const dz = bz - az;
+      const ax = polyline[i].x, az = polyline[i].z;
+      const bx = polyline[i + 1].x, bz = polyline[i + 1].z;
+      const dx = bx - ax, dz = bz - az;
       const segLen = Math.sqrt(dx * dx + dz * dz);
       if (segLen < 0.01) continue;
 
-      const stepSize = this.cellSize * STAMP_STEP_FRACTION;
       const steps = Math.ceil(segLen / stepSize);
+      const effectiveRadius = Math.max(halfWidth, this.cellSize * RIVER_STAMP_FRACTION);
+      const cellRadius = Math.ceil(effectiveRadius / this.cellSize);
 
       for (let s = 0; s <= steps; s++) {
         const t = s / steps;
-        const px = ax + dx * t;
-        const pz = az + dz * t;
-
-        const effectiveRadius = Math.max(halfWidth, this.cellSize * RIVER_STAMP_FRACTION);
-        const cellRadius = Math.ceil(effectiveRadius / this.cellSize);
+        const px = ax + dx * t, pz = az + dz * t;
         const cgx = Math.round((px - this.originX) / this.cellSize);
         const cgz = Math.round((pz - this.originZ) / this.cellSize);
 
         for (let ddz = -cellRadius; ddz <= cellRadius; ddz++) {
           for (let ddx = -cellRadius; ddx <= cellRadius; ddx++) {
-            const gx = cgx + ddx;
-            const gz = cgz + ddz;
+            const gx = cgx + ddx, gz = cgz + ddz;
             if (gx < 0 || gx >= this.width || gz < 0 || gz >= this.height) continue;
-
-            const cellCenterX = this.originX + gx * this.cellSize;
-            const cellCenterZ = this.originZ + gz * this.cellSize;
-            const distSq = (cellCenterX - px) ** 2 + (cellCenterZ - pz) ** 2;
+            const cellX = this.originX + gx * this.cellSize;
+            const cellZ = this.originZ + gz * this.cellSize;
+            const distSq = (cellX - px) ** 2 + (cellZ - pz) ** 2;
             if (distSq <= effectiveRadius * effectiveRadius) {
-              this.roadGrid.set(gx, gz, 1);
-              this.buildability.set(gx, gz, 0);
-
-              // Only stamp bridgeGrid for explicit bridge features
-              if (feature.bridge && this.waterMask.get(gx, gz) > 0) {
+              if (this.waterMask.get(gx, gz) > 0) {
                 this.bridgeGrid.set(gx, gz, 1);
               }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // --- Road buildability zeroing ---
+
+  _zeroBuildabilityAlongRoad(polyline, width) {
+    if (!polyline || polyline.length < 2) return;
+
+    const halfWidth = (width || 6) / 2;
+    const stepSize = this.cellSize * STAMP_STEP_FRACTION;
+
+    for (let i = 0; i < polyline.length - 1; i++) {
+      const ax = polyline[i].x, az = polyline[i].z;
+      const bx = polyline[i + 1].x, bz = polyline[i + 1].z;
+      const dx = bx - ax, dz = bz - az;
+      const segLen = Math.sqrt(dx * dx + dz * dz);
+      if (segLen < 0.01) continue;
+
+      const steps = Math.ceil(segLen / stepSize);
+      const effectiveRadius = Math.max(halfWidth, this.cellSize * RIVER_STAMP_FRACTION);
+      const cellRadius = Math.ceil(effectiveRadius / this.cellSize);
+
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const px = ax + dx * t;
+        const pz = az + dz * t;
+        const cgx = Math.round((px - this.originX) / this.cellSize);
+        const cgz = Math.round((pz - this.originZ) / this.cellSize);
+
+        for (let ddz = -cellRadius; ddz <= cellRadius; ddz++) {
+          for (let ddx = -cellRadius; ddx <= cellRadius; ddx++) {
+            const gx = cgx + ddx, gz = cgz + ddz;
+            if (gx < 0 || gx >= this.width || gz < 0 || gz >= this.height) continue;
+            const cellX = this.originX + gx * this.cellSize;
+            const cellZ = this.originZ + gz * this.cellSize;
+            const distSq = (cellX - px) ** 2 + (cellZ - pz) ** 2;
+            if (distSq <= effectiveRadius * effectiveRadius) {
+              this.buildability.set(gx, gz, 0);
             }
           }
         }
@@ -900,15 +940,6 @@ export class FeatureMap {
     }
   }
 
-  /**
-   * Incrementally add value from a newly added road and re-blur locally.
-   * Lighter than full recompute — just stamps junction value near the new road.
-   */
-  _stampRoadValue(_feature) {
-    // No-op: land value is computed from terrain (flatness + proximity + water),
-    // not from road junctions/bridges. The strategy recomputes land value
-    // explicitly after skeleton roads are placed.
-  }
 
   // --- Cloning ---
 
@@ -926,27 +957,46 @@ export class FeatureMap {
     // Derived grids
     copy.buildability = this.buildability.clone();
     copy.waterMask = this.waterMask.clone();
-    copy.bridgeGrid = this.bridgeGrid.clone();
-    copy.roadGrid = this.roadGrid.clone();
     copy.railwayGrid = this.railwayGrid.clone();
     copy.landValue = this.landValue.clone();
     if (this.waterType) copy.waterType = this.waterType.clone();
     if (this.waterDist) copy.waterDist = this.waterDist.clone();
     if (this.waterDepth) copy.waterDepth = this.waterDepth.clone();
 
-    // Features (deep copy data, not object references)
+    // Road network — re-add all roads to the copy's fresh network
+    for (const road of this.roadNetwork.roads) {
+      const r = copy.roadNetwork.add(road.polyline, {
+        width: road.width,
+        hierarchy: road.hierarchy,
+        importance: road.importance,
+        source: road.source,
+      });
+      for (const b of road.bridges) {
+        copy.roadNetwork.addBridge(r.id, b.bankA, b.bankB, b.entryT, b.exitT);
+      }
+      // Add to features[] for backward compat
+      copy.features.push({
+        type: 'road', id: r.id, _road: r,
+        polyline: road.polyline, width: road.width,
+        hierarchy: road.hierarchy, importance: road.importance,
+        source: road.source,
+      });
+    }
+
+    // Non-road features (deep copy)
     for (const f of this.features) {
+      if (f.type === 'road') continue; // roads handled via roadNetwork above
       const fCopy = JSON.parse(JSON.stringify(f));
       copy.features.push(fCopy);
       switch (fCopy.type) {
-        case 'road': copy.roads.push(fCopy); break;
         case 'river': copy.rivers.push(fCopy); break;
         case 'plot': copy.plots.push(fCopy); break;
         case 'building': copy.buildings.push(fCopy); break;
       }
     }
 
-    // Graph is fresh (strategies build their own)
+    // Graph compaction (strategies may have already compacted)
+    // copy.roadNetwork.graph is already populated from the re-added roads
 
     // Nuclei (deep copy)
     copy.nuclei = this.nuclei.map(n => ({ ...n }));

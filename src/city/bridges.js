@@ -373,7 +373,12 @@ function _spliceBridge(road, entryX, entryZ, exitX, exitZ, bankA, bankB) {
   const before = polyline.slice(0, entryIdx + 1);
   const after = polyline.slice(exitIdx);
 
-  road.polyline = [...before, nearBank, farBank, ...after];
+  const newPolyline = [...before, nearBank, farBank, ...after];
+  if (typeof road._replacePolyline === 'function') {
+    road._replacePolyline(newPolyline);
+  } else {
+    road.polyline = newPolyline;
+  }
 }
 
 /**

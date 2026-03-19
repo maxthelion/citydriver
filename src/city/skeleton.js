@@ -463,72 +463,74 @@ const HIER_RANK = { arterial: 1, collector: 2, local: 3, track: 4 };
  * @param {number} snapDist - Max distance to merge vertices
  */
 export function compactRoads(map, snapDist) {
-  const roads = map.roads.filter(r => r.source === 'skeleton');
+  const network = map.roadNetwork;
+  const roads = network.roads.filter(r => r.source === 'skeleton');
   if (roads.length === 0) return;
 
   // --- Pass 1: Snap polyline ENDPOINTS to nearest representative ---
-  // Only endpoints (first/last point) participate in snapping.
-  // This merges roads that start/end at nearby positions without
-  // distorting intermediate vertices along a road's path.
-  const reps = []; // [{x, z}]
+  const reps = [];
   const snapDistSq = snapDist * snapDist;
 
-  function snapPoint(p) {
+  function findSnap(p) {
     let bestDist = snapDistSq;
     let bestRep = null;
     for (const rep of reps) {
       const dx = p.x - rep.x, dz = p.z - rep.z;
       const d2 = dx * dx + dz * dz;
-      if (d2 < bestDist) {
-        bestDist = d2;
-        bestRep = rep;
-      }
+      if (d2 < bestDist) { bestDist = d2; bestRep = rep; }
     }
-    if (bestRep) {
-      p.x = bestRep.x;
-      p.z = bestRep.z;
-    } else {
-      reps.push({ x: p.x, z: p.z });
-    }
+    if (bestRep) return bestRep;
+    const newRep = { x: p.x, z: p.z };
+    reps.push(newRep);
+    return newRep;
   }
 
+  // Compute snapped endpoints for each road
+  const snappedPolys = new Map(); // roadId → newPolyline
   for (const road of roads) {
     const poly = road.polyline;
     if (poly.length < 2) continue;
-    snapPoint(poly[0]);
-    snapPoint(poly[poly.length - 1]);
-  }
+    const snappedStart = findSnap(poly[0]);
+    const snappedEnd = findSnap(poly[poly.length - 1]);
 
-  // --- Pass 1b: Deduplicate consecutive identical points in each polyline ---
-  for (const road of roads) {
-    const poly = road.polyline;
-    const deduped = [poly[0]];
-    for (let i = 1; i < poly.length; i++) {
-      if (poly[i].x !== deduped[deduped.length - 1].x ||
-          poly[i].z !== deduped[deduped.length - 1].z) {
-        deduped.push(poly[i]);
+    // Build new polyline with snapped endpoints
+    const newPoly = poly.map(p => ({ x: p.x, z: p.z }));
+    newPoly[0] = { x: snappedStart.x, z: snappedStart.z };
+    newPoly[newPoly.length - 1] = { x: snappedEnd.x, z: snappedEnd.z };
+
+    // Deduplicate consecutive identical points
+    const deduped = [newPoly[0]];
+    for (let i = 1; i < newPoly.length; i++) {
+      if (newPoly[i].x !== deduped[deduped.length - 1].x ||
+          newPoly[i].z !== deduped[deduped.length - 1].z) {
+        deduped.push(newPoly[i]);
       }
     }
-    road.polyline = deduped;
+    snappedPolys.set(road.id, deduped);
   }
 
-  // --- Pass 2: Remove duplicate/parallel roads ---
-  // Two roads are duplicates if they share both endpoints (after snapping).
-  // Two roads are parallel if they share one endpoint and the other endpoints
-  // are within snapDist of each other.
+  // Apply snapped polylines via updatePolyline, or remove if too short
+  for (const [id, poly] of snappedPolys) {
+    if (poly.length < 2) {
+      network.remove(id);
+    } else {
+      network.updatePolyline(id, poly);
+    }
+  }
+
+  // --- Pass 2: Remove duplicate roads (same snapped endpoints, keep best hierarchy) ---
+  const remaining = network.roads.filter(r => r.source === 'skeleton');
   const toRemove = new Set();
 
-  // Normalize endpoint pair for a road (direction-agnostic)
   function endpointKey(road) {
-    const s = road.polyline[0], e = road.polyline[road.polyline.length - 1];
+    const s = road.start, e = road.end;
     return s.x < e.x || (s.x === e.x && s.z <= e.z)
       ? `${s.x},${s.z}-${e.x},${e.z}`
       : `${e.x},${e.z}-${s.x},${s.z}`;
   }
 
-  // 2a: Exact endpoint duplicates
   const roadsByEndpoints = new Map();
-  for (const road of roads) {
+  for (const road of remaining) {
     if (road.polyline.length < 2) continue;
     const key = endpointKey(road);
     if (!roadsByEndpoints.has(key)) roadsByEndpoints.set(key, []);
@@ -544,15 +546,13 @@ export function compactRoads(map, snapDist) {
     }
   }
 
-  // Also remove roads that became too short (< 2 distinct points)
-  for (const road of roads) {
-    if (road.polyline.length < 2) toRemove.add(road.id);
+  for (const id of toRemove) {
+    network.remove(id);
   }
 
-  // Remove from map.roads and map.features
+  // Also clean up features[] for backward compat
   if (toRemove.size > 0) {
-    map.roads = map.roads.filter(r => !toRemove.has(r.id));
-    map.features = map.features.filter(f => !toRemove.has(f.id));
+    map.features = map.features.filter(f => f.type !== 'road' || !toRemove.has(f.id));
   }
 }
 
@@ -563,15 +563,8 @@ export function compactRoads(map, snapDist) {
  * @param {import('../core/FeatureMap.js').FeatureMap} map
  */
 export function rebuildGraphFromRoads(map) {
-  // Clear graph and rebuild from road polylines
-  map.graph = new PlanarGraph();
-
-  for (const road of map.roads) {
-    if (!road.polyline || road.polyline.length < 2) continue;
-    addRoadToGraph(map, road.polyline, road.width, road.hierarchy);
-  }
-
-  // Compact graph nodes too
+  // With RoadNetwork, the graph is already in sync with roads.
+  // Just compact graph nodes to merge nearby nodes.
   map.graph.compact(map.cellSize * 1.5);
 }
 
