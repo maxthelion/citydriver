@@ -206,7 +206,7 @@ export class CompareScreen {
     this._selectedCell = null;
     this.tickLabel.textContent = 'Tick: 0';
 
-    // Auto-run ticks 1-8 (skeleton + desire lines + subdivision passes)
+    // Auto-run ticks 1-8 (skeleton + subdivision passes)
     for (let t = 0; t < 8; t++) {
       for (const s of this.strategies) s.tick();
       this.currentTick++;
