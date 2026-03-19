@@ -310,6 +310,11 @@ function placeNuclei(map, tier, rng) {
   const cap = nucleusCap(tier);
   const nuclei = [];
 
+  // Read from layer bag (set by setup before this is called)
+  const buildability = map.hasLayer('terrainSuitability') ? map.getLayer('terrainSuitability') : map.buildability;
+  const landValue = map.hasLayer('landValue') ? map.getLayer('landValue') : map.landValue;
+  const slope = map.hasLayer('slope') ? map.getLayer('slope') : map.slope;
+
   // Convert meter constants to cells at runtime
   const minSpacing = Math.round(NUCLEUS_MIN_SPACING_M / map.cellSize);
   const suppressionRadius = Math.round(NUCLEUS_SUPPRESSION_RADIUS_M / map.cellSize);
@@ -322,7 +327,7 @@ function placeNuclei(map, tier, rng) {
   if (centerGx >= 0 && centerGx < map.width && centerGz >= 0 && centerGz < map.height) {
     // If center is unbuildable (e.g. settlement on river), find nearest buildable cell.
     // Search up to half the map — rivers can be wide at city resolution.
-    if (map.buildability.get(centerGx, centerGz) < 0.1) {
+    if (buildability.get(centerGx, centerGz) < 0.1) {
       let bestDist = Infinity;
       let bestGx = centerGx, bestGz = centerGz;
       const searchR = Math.floor(Math.min(map.width, map.height) / 2);
@@ -330,7 +335,7 @@ function placeNuclei(map, tier, rng) {
         for (let dx = -searchR; dx <= searchR; dx++) {
           const gx = centerGx + dx, gz = centerGz + dz;
           if (gx < 10 || gx >= map.width - 10 || gz < 10 || gz >= map.height - 10) continue;
-          if (map.buildability.get(gx, gz) < NUCLEUS_MIN_BUILDABILITY) continue;
+          if (buildability.get(gx, gz) < NUCLEUS_MIN_BUILDABILITY) continue;
           const d = dx * dx + dz * dz;
           if (d < bestDist) { bestDist = d; bestGx = gx; bestGz = gz; }
         }
@@ -339,7 +344,7 @@ function placeNuclei(map, tier, rng) {
       centerGz = bestGz;
     }
 
-    if (map.buildability.get(centerGx, centerGz) >= 0.1) {
+    if (buildability.get(centerGx, centerGz) >= 0.1) {
       nuclei.push({
         gx: centerGx,
         gz: centerGz,
@@ -359,7 +364,7 @@ function placeNuclei(map, tier, rng) {
   const step = map.width > 200 ? 3 : 1;
   for (let gz = margin; gz < map.height - margin; gz += step) {
     for (let gx = margin; gx < map.width - margin; gx += step) {
-      if (map.buildability.get(gx, gz) >= NUCLEUS_MIN_BUILDABILITY) {
+      if (buildability.get(gx, gz) >= NUCLEUS_MIN_BUILDABILITY) {
         buildableCells.push({ gx, gz });
       }
     }
@@ -398,7 +403,7 @@ function placeNuclei(map, tier, rng) {
     if (gx < 10 || gx >= map.width - 10 || gz < 10 || gz >= map.height - 10) continue;
 
     // If unbuildable, search within radius 15 for nearest buildable cell
-    if (map.buildability.get(gx, gz) < NUCLEUS_MIN_BUILDABILITY) {
+    if (buildability.get(gx, gz) < NUCLEUS_MIN_BUILDABILITY) {
       let bestDist = Infinity;
       let bestGx = gx, bestGz = gz;
       const searchR = 15;
@@ -406,7 +411,7 @@ function placeNuclei(map, tier, rng) {
         for (let dx = -searchR; dx <= searchR; dx++) {
           const nx = gx + dx, nz = gz + dz;
           if (nx < 10 || nx >= map.width - 10 || nz < 10 || nz >= map.height - 10) continue;
-          if (map.buildability.get(nx, nz) < NUCLEUS_MIN_BUILDABILITY) continue;
+          if (buildability.get(nx, nz) < NUCLEUS_MIN_BUILDABILITY) continue;
           const d = dx * dx + dz * dz;
           if (d < bestDist) { bestDist = d; bestGx = nx; bestGz = nz; }
         }
@@ -416,7 +421,7 @@ function placeNuclei(map, tier, rng) {
     }
 
     // Skip if no viable spot found
-    if (map.buildability.get(gx, gz) < NUCLEUS_MIN_BUILDABILITY) continue;
+    if (buildability.get(gx, gz) < NUCLEUS_MIN_BUILDABILITY) continue;
 
     // Skip if too close to existing nuclei
     let tooClose = false;
@@ -460,10 +465,10 @@ function placeNuclei(map, tier, rng) {
       }
       if (minDist < minSpacing) continue;
 
-      const b = map.buildability.get(c.gx, c.gz);
-      const v = Math.max(0, map.landValue.get(c.gx, c.gz) - suppression[c.gz * map.width + c.gx]);
+      const b = buildability.get(c.gx, c.gz);
+      const v = Math.max(0, landValue.get(c.gx, c.gz) - suppression[c.gz * map.width + c.gx]);
       const spacingBonus = Math.min(1, minDist / (minSpacing * 2));
-      const s = map.slope ? map.slope.get(c.gx, c.gz) : 0;
+      const s = slope ? slope.get(c.gx, c.gz) : 0;
       const flatBonus = s < NUCLEUS_FLAT_SLOPE_MAX
         ? NUCLEUS_FLAT_BONUS * (1 - s / NUCLEUS_FLAT_SLOPE_MAX) : 0;
       const score = (v + flatBonus) * b
@@ -559,13 +564,18 @@ function _addSuppression(suppression, w, h, cx, cz, radius) {
  * Classify nucleus type based on surrounding terrain.
  */
 function classifyNucleus(map, gx, gz) {
+  const waterMask = map.hasLayer('waterMask') ? map.getLayer('waterMask') : map.waterMask;
+  const roadGrid = map.roadGrid; // delegate via getter → RoadNetwork
+  const elevation = map.hasLayer('elevation') ? map.getLayer('elevation') : map.elevation;
+  const slope = map.hasLayer('slope') ? map.getLayer('slope') : map.slope;
+
   const waterRadius = 5;
   for (let dz = -waterRadius; dz <= waterRadius; dz++) {
     for (let dx = -waterRadius; dx <= waterRadius; dx++) {
       const nx = gx + dx;
       const nz = gz + dz;
       if (nx >= 0 && nx < map.width && nz >= 0 && nz < map.height) {
-        if (map.waterMask.get(nx, nz) > 0) return 'waterfront';
+        if (waterMask.get(nx, nz) > 0) return 'waterfront';
       }
     }
   }
@@ -577,7 +587,7 @@ function classifyNucleus(map, gx, gz) {
       const nx = gx + dx * r;
       const nz = gz + dz * r;
       if (nx >= 0 && nx < map.width && nz >= 0 && nz < map.height) {
-        if (map.roadGrid.get(nx, nz) > 0) { roadDirs++; break; }
+        if (roadGrid.get(nx, nz) > 0) { roadDirs++; break; }
       }
     }
   }
@@ -589,8 +599,8 @@ function classifyNucleus(map, gx, gz) {
     for (let dx = -windowSize; dx <= windowSize; dx++) {
       const nx = gx + dx, nz = gz + dz;
       if (nx >= 0 && nx < map.width && nz >= 0 && nz < map.height) {
-        avgElev += map.elevation.get(nx, nz);
-        avgSlope += map.slope.get(nx, nz);
+        avgElev += elevation.get(nx, nz);
+        avgSlope += slope.get(nx, nz);
         count++;
       }
     }
@@ -602,7 +612,7 @@ function classifyNucleus(map, gx, gz) {
   let globalCount = 0;
   for (let gz2 = 0; gz2 < map.height; gz2 += 5) {
     for (let gx2 = 0; gx2 < map.width; gx2 += 5) {
-      globalAvgElev += map.elevation.get(gx2, gz2);
+      globalAvgElev += elevation.get(gx2, gz2);
       globalCount++;
     }
   }
@@ -611,7 +621,7 @@ function classifyNucleus(map, gx, gz) {
   if (avgElev > globalAvgElev + 5 && avgSlope > 0.05) return 'hilltop';
   if (avgElev < globalAvgElev - 5 && avgSlope < 0.05) return 'valley';
 
-  if (map.roadGrid.get(gx, gz) > 0) return 'roadside';
+  if (roadGrid.get(gx, gz) > 0) return 'roadside';
 
   return 'suburban';
 }
