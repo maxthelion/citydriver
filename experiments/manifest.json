@@ -261,5 +261,31 @@
         "tick": null
       }
     ]
+  },
+  {
+    "num": "007f",
+    "slug": "multiedge",
+    "md": "007f-multiedge.md",
+    "images": [
+      {
+        "path": "007f-output/ribbon-zone-seed884469.png",
+        "layer": "ribbon-zone",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007g",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "007g-output/ribbon-zone-seed884469.png",
+        "layer": "ribbon-zone",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
   }
 ]
