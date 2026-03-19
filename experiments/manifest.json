@@ -196,5 +196,31 @@
         "tick": null
       }
     ]
+  },
+  {
+    "num": "007a",
+    "slug": "terrain-split",
+    "md": "007a-terrain-split.md",
+    "images": [
+      {
+        "path": "007a-output/ribbon-zone-seed884469.png",
+        "layer": "ribbon-zone",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007b",
+    "slug": "min-spacing",
+    "md": "007b-min-spacing.md",
+    "images": [
+      {
+        "path": "007b-output/ribbon-zone-seed884469.png",
+        "layer": "ribbon-zone",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
   }
 ]
