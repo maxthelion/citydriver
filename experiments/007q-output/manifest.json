@@ -1,0 +1,20 @@
+{
+  "experiment": "007q",
+  "generated": "2026-03-19T10:30:55.369Z",
+  "seeds": [
+    "884469"
+  ],
+  "layers": null,
+  "archetype": null,
+  "ticks": null,
+  "script": "render-ribbon-local-kink.js",
+  "images": [
+    {
+      "file": "ribbon-zone-zoomed-seed884469.png",
+      "path": "007q-output/ribbon-zone-zoomed-seed884469.png",
+      "layer": "ribbon-zone-zoomed",
+      "seed": "884469",
+      "tick": null
+    }
+  ]
+}
