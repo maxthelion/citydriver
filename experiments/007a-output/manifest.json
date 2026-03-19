@@ -1,0 +1,20 @@
+{
+  "experiment": "007a",
+  "generated": "2026-03-19T07:24:58.390Z",
+  "seeds": [
+    "884469"
+  ],
+  "layers": null,
+  "archetype": null,
+  "ticks": null,
+  "script": "render-ribbon-terrain-split.js",
+  "images": [
+    {
+      "file": "ribbon-zone-seed884469.png",
+      "path": "007a-output/ribbon-zone-seed884469.png",
+      "layer": "ribbon-zone",
+      "seed": "884469",
+      "tick": null
+    }
+  ]
+}
