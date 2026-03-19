@@ -235,5 +235,18 @@
         "tick": null
       }
     ]
+  },
+  {
+    "num": "007d",
+    "slug": "crossfirst",
+    "md": "007d-crossfirst.md",
+    "images": [
+      {
+        "path": "007d-output/ribbon-zone-seed884469.png",
+        "layer": "ribbon-zone",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
   }
 ]
