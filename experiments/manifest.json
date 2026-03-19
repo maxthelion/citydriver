@@ -410,5 +410,56 @@
         "tick": null
       }
     ]
+  },
+  {
+    "num": "007o",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "007o-output/ribbon-zone-bias05-seed884469.png",
+        "layer": "ribbon-zone-bias05",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "007o-output/ribbon-zone-bias10-seed884469.png",
+        "layer": "ribbon-zone-bias10",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "007o-output/ribbon-zone-bias0-seed884469.png",
+        "layer": "ribbon-zone-bias0",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007p",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "007p-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007q",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "007q-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
   }
 ]

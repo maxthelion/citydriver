@@ -1,0 +1,34 @@
+{
+  "experiment": "007o",
+  "generated": "2026-03-19T10:30:36.262Z",
+  "seeds": [
+    "884469"
+  ],
+  "layers": null,
+  "archetype": null,
+  "ticks": null,
+  "script": "render-ribbon-straight-compromise.js",
+  "images": [
+    {
+      "file": "ribbon-zone-bias05-seed884469.png",
+      "path": "007o-output/ribbon-zone-bias05-seed884469.png",
+      "layer": "ribbon-zone-bias05",
+      "seed": "884469",
+      "tick": null
+    },
+    {
+      "file": "ribbon-zone-bias10-seed884469.png",
+      "path": "007o-output/ribbon-zone-bias10-seed884469.png",
+      "layer": "ribbon-zone-bias10",
+      "seed": "884469",
+      "tick": null
+    },
+    {
+      "file": "ribbon-zone-bias0-seed884469.png",
+      "path": "007o-output/ribbon-zone-bias0-seed884469.png",
+      "layer": "ribbon-zone-bias0",
+      "seed": "884469",
+      "tick": null
+    }
+  ]
+}
