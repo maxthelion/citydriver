@@ -1,14 +1,21 @@
 {
   "experiment": "007h",
-  "generated": "2026-03-19T09:05:51.335Z",
+  "generated": "2026-03-19T09:13:26.703Z",
   "seeds": [
     "884469"
   ],
   "layers": null,
   "archetype": null,
   "ticks": null,
-  "script": "render-ribbon-faces.js",
+  "script": "render-ribbon-faces-zoomed.js",
   "images": [
+    {
+      "file": "ribbon-zone-zoomed-seed884469.png",
+      "path": "007h-output/ribbon-zone-zoomed-seed884469.png",
+      "layer": "ribbon-zone-zoomed",
+      "seed": "884469",
+      "tick": null
+    },
     {
       "file": "ribbon-zone-seed884469.png",
       "path": "007h-output/ribbon-zone-seed884469.png",

@@ -290,9 +290,15 @@
   },
   {
     "num": "007h",
-    "slug": "unknown",
-    "md": null,
+    "slug": "terrain-faces",
+    "md": "007h-terrain-faces.md",
     "images": [
+      {
+        "path": "007h-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      },
       {
         "path": "007h-output/ribbon-zone-seed884469.png",
         "layer": "ribbon-zone",
