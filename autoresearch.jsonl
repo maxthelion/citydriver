@@ -1,0 +1,1 @@
+{"type":"config","name":"GPU optimisation of composeAllValueLayers","metricName":"mean_ms","metricUnit":"ms","bestDirection":"lower"}
