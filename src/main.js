@@ -35,9 +35,13 @@ function goBack() {
   history.back();
 }
 
-function enterSubScreen(mode, layers, settlement, seed) {
+function enterSubScreen(mode, layers, settlement, seed, opts = {}) {
   disposeAll();
-  const url = `?seed=${seed}&mode=${mode}&gx=${settlement.gx}&gz=${settlement.gz}`;
+  const { archetype, tick, lens } = opts;
+  let url = `?seed=${seed}&mode=${mode}&gx=${settlement.gx}&gz=${settlement.gz}`;
+  if (archetype && archetype !== 'auto') url += `&archetype=${archetype}`;
+  if (tick != null && tick !== 0) url += `&tick=${tick}`;
+  if (lens && (mode === 'debug' || mode === 'compare-archetypes')) url += `&lens=${lens}`;
   history.pushState(null, '', url);
 
   if (mode === 'city') {
@@ -58,10 +62,9 @@ function enterSubScreen(mode, layers, settlement, seed) {
 
 function showRegion(initialSeed) {
   regionScreen = new RegionScreen(container, {
-    onEnter(layers, settlement, seed) { enterSubScreen('city', layers, settlement, seed); },
-    onDebug(layers, settlement, seed) { enterSubScreen('debug', layers, settlement, seed); },
-    onCompare(layers, settlement, seed) { enterSubScreen('compare', layers, settlement, seed); },
-    onCompareArchetypes(layers, settlement, seed) { enterSubScreen('compare-archetypes', layers, settlement, seed); },
+    onGo(mode, layers, settlement, seed, opts) {
+      enterSubScreen(mode, layers, settlement, seed, opts);
+    },
     onBuildings() {
       disposeAll();
       history.pushState(null, '', '?mode=buildings');

@@ -6,6 +6,8 @@ import { renderMap, drawSettlements, drawRivers, drawRoads, drawRailways } from 
 import { buildRegionTerrain, buildWaterPlane, buildSettlementMarkers, buildRegionRoads, buildRegionRailways, buildRegionRiverMeshes, buildCityBoundary } from '../rendering/regionPreview3D.js';
 import { createScorePanel, updateScorePanel } from './ScorePanel.js';
 import { SeededRandom } from '../core/rng.js';
+import { ARCHETYPES } from '../city/archetypes.js';
+import { LAYERS, layerSlug } from '../rendering/debugLayers.js';
 
 const RING_HOVER_OPACITY = 0.4;
 const RING_SELECTED_OPACITY = 0.8;
@@ -19,12 +21,17 @@ const RING_SELECTED_COLOR = 0xffffff;
 export class RegionScreen {
   constructor(container, callbacks, initialSeed) {
     this.container = container;
-    // Support both old-style (single function) and new-style ({ onEnter, onDebug })
+    // Support both old-style (single function) and new-style ({ onGo, onBuildings, ... })
     if (typeof callbacks === 'function') {
-      this.onEnter = callbacks;
-      this.onDebug = null;
+      this.onGo = callbacks;
+      this.onBuildings = null;
+      this.onTerraced = null;
+      this.onRailways = null;
     } else {
-      this.onEnter = callbacks.onEnter;
+      // New unified callback — receives (mode, layers, settlement, seed, opts)
+      this.onGo = callbacks.onGo || null;
+      // Keep legacy individual callbacks as fallbacks
+      this.onEnter = callbacks.onEnter || null;
       this.onDebug = callbacks.onDebug || null;
       this.onCompare = callbacks.onCompare || null;
       this.onCompareArchetypes = callbacks.onCompareArchetypes || null;
@@ -85,89 +92,121 @@ export class RegionScreen {
     seedRow.appendChild(this._seedInput);
     rightPanel.appendChild(seedRow);
 
-    // Buttons
-    const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex;gap:8px;margin-top:8px;flex-wrap:wrap';
-
+    // Regenerate button (always visible)
+    const topBtnRow = document.createElement('div');
+    topBtnRow.style.cssText = 'display:flex;gap:8px;margin-top:4px;flex-wrap:wrap';
     this._regenBtn = this._makeBtn('Regenerate', () => {
       this._seed = parseInt(this._seedInput.value) || Math.floor(Math.random() * 999999);
       this._seedInput.value = this._seed;
       this._generate();
     });
-    btnRow.appendChild(this._regenBtn);
-
-    this._enterBtn = this._makeBtn('Enter City', () => {
-      if (this._layers && this._selectedSettlement && this.onEnter) {
-        this.onEnter(this._layers, this._selectedSettlement, this._seed);
-      }
-    });
-    this._enterBtn.style.opacity = '0.5';
-    btnRow.appendChild(this._enterBtn);
-
-    if (this.onDebug) {
-      this._debugBtn = this._makeBtn('Debug City', () => {
-        if (this._layers && this._selectedSettlement && this.onDebug) {
-          this.onDebug(this._layers, this._selectedSettlement, this._seed);
-        }
-      });
-      this._debugBtn.style.opacity = '0.5';
-      this._debugBtn.style.background = '#335';
-      btnRow.appendChild(this._debugBtn);
-    }
-
-    if (this.onCompare) {
-      this._compareBtn = this._makeBtn('Compare Growth', () => {
-        if (this._layers && this._selectedSettlement && this.onCompare) {
-          this.onCompare(this._layers, this._selectedSettlement, this._seed);
-        }
-      });
-      this._compareBtn.style.opacity = '0.5';
-      this._compareBtn.style.background = '#353';
-      btnRow.appendChild(this._compareBtn);
-    }
-
-    if (this.onCompareArchetypes) {
-      this._compareArchetypesBtn = this._makeBtn('Compare Archetypes', () => {
-        if (this._layers && this._selectedSettlement && this.onCompareArchetypes) {
-          this.onCompareArchetypes(this._layers, this._selectedSettlement, this._seed);
-        }
-      });
-      this._compareArchetypesBtn.style.opacity = '0.5';
-      this._compareArchetypesBtn.style.background = '#353';
-      btnRow.appendChild(this._compareArchetypesBtn);
-    }
+    topBtnRow.appendChild(this._regenBtn);
 
     if (this.onBuildings) {
-      this._buildingsBtn = this._makeBtn('Building Styles', () => {
-        if (this.onBuildings) {
-          this.onBuildings();
-        }
-      });
-      this._buildingsBtn.style.background = '#534';
-      btnRow.appendChild(this._buildingsBtn);
+      const buildingsBtn = this._makeBtn('Building Styles', () => { this.onBuildings(); });
+      buildingsBtn.style.background = '#534';
+      topBtnRow.appendChild(buildingsBtn);
     }
-
     if (this.onTerraced) {
-      this._terracedBtn = this._makeBtn('Terraced Row', () => {
-        if (this.onTerraced) {
-          this.onTerraced();
-        }
-      });
-      this._terracedBtn.style.background = '#543';
-      btnRow.appendChild(this._terracedBtn);
+      const terracedBtn = this._makeBtn('Terraced Row', () => { this.onTerraced(); });
+      terracedBtn.style.background = '#543';
+      topBtnRow.appendChild(terracedBtn);
     }
-
     if (this.onRailways) {
-      this._railwaysBtn = this._makeBtn('Railways', () => {
-        if (this._layers && this.onRailways) {
-          this.onRailways(this._layers, this._seed);
-        }
+      const railwaysBtn = this._makeBtn('Railways', () => {
+        if (this._layers) this.onRailways(this._layers, this._seed);
       });
-      this._railwaysBtn.style.background = '#345';
-      btnRow.appendChild(this._railwaysBtn);
+      railwaysBtn.style.background = '#345';
+      topBtnRow.appendChild(railwaysBtn);
     }
+    rightPanel.appendChild(topBtnRow);
 
-    rightPanel.appendChild(btnRow);
+    // --- Unified control panel (shown when a settlement is selected) ---
+    this._controlPanel = document.createElement('div');
+    this._controlPanel.style.cssText = 'display:none;flex-direction:column;gap:6px;margin-top:10px;padding:10px;background:#1a1a2e;border:1px solid #334;border-radius:4px';
+    rightPanel.appendChild(this._controlPanel);
+
+    // Helper to build a labelled row
+    const makeRow = (labelText) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px';
+      const label = document.createElement('span');
+      label.textContent = labelText;
+      label.style.cssText = 'color:#aaa;font-family:monospace;font-size:11px;width:90px;flex-shrink:0';
+      row.appendChild(label);
+      return { row, label };
+    };
+
+    const selectStyle = 'flex:1;background:#222;color:#eee;border:1px solid #557;padding:3px 6px;font-family:monospace;font-size:11px;border-radius:3px';
+
+    // View Mode dropdown
+    const { row: modeRow } = makeRow('View Mode');
+    this._modeSelect = document.createElement('select');
+    this._modeSelect.style.cssText = selectStyle;
+    [
+      { value: 'city',               label: '3D City' },
+      { value: 'debug',              label: 'Debug' },
+      { value: 'compare-archetypes', label: 'Compare Archetypes' },
+      { value: 'compare',            label: 'Compare Growth' },
+    ].forEach(({ value, label }) => {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      this._modeSelect.appendChild(opt);
+    });
+    this._modeSelect.addEventListener('change', () => this._onModeChange());
+    modeRow.appendChild(this._modeSelect);
+    this._controlPanel.appendChild(modeRow);
+
+    // Archetype dropdown
+    const { row: archRow } = makeRow('Archetype');
+    this._archetypeSelect = document.createElement('select');
+    this._archetypeSelect.style.cssText = selectStyle;
+    [
+      { value: 'auto', label: 'Auto (best fit)' },
+      { value: 'none', label: '(none)' },
+      ...Object.values(ARCHETYPES).map(a => ({ value: a.id, label: a.name })),
+    ].forEach(({ value, label }) => {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      this._archetypeSelect.appendChild(opt);
+    });
+    archRow.appendChild(this._archetypeSelect);
+    this._controlPanel.appendChild(archRow);
+
+    // Tick input
+    const { row: tickRow } = makeRow('Tick');
+    this._tickInput = document.createElement('input');
+    this._tickInput.type = 'number';
+    this._tickInput.min = '0';
+    this._tickInput.max = '20';
+    this._tickInput.value = '5';
+    this._tickInput.style.cssText = selectStyle;
+    tickRow.appendChild(this._tickInput);
+    this._controlPanel.appendChild(tickRow);
+
+    // Debug Layer dropdown (only shown for debug / compare modes)
+    const { row: lensRow } = makeRow('Debug Layer');
+    this._lensRow = lensRow;
+    this._lensSelect = document.createElement('select');
+    this._lensSelect.style.cssText = selectStyle;
+    LAYERS.forEach((layer, i) => {
+      const opt = document.createElement('option');
+      opt.value = layerSlug(layer.name);
+      opt.textContent = layer.name;
+      this._lensSelect.appendChild(opt);
+    });
+    lensRow.appendChild(this._lensSelect);
+    this._controlPanel.appendChild(lensRow);
+
+    // Go button
+    this._goBtn = this._makeBtn('Go', () => this._onGo());
+    this._goBtn.style.cssText = this._goBtn.style.cssText + ';background:#335;border-color:#557;margin-top:4px';
+    this._controlPanel.appendChild(this._goBtn);
+
+    // Apply initial mode visibility
+    this._onModeChange();
 
     // Score panel
     this._scorePanel = createScorePanel();
@@ -175,6 +214,41 @@ export class RegionScreen {
     this._scorePanel.style.marginTop = '10px';
     this._scorePanel.style.maxHeight = '300px';
     rightPanel.appendChild(this._scorePanel);
+  }
+
+  /** Toggle lens row visibility based on selected mode. */
+  _onModeChange() {
+    const mode = this._modeSelect ? this._modeSelect.value : 'city';
+    const needsLens = mode === 'debug' || mode === 'compare-archetypes';
+    this._lensRow.style.display = needsLens ? 'flex' : 'none';
+  }
+
+  /** Called when the Go button is clicked. */
+  _onGo() {
+    if (!this._layers || !this._selectedSettlement) return;
+    const mode = this._modeSelect.value;
+    const archetype = this._archetypeSelect.value;
+    const tick = parseInt(this._tickInput.value) || 0;
+    const lens = this._lensSelect.value;
+
+    const opts = { archetype, tick, lens };
+
+    // Use unified onGo if provided, otherwise fall back to legacy callbacks
+    if (this.onGo) {
+      this.onGo(mode, this._layers, this._selectedSettlement, this._seed, opts);
+      return;
+    }
+
+    // Legacy fallback
+    if (mode === 'city' && this.onEnter) {
+      this.onEnter(this._layers, this._selectedSettlement, this._seed);
+    } else if (mode === 'debug' && this.onDebug) {
+      this.onDebug(this._layers, this._selectedSettlement, this._seed);
+    } else if (mode === 'compare' && this.onCompare) {
+      this.onCompare(this._layers, this._selectedSettlement, this._seed);
+    } else if (mode === 'compare-archetypes' && this.onCompareArchetypes) {
+      this.onCompareArchetypes(this._layers, this._selectedSettlement, this._seed);
+    }
   }
 
   _makeBtn(text, onClick) {
@@ -315,20 +389,9 @@ export class RegionScreen {
    */
   _selectSettlement(settlement) {
     this._selectedSettlement = settlement;
-    this._enterBtn.style.opacity = settlement ? '1' : '0.5';
-    this._enterBtn.disabled = !settlement;
-    if (this._debugBtn) {
-      this._debugBtn.style.opacity = settlement ? '1' : '0.5';
-      this._debugBtn.disabled = !settlement;
-    }
-    if (this._compareBtn) {
-      this._compareBtn.style.opacity = settlement ? '1' : '0.5';
-      this._compareBtn.disabled = !settlement;
-    }
-    if (this._compareArchetypesBtn) {
-      this._compareArchetypesBtn.style.opacity = settlement ? '1' : '0.5';
-      this._compareArchetypesBtn.disabled = !settlement;
-    }
+
+    // Show unified control panel when a settlement is selected
+    this._controlPanel.style.display = settlement ? 'flex' : 'none';
 
     if (settlement) {
       this._info.textContent = `Selected: ${settlement.type} (tier ${settlement.tier}) at (${settlement.gx}, ${settlement.gz})`;
