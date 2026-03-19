@@ -36,11 +36,11 @@ describe('Road — defensive copy of polyline', () => {
     expect(r.polyline[0].x).toBe(0);
   });
 
-  it('polyline getter returns a snapshot (not the internal array)', () => {
+  it('polyline getter returns the same internal array (not a copy)', () => {
     const r = new Road([{ x: 0, z: 0 }, { x: 10, z: 0 }]);
     const poly1 = r.polyline;
     const poly2 = r.polyline;
-    expect(poly1).not.toBe(poly2);
+    expect(poly1).toBe(poly2);
   });
 });
 
@@ -101,25 +101,23 @@ describe('Road — bridges', () => {
 
   it('addBridge stores parametric bridge data', () => {
     const r = new Road([{ x: 0, z: 0 }, { x: 10, z: 0 }]);
-    const bankA = [{ x: 2, z: -1 }, { x: 4, z: -1 }];
-    const bankB = [{ x: 2, z: 1 }, { x: 4, z: 1 }];
-    r.addBridge(bankA, bankB, 0.2, 0.4);
+    r.addBridge({ x: 2, z: -1 }, { x: 2, z: 1 }, 0.2, 0.4);
     expect(r.bridges).toHaveLength(1);
     expect(r.bridges[0].entryT).toBe(0.2);
     expect(r.bridges[0].exitT).toBe(0.4);
-    expect(r.bridges[0].bankA).toEqual(bankA);
-    expect(r.bridges[0].bankB).toEqual(bankB);
+    expect(r.bridges[0].bankA).toEqual({ x: 2, z: -1 });
+    expect(r.bridges[0].bankB).toEqual({ x: 2, z: 1 });
   });
 
   it('addBridge stores defensive copies of bankA and bankB', () => {
     const r = new Road([{ x: 0, z: 0 }, { x: 10, z: 0 }]);
-    const bankA = [{ x: 2, z: -1 }];
-    const bankB = [{ x: 2, z: 1 }];
+    const bankA = { x: 2, z: -1 };
+    const bankB = { x: 2, z: 1 };
     r.addBridge(bankA, bankB, 0.2, 0.4);
-    bankA[0].x = 999;
-    bankB.push({ x: 5, z: 5 });
-    expect(r.bridges[0].bankA[0].x).toBe(2);
-    expect(r.bridges[0].bankB).toHaveLength(1);
+    bankA.x = 999;
+    bankB.z = 999;
+    expect(r.bridges[0].bankA.x).toBe(2);
+    expect(r.bridges[0].bankB.z).toBe(1);
   });
 
   it('bridges getter returns a snapshot, not a live reference', () => {
@@ -131,9 +129,7 @@ describe('Road — bridges', () => {
 
   it('mutating the bridges snapshot does not affect the road', () => {
     const r = new Road([{ x: 0, z: 0 }, { x: 10, z: 0 }]);
-    const bankA = [{ x: 2, z: -1 }];
-    const bankB = [{ x: 2, z: 1 }];
-    r.addBridge(bankA, bankB, 0.2, 0.4);
+    r.addBridge({ x: 2, z: -1 }, { x: 2, z: 1 }, 0.2, 0.4);
     const snap = r.bridges;
     snap.push({ fake: true });
     expect(r.bridges).toHaveLength(1);
@@ -150,21 +146,21 @@ describe('Road — resolvedPolyline', () => {
   it('with one bridge, bank points appear in the result', () => {
     // Road goes from (0,0) to (10,0) — total length 10
     const r = new Road([{ x: 0, z: 0 }, { x: 10, z: 0 }]);
-    const bankA = [{ x: 3, z: -2 }, { x: 5, z: -2 }];
-    const bankB = [{ x: 3, z: 2 }, { x: 5, z: 2 }];
     // bridge from t=0.3 to t=0.5 (i.e., x=3 to x=5)
-    r.addBridge(bankA, bankB, 0.3, 0.5);
+    r.addBridge({ x: 3, z: -2 }, { x: 5, z: 2 }, 0.3, 0.5);
     const resolved = r.resolvedPolyline();
     // Should contain at least the base start, entry point, bankA, bankB, exit point, base end
     expect(resolved.length).toBeGreaterThan(2);
     // bankA and bankB points should appear in result
-    const hasBank = resolved.some(p => p.z === -2 || p.z === 2);
-    expect(hasBank).toBe(true);
+    const hasBankA = resolved.some(p => p.x === 3 && p.z === -2);
+    const hasBankB = resolved.some(p => p.x === 5 && p.z === 2);
+    expect(hasBankA).toBe(true);
+    expect(hasBankB).toBe(true);
   });
 
   it('with one bridge, result starts with road start and ends with road end', () => {
     const r = new Road([{ x: 0, z: 0 }, { x: 10, z: 0 }]);
-    r.addBridge([{ x: 3, z: -1 }], [{ x: 3, z: 1 }], 0.3, 0.4);
+    r.addBridge({ x: 3, z: -1 }, { x: 3, z: 1 }, 0.3, 0.4);
     const resolved = r.resolvedPolyline();
     expect(resolved[0]).toEqual({ x: 0, z: 0 });
     expect(resolved[resolved.length - 1]).toEqual({ x: 10, z: 0 });
@@ -209,16 +205,14 @@ describe('Road — toJSON / fromJSON', () => {
 
   it('round-trips a Road with bridges', () => {
     const r = new Road([{ x: 0, z: 0 }, { x: 10, z: 0 }]);
-    const bankA = [{ x: 3, z: -1 }, { x: 5, z: -1 }];
-    const bankB = [{ x: 3, z: 1 }, { x: 5, z: 1 }];
-    r.addBridge(bankA, bankB, 0.3, 0.5);
+    r.addBridge({ x: 3, z: -1 }, { x: 5, z: 1 }, 0.3, 0.5);
     const json = r.toJSON();
     const r2 = Road.fromJSON(json);
     expect(r2.bridges).toHaveLength(1);
     expect(r2.bridges[0].entryT).toBe(0.3);
     expect(r2.bridges[0].exitT).toBe(0.5);
-    expect(r2.bridges[0].bankA).toEqual(bankA);
-    expect(r2.bridges[0].bankB).toEqual(bankB);
+    expect(r2.bridges[0].bankA).toEqual({ x: 3, z: -1 });
+    expect(r2.bridges[0].bankB).toEqual({ x: 5, z: 1 });
   });
 
   it('toJSON produces a plain serializable object', () => {

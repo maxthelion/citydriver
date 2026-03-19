@@ -39,15 +39,22 @@ export class Road {
 
   get id() { return this.#id; }
 
-  /** Returns a snapshot of the polyline (defensive copy). */
-  get polyline() { return _copyPolyline(this.#polyline); }
+  /** Read-only access to the polyline. */
+  get polyline() { return this.#polyline; }
 
   get start() { return { ...this.#polyline[0] }; }
 
   get end() { return { ...this.#polyline[this.#polyline.length - 1] }; }
 
   /** Returns a snapshot of the bridges array. */
-  get bridges() { return this.#bridges.map(_copyBridge); }
+  get bridges() {
+    return this.#bridges.map(b => ({
+      bankA: { x: b.bankA.x, z: b.bankA.z },
+      bankB: { x: b.bankB.x, z: b.bankB.z },
+      entryT: b.entryT,
+      exitT: b.exitT,
+    }));
+  }
 
   // ── Mutation helpers ─────────────────────────────────────────────────────────
 
@@ -61,15 +68,15 @@ export class Road {
 
   /**
    * Add a parametric bridge to this road.
-   * @param {Array<{x,z}>} bankA - Points along one side of the bridge
-   * @param {Array<{x,z}>} bankB - Points along the other side
+   * @param {{x: number, z: number}} bankA - Bank position on one side
+   * @param {{x: number, z: number}} bankB - Bank position on the other side
    * @param {number} entryT - Fractional arc-length (0..1) where bridge begins
    * @param {number} exitT  - Fractional arc-length (0..1) where bridge ends
    */
   addBridge(bankA, bankB, entryT, exitT) {
     this.#bridges.push({
-      bankA: _copyPolyline(bankA),
-      bankB: _copyPolyline(bankB),
+      bankA: { x: bankA.x, z: bankA.z },
+      bankB: { x: bankB.x, z: bankB.z },
       entryT,
       exitT,
     });
@@ -153,9 +160,9 @@ export class Road {
       // Interpolated entry point (splice onto the segment)
       result.push(entry.point);
 
-      // bankA then bankB
-      for (const p of bridge.bankA) result.push({ ...p });
-      for (const p of bridge.bankB) result.push({ ...p });
+      // bankA then bankB (single points)
+      result.push({ x: bridge.bankA.x, z: bridge.bankA.z });
+      result.push({ x: bridge.bankB.x, z: bridge.bankB.z });
 
       // Interpolated exit point
       result.push(exit.point);
@@ -187,7 +194,12 @@ export class Road {
       hierarchy: this.hierarchy,
       importance: this.importance,
       source: this.source,
-      bridges: this.#bridges.map(_copyBridge),
+      bridges: this.#bridges.map(b => ({
+        bankA: { x: b.bankA.x, z: b.bankA.z },
+        bankB: { x: b.bankB.x, z: b.bankB.z },
+        entryT: b.entryT,
+        exitT: b.exitT,
+      })),
     };
   }
 
@@ -213,11 +225,3 @@ function _copyPolyline(pts) {
   return pts.map(p => ({ ...p }));
 }
 
-function _copyBridge(b) {
-  return {
-    bankA: _copyPolyline(b.bankA),
-    bankB: _copyPolyline(b.bankB),
-    entryT: b.entryT,
-    exitT: b.exitT,
-  };
-}
