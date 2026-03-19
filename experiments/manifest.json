@@ -572,6 +572,12 @@
     "md": "007s7-straightness.md",
     "images": [
       {
+        "path": "007s7-output/ribbon-zone-zoomed-seed884469-BEFORE.png",
+        "layer": "ribbon-zone-zoomed-seed884469-BEFORE",
+        "seed": null,
+        "tick": null
+      },
+      {
         "path": "007s7-output/ribbon-zone-zoomed-seed884469.png",
         "layer": "ribbon-zone-zoomed",
         "seed": "884469",

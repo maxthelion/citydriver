@@ -1,6 +1,6 @@
 {
   "experiment": "007s7",
-  "generated": "2026-03-19T14:48:20.286Z",
+  "generated": "2026-03-19T15:58:02.196Z",
   "seeds": [
     "884469"
   ],
@@ -9,6 +9,13 @@
   "ticks": null,
   "script": "render-ribbon-overlay-v5.js",
   "images": [
+    {
+      "file": "ribbon-zone-zoomed-seed884469-BEFORE.png",
+      "path": "007s7-output/ribbon-zone-zoomed-seed884469-BEFORE.png",
+      "layer": "ribbon-zone-zoomed-seed884469-BEFORE",
+      "seed": null,
+      "tick": null
+    },
     {
       "file": "ribbon-zone-zoomed-seed884469.png",
       "path": "007s7-output/ribbon-zone-zoomed-seed884469.png",
