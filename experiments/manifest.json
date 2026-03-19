@@ -248,5 +248,18 @@
         "tick": null
       }
     ]
+  },
+  {
+    "num": "007e",
+    "slug": "gradient-construction",
+    "md": "007e-gradient-construction.md",
+    "images": [
+      {
+        "path": "007e-output/ribbon-zone-seed884469.png",
+        "layer": "ribbon-zone",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
   }
 ]

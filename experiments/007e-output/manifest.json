@@ -1,0 +1,20 @@
+{
+  "experiment": "007e",
+  "generated": "2026-03-19T07:42:05.307Z",
+  "seeds": [
+    "884469"
+  ],
+  "layers": null,
+  "archetype": null,
+  "ticks": null,
+  "script": "render-ribbon-gradient.js",
+  "images": [
+    {
+      "file": "ribbon-zone-seed884469.png",
+      "path": "007e-output/ribbon-zone-seed884469.png",
+      "layer": "ribbon-zone",
+      "seed": "884469",
+      "tick": null
+    }
+  ]
+}
