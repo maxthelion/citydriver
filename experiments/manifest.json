@@ -306,5 +306,18 @@
         "tick": null
       }
     ]
+  },
+  {
+    "num": "007i",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "007i-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
   }
 ]
