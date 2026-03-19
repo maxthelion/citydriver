@@ -347,6 +347,19 @@
     ]
   },
   {
+    "num": "007k2",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "007k2-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
     "num": "007l",
     "slug": "unknown",
     "md": null,

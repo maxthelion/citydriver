@@ -1,0 +1,20 @@
+{
+  "experiment": "007k2",
+  "generated": "2026-03-19T09:47:13.053Z",
+  "seeds": [
+    "884469"
+  ],
+  "layers": null,
+  "archetype": null,
+  "ticks": null,
+  "script": "render-ribbon-dist-snap.js",
+  "images": [
+    {
+      "file": "ribbon-zone-zoomed-seed884469.png",
+      "path": "007k2-output/ribbon-zone-zoomed-seed884469.png",
+      "layer": "ribbon-zone-zoomed",
+      "seed": "884469",
+      "tick": null
+    }
+  ]
+}
