@@ -227,6 +227,13 @@ export function extractDevelopmentZones(map) {
   const { width, height, cellSize, nuclei } = map;
   if (!nuclei || nuclei.length === 0) return [];
 
+  // Read from layer bag if available, fall back to direct properties
+  const waterMask = map.hasLayer('waterMask') ? map.getLayer('waterMask') : map.waterMask;
+  const landValue = map.hasLayer('landValue') ? map.getLayer('landValue') : map.landValue;
+  const slope = map.hasLayer('slope') ? map.getLayer('slope') : map.slope;
+  const roadGrid = map.hasLayer('roadGrid') ? map.getLayer('roadGrid') : (map.roadGrid || null);
+  const terrainSuitability = map.hasLayer('terrainSuitability') ? map.getLayer('terrainSuitability') : map.buildability;
+
   const morphRadius = Math.max(1, Math.round(ZONE_MORPH_RADIUS_M / cellSize));
 
   // Step 1: Voronoi assignment — each cell → nearest nucleus index
@@ -251,10 +258,10 @@ export function extractDevelopmentZones(map) {
     for (let gz = 0; gz < height; gz++) {
       for (let gx = 0; gx < width; gx++) {
         if (assignment.get(gx, gz) !== ni) continue;
-        if (map.waterMask.get(gx, gz) > 0) continue;
-        if (map.landValue.get(gx, gz) < ZONE_LV_THRESHOLD) continue;
-        if (map.buildability.get(gx, gz) < ZONE_BUILD_THRESHOLD) continue;
-        if (map.slope && map.slope.get(gx, gz) >= effectiveSlopeMax(map.landValue.get(gx, gz))) continue;
+        if (waterMask.get(gx, gz) > 0) continue;
+        if (landValue.get(gx, gz) < ZONE_LV_THRESHOLD) continue;
+        if (terrainSuitability.get(gx, gz) < ZONE_BUILD_THRESHOLD) continue;
+        if (slope && slope.get(gx, gz) >= effectiveSlopeMax(landValue.get(gx, gz))) continue;
         mask.set(gx, gz, 1);
       }
     }
@@ -268,11 +275,11 @@ export function extractDevelopmentZones(map) {
       for (let gx = 0; gx < width; gx++) {
         if (closed.get(gx, gz) === 0) continue;
         // Water cells must never be in a zone
-        if (map.waterMask.get(gx, gz) > 0) { closed.set(gx, gz, 0); continue; }
+        if (waterMask.get(gx, gz) > 0) { closed.set(gx, gz, 0); continue; }
         // Road cells split zones (roads are barriers)
-        if (map.roadGrid && map.roadGrid.get(gx, gz) > 0) { closed.set(gx, gz, 0); continue; }
+        if (roadGrid && roadGrid.get(gx, gz) > 0) { closed.set(gx, gz, 0); continue; }
         // Cells added by dilation that fail slope check
-        if (mask.get(gx, gz) === 0 && map.slope && map.slope.get(gx, gz) >= effectiveSlopeMax(map.landValue.get(gx, gz))) {
+        if (mask.get(gx, gz) === 0 && slope && slope.get(gx, gz) >= effectiveSlopeMax(landValue.get(gx, gz))) {
           closed.set(gx, gz, 0);
         }
       }
@@ -288,18 +295,19 @@ export function extractDevelopmentZones(map) {
 
     for (const zone of zones) {
       let slopeSum = 0, gradX = 0, gradZ = 0, lvSum = 0;
+      const elevation = map.hasLayer('elevation') ? map.getLayer('elevation') : map.elevation;
       for (const c of zone.cells) {
-        if (map.slope) slopeSum += map.slope.get(c.gx, c.gz);
-        lvSum += map.landValue.get(c.gx, c.gz);
+        if (slope) slopeSum += slope.get(c.gx, c.gz);
+        lvSum += landValue.get(c.gx, c.gz);
 
-        if (map.elevation) {
-          const e = map.elevation.get(c.gx, c.gz);
-          if (c.gx > 0) gradX += e - map.elevation.get(c.gx - 1, c.gz);
-          if (c.gz > 0) gradZ += e - map.elevation.get(c.gx, c.gz - 1);
+        if (elevation) {
+          const e = elevation.get(c.gx, c.gz);
+          if (c.gx > 0) gradX += e - elevation.get(c.gx - 1, c.gz);
+          if (c.gz > 0) gradZ += e - elevation.get(c.gx, c.gz - 1);
         }
       }
 
-      const avgSlope = map.slope ? slopeSum / zone.cells.length : 0;
+      const avgSlope = slope ? slopeSum / zone.cells.length : 0;
       const avgLandValue = lvSum / zone.cells.length;
       const gradLen = Math.sqrt(gradX * gradX + gradZ * gradZ);
       const slopeDir = gradLen > 0.01
