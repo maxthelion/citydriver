@@ -413,8 +413,8 @@
   },
   {
     "num": "007o",
-    "slug": "unknown",
-    "md": null,
+    "slug": "straight-compromise",
+    "md": "007o-straight-compromise.md",
     "images": [
       {
         "path": "007o-output/ribbon-zone-bias05-seed884469.png",
@@ -438,8 +438,8 @@
   },
   {
     "num": "007p",
-    "slug": "unknown",
-    "md": null,
+    "slug": "smooth-curve",
+    "md": "007p-smooth-curve.md",
     "images": [
       {
         "path": "007p-output/ribbon-zone-zoomed-seed884469.png",
@@ -451,8 +451,8 @@
   },
   {
     "num": "007q",
-    "slug": "unknown",
-    "md": null,
+    "slug": "local-kink",
+    "md": "007q-local-kink.md",
     "images": [
       {
         "path": "007q-output/ribbon-zone-zoomed-seed884469.png",
