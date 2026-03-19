@@ -277,8 +277,8 @@
   },
   {
     "num": "007g",
-    "slug": "unknown",
-    "md": null,
+    "slug": "contour",
+    "md": "007g-contour.md",
     "images": [
       {
         "path": "007g-output/ribbon-zone-seed884469.png",
@@ -309,8 +309,8 @@
   },
   {
     "num": "007i",
-    "slug": "unknown",
-    "md": null,
+    "slug": "gradient-cross",
+    "md": "007i-gradient-cross.md",
     "images": [
       {
         "path": "007i-output/ribbon-zone-zoomed-seed884469.png",
@@ -322,8 +322,8 @@
   },
   {
     "num": "007j",
-    "slug": "unknown",
-    "md": null,
+    "slug": "converging-parallels",
+    "md": "007j-converging-parallels.md",
     "images": [
       {
         "path": "007j-output/ribbon-zone-zoomed-seed884469.png",
@@ -335,8 +335,8 @@
   },
   {
     "num": "007k",
-    "slug": "unknown",
-    "md": null,
+    "slug": "shared-junctions",
+    "md": "007k-shared-junctions.md",
     "images": [
       {
         "path": "007k-output/ribbon-zone-zoomed-seed884469.png",
@@ -348,8 +348,8 @@
   },
   {
     "num": "007k2",
-    "slug": "unknown",
-    "md": null,
+    "slug": "dist-snap",
+    "md": "007k2-dist-snap.md",
     "images": [
       {
         "path": "007k2-output/ribbon-zone-zoomed-seed884469.png",
@@ -361,8 +361,8 @@
   },
   {
     "num": "007l",
-    "slug": "unknown",
-    "md": null,
+    "slug": "road-blend",
+    "md": "007l-road-blend.md",
     "images": [
       {
         "path": "007l-output/ribbon-zone-zoomed-seed884469.png",
@@ -387,8 +387,8 @@
   },
   {
     "num": "007n",
-    "slug": "unknown",
-    "md": null,
+    "slug": "road-axis",
+    "md": "007n-road-axis.md",
     "images": [
       {
         "path": "007n-output/ribbon-zone-zoomed-seed884469.png",
