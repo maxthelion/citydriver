@@ -1,93 +1,70 @@
 /**
  * Land-First Development strategy.
- * Thin sequencer — each tick calls a pipeline function.
  *
- * Tick 1: Skeleton roads
- * Tick 2: Recompute land value with nucleus-aware formula
- * Tick 3: Extract development zones
- * Tick 4: Compute spatial layers (centrality, waterfrontness, etc.)
- * Tick 5..N: Growth agent ticks (archetype-driven incremental zoning)
- * N+1: Ribbon layout — place parallel streets within zones
- * N+2: Connect zone spines to skeleton network
+ * Thin wrapper around PipelineRunner + cityPipeline. Each call to tick()
+ * advances the pipeline by one named step.
+ *
+ * Step sequence (see cityPipeline.js):
+ *   skeleton → land-value → zones → spatial
+ *   → growth-1 … growth-N  (organic, archetype-driven)
+ *   → connect
+ *
+ * Backward compat: CompareArchetypesScreen sets strategy._tick = N to fast-forward
+ * past shared steps whose results already exist on the cloned map. This calls
+ * runner.skipSteps(N) without re-executing the shared pipeline functions.
+ *
+ * Spec: specs/v5/next-steps.md § Step 1
  */
 
-import { buildSkeletonRoads } from '../pipeline/buildSkeletonRoads.js';
-import { computeLandValue } from '../pipeline/computeLandValue.js';
-import { extractZones } from '../pipeline/extractZones.js';
-import { computeSpatialLayers } from '../pipeline/computeSpatialLayers.js';
-import { reserveLandUse } from '../pipeline/reserveLandUse.js';
-import { initGrowthState, runGrowthTick } from '../pipeline/growthTick.js';
-import { layoutRibbons } from '../pipeline/layoutRibbons.js';
-import { connectToNetwork } from '../pipeline/connectToNetwork.js';
+import { PipelineRunner } from '../pipeline/PipelineRunner.js';
+import { cityPipeline } from '../pipeline/cityPipeline.js';
 
 export class LandFirstDevelopment {
+  /**
+   * @param {import('../../core/FeatureMap.js').FeatureMap} map
+   * @param {{ archetype?: object }} options
+   */
   constructor(map, options = {}) {
     this.map = map;
-    this._tick = 0;
     this.archetype = options.archetype || null;
-    this._growthState = null;
-    this._growthDone = false;
-    this._phase = 'pipeline'; // 'pipeline' | 'growth' | 'finish'
+    this._runner = new PipelineRunner(cityPipeline(map, this.archetype));
+    this._stepsRun = 0;
   }
 
+  /**
+   * Advance the pipeline by one step.
+   * @returns {boolean} true if a step was executed (more may remain), false when complete.
+   */
   tick() {
-    this._tick++;
+    const ran = this._runner.advance();
+    if (ran) this._stepsRun++;
+    return ran;
+  }
 
-    if (this._phase === 'pipeline') {
-      switch (this._tick) {
-        case 1: this.map = buildSkeletonRoads(this.map); return true;
-        case 2: this.map = computeLandValue(this.map); return true;
-        case 3: this.map = extractZones(this.map); return true;
-        case 4: this.map = computeSpatialLayers(this.map); return true;
-        case 5:
-          // Start growth phase if archetype has growth config, else fall back to old system
-          if (this.archetype && this.archetype.growth) {
-            this._phase = 'growth';
-            this._growthState = initGrowthState(this.map, this.archetype);
-            this._growthDone = runGrowthTick(this.map, this.archetype, this._growthState);
-            return true;
-          } else {
-            this.map = reserveLandUse(this.map, this.archetype);
-            this._phase = 'finish';
-            this._finishTick = 0;
-            return true;
-          }
-        default:
-          return false;
-      }
+  /**
+   * Backward-compat setter: CompareArchetypesScreen sets strategy._tick = sharedTicks
+   * to skip past the shared early steps (skeleton, land-value, zones, spatial).
+   * Advances the generator without executing step functions.
+   */
+  set _tick(n) {
+    const toSkip = n - this._stepsRun;
+    if (toSkip > 0) {
+      this._runner.skipSteps(toSkip);
+      this._stepsRun = n;
     }
+  }
 
-    if (this._phase === 'growth') {
-      if (this._growthDone) {
-        this._phase = 'finish';
-        this._finishTick = 0;
-        return this.tick(); // immediately run first finish tick
-      }
-      this._growthDone = runGrowthTick(this.map, this.archetype, this._growthState);
-      return true;
-    }
+  get _tick() {
+    return this._stepsRun;
+  }
 
-    if (this._phase === 'finish') {
-      this._finishTick = (this._finishTick || 0) + 1;
-      // When growth config is active, skip layoutRibbons — roads are grown during ticks
-      const hasGrowth = this.archetype && this.archetype.growth;
-      switch (this._finishTick) {
-        case 1:
-          if (hasGrowth) {
-            // Skip layoutRibbons, go straight to connectToNetwork
-            this.map = connectToNetwork(this.map);
-            return true;
-          }
-          this.map = layoutRibbons(this.map);
-          return true;
-        case 2:
-          if (hasGrowth) return false; // already ran connectToNetwork
-          this.map = connectToNetwork(this.map);
-          return true;
-        default: return false;
-      }
-    }
+  /** True when all pipeline steps are complete. */
+  get done() {
+    return this._runner.done;
+  }
 
-    return false;
+  /** Expose the runner for hook attachment (timing, invariants, etc.). */
+  get runner() {
+    return this._runner;
   }
 }
