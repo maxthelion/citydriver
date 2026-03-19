@@ -26,7 +26,7 @@ describe('setupCity', { timeout: 30000 }, () => {
     expect(map.slope).not.toBeNull();
   });
 
-  it('has buildability computed', () => {
+  it('has terrainSuitability computed', () => {
     const { layers, rng } = makeRegion();
     const settlements = layers.getData('settlements');
     if (!settlements || settlements.length === 0) return;
@@ -34,11 +34,13 @@ describe('setupCity', { timeout: 30000 }, () => {
     const settlement = settlements[0];
     const map = setupCity(layers, settlement, rng.fork('city'));
 
-    // Should have some buildable cells
+    // Should have some buildable cells in terrainSuitability layer
+    const suitability = map.getLayer('terrainSuitability');
+    expect(suitability).toBeDefined();
     let buildable = 0;
     for (let gz = 0; gz < map.height; gz++) {
       for (let gx = 0; gx < map.width; gx++) {
-        if (map.buildability.get(gx, gz) > 0.3) buildable++;
+        if (suitability.get(gx, gz) > 0.3) buildable++;
       }
     }
     expect(buildable).toBeGreaterThan(0);

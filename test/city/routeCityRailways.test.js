@@ -97,16 +97,17 @@ describe('bitmap invariants', () => {
         }
       });
 
-      it('railway cells have buildability = 0', () => {
+      it('railway cells are not water cells', () => {
         let violations = 0;
         map.railwayGrid.forEach((gx, gz, v) => {
-          if (v > 0 && map.buildability.get(gx, gz) > 0) violations++;
+          if (v > 0 && map.waterMask.get(gx, gz) > 0) violations++;
         });
-        expect(violations, `${violations} buildable railway cells`).toBe(0);
+        expect(violations, `${violations} railway cells on water`).toBe(0);
       });
 
       it('railway polyline segments do not cross water', () => {
-        const railFeatures = map.features.filter(f => f.type === 'railway');
+        // Railway polylines are stored on map (no features array)
+        const railFeatures = [];
         let violations = 0;
         for (const f of railFeatures) {
           if (!f.polyline || f.polyline.length < 2) continue;

@@ -511,10 +511,7 @@ export function compactRoads(map, snapDist) {
     network.remove(id);
   }
 
-  // Also clean up features[] for backward compat
-  if (toRemove.size > 0) {
-    map.features = map.features.filter(f => f.type !== 'road' || !toRemove.has(f.id));
-  }
+  // roadNetwork.remove() already handles cleanup internally
 }
 
 /**

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { FeatureMap } from '../../src/core/FeatureMap.js';
 import { Grid2D } from '../../src/core/Grid2D.js';
+import { stampRiverWaterMask } from '../../src/city/stampFeature.js';
 import {
   placeBridges,
   findRoadWaterCrossings,
@@ -27,43 +28,28 @@ function makeTestMap(options = {}) {
   map.elevation = new Grid2D(width, height, { type: 'float32', fill: 10 });
   map.slope = new Grid2D(width, height, { type: 'float32', fill: 0 });
 
-  // Add a horizontal river (polyline with width)
+  // Add a horizontal river — push to rivers and stamp waterMask
   const riverPolyline = [
     { x: 0, z: (riverMinZ + riverMaxZ) / 2 * cellSize, width: (riverMaxZ - riverMinZ) * cellSize, accumulation: 100 },
     { x: width * cellSize, z: (riverMinZ + riverMaxZ) / 2 * cellSize, width: (riverMaxZ - riverMinZ) * cellSize, accumulation: 100 },
   ];
-  map.addFeature('river', { polyline: riverPolyline });
+  const river = { type: 'river', polyline: riverPolyline };
+  map.rivers.push(river);
+  stampRiverWaterMask(map.waterMask, river, cellSize, 0, 0);
 
   // Stamp the river band onto waterMask manually for precise control
   for (let gz = riverMinZ; gz <= riverMaxZ; gz++) {
     for (let gx = 0; gx < width; gx++) {
       map.waterMask.set(gx, gz, 1);
-      map.buildability.set(gx, gz, 0);
-    }
-  }
-
-  // Recompute buildability for non-water cells
-  for (let gz = 0; gz < height; gz++) {
-    for (let gx = 0; gx < width; gx++) {
-      if (map.waterMask.get(gx, gz) === 0) {
-        map.buildability.set(gx, gz, 1.0);
-      }
     }
   }
 
   if (roads) {
     // Add a vertical skeleton road crossing the river at x=50
-    const roadPolyline = [
-      { x: 50 * cellSize, z: 10 * cellSize },
-      { x: 50 * cellSize, z: 90 * cellSize },
-    ];
-    map.addFeature('road', {
-      polyline: roadPolyline,
-      width: 10,
-      hierarchy: 'arterial',
-      importance: 0.9,
-      source: 'skeleton',
-    });
+    map.roadNetwork.add(
+      [{ x: 50 * cellSize, z: 10 * cellSize }, { x: 50 * cellSize, z: 90 * cellSize }],
+      { width: 10, hierarchy: 'arterial', importance: 0.9, source: 'skeleton' }
+    );
   }
 
   return map;
@@ -149,16 +135,10 @@ describe('bridges', () => {
 
       // Two vertical roads 15 cells apart (< MIN_BRIDGE_SPACING of 25)
       for (const roadX of [45, 55]) {
-        map.addFeature('road', {
-          polyline: [
-            { x: roadX * map.cellSize, z: 10 * map.cellSize },
-            { x: roadX * map.cellSize, z: 90 * map.cellSize },
-          ],
-          width: 10,
-          hierarchy: 'arterial',
-          importance: 0.9,
-          source: 'skeleton',
-        });
+        map.roadNetwork.add(
+          [{ x: roadX * map.cellSize, z: 10 * map.cellSize }, { x: roadX * map.cellSize, z: 90 * map.cellSize }],
+          { width: 10, hierarchy: 'arterial', importance: 0.9, source: 'skeleton' }
+        );
       }
 
       const result = placeBridges(map);
@@ -176,53 +156,28 @@ describe('bridges', () => {
       map.slope = new Grid2D(width, height, { type: 'float32', fill: 0 });
 
       // River 1 at z=20-25
-      map.addFeature('river', {
-        polyline: [
-          { x: 0, z: 22.5 * cellSize, width: 5 * cellSize, accumulation: 50 },
-          { x: width * cellSize, z: 22.5 * cellSize, width: 5 * cellSize, accumulation: 50 },
-        ],
-      });
-      for (let gz = 20; gz <= 25; gz++) {
-        for (let gx = 0; gx < width; gx++) {
-          map.waterMask.set(gx, gz, 1);
-          map.buildability.set(gx, gz, 0);
-        }
-      }
+      const r1 = { type: 'river', polyline: [
+        { x: 0, z: 22.5 * cellSize, width: 5 * cellSize, accumulation: 50 },
+        { x: width * cellSize, z: 22.5 * cellSize, width: 5 * cellSize, accumulation: 50 },
+      ] };
+      map.rivers.push(r1);
+      for (let gz = 20; gz <= 25; gz++)
+        for (let gx = 0; gx < width; gx++) map.waterMask.set(gx, gz, 1);
 
       // River 2 at z=70-75
-      map.addFeature('river', {
-        polyline: [
-          { x: 0, z: 72.5 * cellSize, width: 5 * cellSize, accumulation: 50 },
-          { x: width * cellSize, z: 72.5 * cellSize, width: 5 * cellSize, accumulation: 50 },
-        ],
-      });
-      for (let gz = 70; gz <= 75; gz++) {
-        for (let gx = 0; gx < width; gx++) {
-          map.waterMask.set(gx, gz, 1);
-          map.buildability.set(gx, gz, 0);
-        }
-      }
-
-      // Set buildability for non-water
-      for (let gz = 0; gz < height; gz++) {
-        for (let gx = 0; gx < width; gx++) {
-          if (map.waterMask.get(gx, gz) === 0) {
-            map.buildability.set(gx, gz, 1.0);
-          }
-        }
-      }
+      const r2 = { type: 'river', polyline: [
+        { x: 0, z: 72.5 * cellSize, width: 5 * cellSize, accumulation: 50 },
+        { x: width * cellSize, z: 72.5 * cellSize, width: 5 * cellSize, accumulation: 50 },
+      ] };
+      map.rivers.push(r2);
+      for (let gz = 70; gz <= 75; gz++)
+        for (let gx = 0; gx < width; gx++) map.waterMask.set(gx, gz, 1);
 
       // One road crossing both rivers at x=50
-      map.addFeature('road', {
-        polyline: [
-          { x: 50 * cellSize, z: 5 * cellSize },
-          { x: 50 * cellSize, z: 95 * cellSize },
-        ],
-        width: 10,
-        hierarchy: 'arterial',
-        importance: 0.9,
-        source: 'skeleton',
-      });
+      map.roadNetwork.add(
+        [{ x: 50 * cellSize, z: 5 * cellSize }, { x: 50 * cellSize, z: 95 * cellSize }],
+        { width: 10, hierarchy: 'arterial', importance: 0.9, source: 'skeleton' }
+      );
 
       const result = placeBridges(map);
 

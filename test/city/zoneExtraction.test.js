@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Grid2D } from '../../src/core/Grid2D.js';
 import { FeatureMap } from '../../src/core/FeatureMap.js';
+import { computeTerrainSuitability } from '../../src/core/terrainSuitability.js';
 import {
   morphClose, floodFillZones, extractZoneBoundary, extractDevelopmentZones,
 } from '../../src/city/zoneExtraction.js';
@@ -99,9 +100,14 @@ describe('extractDevelopmentZones', () => {
     const map = new FeatureMap(60, 60, 5);
     const elevation = new Grid2D(60, 60, { cellSize: 5, fill: 100 });
     const slope = new Grid2D(60, 60, { cellSize: 5, fill: 0.02 });
-    map.setTerrain(elevation, slope);
+    map.elevation = elevation; map.slope = slope;
+    const { suitability } = computeTerrainSuitability(elevation, slope, map.waterMask, 0, null);
+    map.setLayer('terrainSuitability', suitability);
+    map.setLayer('elevation', elevation); map.setLayer('slope', slope);
+    map.setLayer('waterMask', map.waterMask);
     map.nuclei = [{ gx: 30, gz: 30, type: 'market' }];
     map.computeLandValue();
+    map.setLayer('landValue', map.landValue);
 
     const zones = extractDevelopmentZones(map);
     expect(zones.length).toBeGreaterThan(0);
@@ -118,12 +124,17 @@ describe('extractDevelopmentZones', () => {
     const map = new FeatureMap(100, 100, 5);
     const elevation = new Grid2D(100, 100, { cellSize: 5, fill: 100 });
     const slope = new Grid2D(100, 100, { cellSize: 5, fill: 0.02 });
-    map.setTerrain(elevation, slope);
+    map.elevation = elevation; map.slope = slope;
+    const { suitability } = computeTerrainSuitability(elevation, slope, map.waterMask, 0, null);
+    map.setLayer('terrainSuitability', suitability);
+    map.setLayer('elevation', elevation); map.setLayer('slope', slope);
+    map.setLayer('waterMask', map.waterMask);
     map.nuclei = [
       { gx: 25, gz: 50, type: 'market' },
       { gx: 75, gz: 50, type: 'suburban' },
     ];
     map.computeLandValue();
+    map.setLayer('landValue', map.landValue);
 
     const zones = extractDevelopmentZones(map);
     const nuclei0 = zones.filter(z => z.nucleusIdx === 0);
@@ -134,11 +145,15 @@ describe('extractDevelopmentZones', () => {
 });
 
 // Helper: construct a FeatureMap with manually set grids for isolated testing.
-// Bypasses setTerrain()/computeLandValue() to control exact cell values.
 function makeZoneTestMap(w, h) {
   const map = new FeatureMap(w, h, 5);
-  map.slope = new Grid2D(w, h, { cellSize: 5, fill: 0 });
-  map.buildability = new Grid2D(w, h, { cellSize: 5, fill: 0 });
+  const slope = new Grid2D(w, h, { cellSize: 5, fill: 0 });
+  const suitability = new Grid2D(w, h, { cellSize: 5, fill: 0 });
+  map.slope = slope;
+  map.setLayer('slope', slope);
+  map.setLayer('terrainSuitability', suitability);
+  map.setLayer('waterMask', map.waterMask);
+  map.setLayer('landValue', map.landValue);
   return map;
 }
 
@@ -149,7 +164,7 @@ describe('adaptive slope threshold', () => {
       for (let gx = 0; gx < 20; gx++) {
         map.slope.set(gx, gz, 0.25);
         map.landValue.set(gx, gz, 0.8);
-        map.buildability.set(gx, gz, 0.5);
+        map.getLayer("terrainSuitability").set(gx, gz, 0.5);
       }
     }
     map.nuclei = [{ gx: 10, gz: 10, tier: 1, priority: 1 }];
@@ -166,7 +181,7 @@ describe('adaptive slope threshold', () => {
       for (let gx = 0; gx < 20; gx++) {
         map.slope.set(gx, gz, 0.4);
         map.landValue.set(gx, gz, 0.16);
-        map.buildability.set(gx, gz, 0.5);
+        map.getLayer("terrainSuitability").set(gx, gz, 0.5);
       }
     }
     map.nuclei = [{ gx: 10, gz: 10, tier: 1, priority: 1 }];
@@ -180,7 +195,7 @@ describe('adaptive slope threshold', () => {
       for (let gx = 0; gx < 20; gx++) {
         map.slope.set(gx, gz, 0.05);
         map.landValue.set(gx, gz, 0.7);
-        map.buildability.set(gx, gz, 0.5);
+        map.getLayer("terrainSuitability").set(gx, gz, 0.5);
       }
     }
     map.nuclei = [{ gx: 10, gz: 10, tier: 1, priority: 1 }];
@@ -196,10 +211,10 @@ describe('adaptive slope threshold', () => {
       for (let gx = 0; gx < 20; gx++) {
         mapFlat.slope.set(gx, gz, 0.05);
         mapFlat.landValue.set(gx, gz, 0.7);
-        mapFlat.buildability.set(gx, gz, 0.5);
+        mapFlat.getLayer("terrainSuitability").set(gx, gz, 0.5);
         mapSteep.slope.set(gx, gz, 0.22);
         mapSteep.landValue.set(gx, gz, 0.7);
-        mapSteep.buildability.set(gx, gz, 0.5);
+        mapSteep.getLayer("terrainSuitability").set(gx, gz, 0.5);
       }
     }
     mapFlat.nuclei = [{ gx: 10, gz: 10, tier: 1, priority: 1 }];

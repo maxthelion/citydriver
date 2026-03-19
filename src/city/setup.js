@@ -16,6 +16,7 @@ import { routeCityRailways, extractEntryPoints, gradeRailwayCorridor } from './r
 import { distance2D } from '../core/math.js';
 import { CITY_CELL_SIZE, CITY_RADIUS } from './constants.js';
 import { computeTerrainSuitability, computeFloodZone } from '../core/terrainSuitability.js';
+import { stampRiverWaterMask, stampRailwayGrid } from './stampFeature.js';
 
 /**
  * Create a FeatureMap from regional layers centered on a settlement.
@@ -137,7 +138,7 @@ export function setupCity(layers, settlement, rng) {
     maxZ: originZ + cityGridH * cityCellSize,
   };
 
-  // Import rivers as features (shared inheritance utility)
+  // Import rivers — push to map.rivers and stamp waterMask directly
   const riverPaths = layers.getData('riverPaths');
   if (riverPaths) {
     const cityRivers = inheritRivers(riverPaths, bounds, {
@@ -145,15 +146,18 @@ export function setupCity(layers, settlement, rng) {
       margin: cityCellSize,
     });
     for (const river of cityRivers) {
-      map.addFeature('river', { polyline: river.polyline, systemId: river.systemId });
+      const feature = { type: 'river', polyline: river.polyline, systemId: river.systemId };
+      map.rivers.push(feature);
+      stampRiverWaterMask(map.waterMask, feature, cityCellSize, originX, originZ);
     }
   }
 
   // Railway import is deferred until after terrain/water/landValue are ready
   // (see below, after computeLandValue)
 
-  // Set terrain (computes initial buildability, which needs waterMask first)
-  map.setTerrain(elevation, slope);
+  // Set terrain directly (no buildability computation here — terrainSuitability covers that)
+  map.elevation = elevation;
+  map.slope = slope;
 
   // Store sea level early (needed by carveChannels to avoid carving below sea)
   map.seaLevel = seaLevel;
@@ -214,7 +218,7 @@ export function setupCity(layers, settlement, rng) {
 
   // Import and re-route railways at city resolution.
   // Done here (after terrain/water/landValue) so routing can use the city grid.
-  // Polyline is the single source of truth — grid is derived from it by addFeature.
+  // Polyline is the single source of truth — railwayGrid is stamped directly.
   const railways = layers.getData('railways');
   if (railways) {
     const cityRailways = inheritRailways(railways, bounds, {
@@ -228,8 +232,7 @@ export function setupCity(layers, settlement, rng) {
         bounds, cityCellSize, originX, originZ, seaLevel,
       );
 
-      // Grade terrain along polylines BEFORE adding features.
-      // Grading modifies elevation; _stampRailway then reads correct terrain.
+      // Grade terrain along polylines before stamping.
       if (railResult.polylines.length > 0 && railResult.station) {
         gradeRailwayCorridor(
           railResult.polylines, railResult.entries, railResult.station,
@@ -237,10 +240,9 @@ export function setupCity(layers, settlement, rng) {
         );
       }
 
-      // Add as features — _stampRailway stamps railwayGrid from the polyline.
-      // No separate grid copy needed.
+      // Stamp railwayGrid directly — no addFeature side effects.
       for (const polyline of railResult.polylines) {
-        map.addFeature('railway', { polyline });
+        stampRailwayGrid(map.railwayGrid, map.waterMask, polyline, cityCellSize, originX, originZ);
       }
 
       if (railResult.station) map.station = railResult.station;
