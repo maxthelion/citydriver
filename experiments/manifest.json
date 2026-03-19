@@ -345,5 +345,44 @@
         "tick": null
       }
     ]
+  },
+  {
+    "num": "007l",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "007l-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007m",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "007m-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007n",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "007n-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
   }
 ]
