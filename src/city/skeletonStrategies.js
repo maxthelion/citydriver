@@ -3,7 +3,7 @@
  * Each is a function (map) => void that builds roads on a FeatureMap.
  */
 
-import { buildSkeletonRoads, addRoadToGraph } from './skeleton.js';
+import { buildSkeletonRoads } from './skeleton.js';
 import { UnionFind } from '../core/UnionFind.js';
 import { distance2D } from '../core/math.js';
 
@@ -359,6 +359,4 @@ function _addSparseRoad(map, polyline, hierarchy) {
     importance,
     source: 'skeleton',
   });
-
-  addRoadToGraph(map, polyline, width, hierarchy);
 }

@@ -82,26 +82,7 @@ export function connectIslandZones(map) {
       id: map.roads ? map.roads.length : 0,
     };
 
-    if (map.addFeature) {
-      map.addFeature('road', roadData);
-    } else {
-      map.roads.push(roadData);
-    }
-
-    if (map.graph && simplified.length >= 2) {
-      const snapDist = cs * 3;
-      const startPt = simplified[0];
-      const endPt = simplified[simplified.length - 1];
-      const startNode = findOrCreate(map.graph, startPt.x, startPt.z, snapDist);
-      const endNode = findOrCreate(map.graph, endPt.x, endPt.z, snapDist);
-      if (startNode !== endNode) {
-        map.graph.addEdge(startNode, endNode, {
-          points: simplified.slice(1, -1),
-          width: 6,
-          hierarchy: 'local',
-        });
-      }
-    }
+    map.addFeature('road', roadData);
 
     // Wrap the island zone boundary with a road now that it's connected
     wrapZoneWithRoad(map, zone);
@@ -121,33 +102,6 @@ function isNearRoad(gx, gz, roadGrid, w, h, radius) {
     }
   }
   return false;
-}
-
-/**
- * BFS from (sx,sz) to find nearest road cell, avoiding water.
- */
-function findNearestRoad(sx, sz, roadGrid, waterMask, w, h, maxDist) {
-  const visited = new Uint8Array(w * h);
-  const queue = [{ gx: sx, gz: sz, dist: 0 }];
-  visited[sz * w + sx] = 1;
-
-  while (queue.length > 0) {
-    const { gx, gz, dist } = queue.shift();
-    if (dist > maxDist) return null;
-
-    if (roadGrid.get(gx, gz) > 0) return { gx, gz };
-
-    for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-      const nx = gx + dx, nz = gz + dz;
-      if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
-      if (visited[nz * w + nx]) continue;
-      if (waterMask && waterMask.get(nx, nz) > 0) continue;
-      visited[nz * w + nx] = 1;
-      queue.push({ gx: nx, gz: nz, dist: dist + 1 });
-    }
-  }
-
-  return null;
 }
 
 function simplify(pts, tolerance) {
@@ -178,10 +132,4 @@ function simplify(pts, tolerance) {
     return left.slice(0, -1).concat(right);
   }
   return [first, last];
-}
-
-function findOrCreate(graph, x, z, snapDist) {
-  const nearest = graph.nearestNode(x, z);
-  if (nearest && nearest.dist < snapDist) return nearest.id;
-  return graph.addNode(x, z);
 }

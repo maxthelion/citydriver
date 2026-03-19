@@ -42,26 +42,7 @@ export function wrapZoneWithRoad(map, zone) {
       id: map.roads ? map.roads.length : 0,
     };
 
-    if (map.addFeature) {
-      map.addFeature('road', roadData);
-    } else {
-      map.roads.push(roadData);
-    }
-
-    if (map.graph && seg.length >= 2) {
-      const snapDist = cs * 3;
-      const startPt = seg[0];
-      const endPt = seg[seg.length - 1];
-      const startNode = findOrCreate(map.graph, startPt.x, startPt.z, snapDist);
-      const endNode = findOrCreate(map.graph, endPt.x, endPt.z, snapDist);
-      if (startNode !== endNode) {
-        map.graph.addEdge(startNode, endNode, {
-          points: seg.slice(1, -1),
-          width: 6,
-          hierarchy: 'collector',
-        });
-      }
-    }
+    map.addFeature('road', roadData);
 
     added++;
   }
@@ -163,8 +144,3 @@ function simplify(pts, tolerance) {
   return [first, last];
 }
 
-function findOrCreate(graph, x, z, snapDist) {
-  const nearest = graph.nearestNode(x, z);
-  if (nearest && nearest.dist < snapDist) return nearest.id;
-  return graph.addNode(x, z);
-}

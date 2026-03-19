@@ -205,31 +205,7 @@ function addRoad(map, polyline, hierarchy, width) {
     id: map.roads ? map.roads.length : 0,
   };
 
-  if (map.addFeature) {
-    map.addFeature('road', roadData);
-  } else {
-    map.roads.push(roadData);
-  }
-
-  if (polyline.length >= 2 && map.graph) {
-    const snapDist = map.cellSize * 5; // wider snap to bridge clip buffer gap
-    const startPt = polyline[0];
-    const endPt = polyline[polyline.length - 1];
-    const startNode = findOrCreateNode(map, startPt.x, startPt.z, snapDist);
-    const endNode = findOrCreateNode(map, endPt.x, endPt.z, snapDist);
-
-    if (startNode !== endNode) {
-      const points = polyline.slice(1, -1).map(p => ({ x: p.x, z: p.z }));
-      map.graph.addEdge(startNode, endNode, { points, width, hierarchy });
-    }
-  }
-}
-
-function findOrCreateNode(map, x, z, snapDist) {
-  const graph = map.graph;
-  const nearest = graph.nearestNode(x, z);
-  if (nearest && nearest.dist < snapDist) return nearest.id;
-  return graph.addNode(x, z);
+  map.addFeature('road', roadData);
 }
 
 function clipStreetToGrid(street, map) {
