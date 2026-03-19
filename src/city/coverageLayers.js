@@ -67,10 +67,11 @@ export function applyHashNoise(grid, w, h, baseAmplitude, seed) {
  */
 export function stampWater(map) {
   const { width: w, height: h } = map;
+  const waterMask = map.getLayer?.('waterMask') ?? map.waterMask;
   const out = new Float32Array(w * h);
   for (let gz = 0; gz < h; gz++) {
     for (let gx = 0; gx < w; gx++) {
-      if (map.waterMask.get(gx, gz) > 0) out[gz * w + gx] = 1.0;
+      if (waterMask.get(gx, gz) > 0) out[gz * w + gx] = 1.0;
     }
   }
   return out;
@@ -104,10 +105,11 @@ export function stampRailway(map) {
  */
 export function stampRoad(map) {
   const { width: w, height: h } = map;
+  const roadGrid = map.getLayer?.('roadGrid') ?? map.roadGrid;
   const out = new Float32Array(w * h);
   for (let gz = 0; gz < h; gz++) {
     for (let gx = 0; gx < w; gx++) {
-      if (map.roadGrid.get(gx, gz) === 0) continue;
+      if (roadGrid.get(gx, gz) === 0) continue;
       for (let dz = -2; dz <= 2; dz++) {
         for (let dx = -2; dx <= 2; dx++) {
           const nx = gx + dx, nz = gz + dz;
@@ -127,6 +129,7 @@ export function stampRoad(map) {
  */
 export function stampDevelopment(map) {
   const { width: w, height: h, cellSize: cs } = map;
+  const roadGrid = map.getLayer?.('roadGrid') ?? map.roadGrid;
   const out = new Float32Array(w * h);
 
   if (map.developmentZones) {
@@ -137,7 +140,7 @@ export function stampDevelopment(map) {
 
   for (let gz = 0; gz < h; gz++) {
     for (let gx = 0; gx < w; gx++) {
-      if (map.roadGrid.get(gx, gz) === 0) continue;
+      if (roadGrid.get(gx, gz) === 0) continue;
       for (let dz = -2; dz <= 2; dz++) {
         for (let dx = -2; dx <= 2; dx++) {
           const nx = gx + dx, nz = gz + dz;
