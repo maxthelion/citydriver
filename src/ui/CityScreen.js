@@ -809,7 +809,7 @@ export class CityScreen {
     const bridgeVerts = [], bridgeIdx = [];
     for (let gz = 0; gz < map.height; gz++) {
       for (let gx = 0; gx < map.width; gx++) {
-        if (map.bridgeGrid.get(gx, gz) <= 0) continue;
+        if (map.getLayer?.('bridgeGrid')?.get(gx, gz) <= 0) continue;
         const x = gx * cs, z = gz * cs;
         const y = _elev(gx, gz);
         const half = cs / 2;

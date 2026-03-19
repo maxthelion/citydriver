@@ -69,7 +69,7 @@ export function renderBuildability(ctx, map) {
 
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
-      const b = map.buildability.get(gx, gz);
+      const b = map.getLayer?.("terrainSuitability")?.get(gx, gz);
       // Green = buildable, black = not
       const r = Math.round((1 - b) * 60);
       const g = Math.round(b * 200 + 20);
@@ -88,7 +88,7 @@ export function renderWaterMask(ctx, map) {
 
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
-      if (map.waterMask.get(gx, gz) > 0) {
+      if (map.getLayer?.("waterMask")?.get(gx, gz) > 0) {
         ctx.fillStyle = '#2266cc';
       } else {
         ctx.fillStyle = '#ddeedd';
@@ -124,9 +124,9 @@ export function renderBridgeGrid(ctx, map) {
 
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
-      if (map.bridgeGrid.get(gx, gz) > 0) {
+      if (map.getLayer?.("bridgeGrid")?.get(gx, gz) > 0) {
         ctx.fillStyle = '#ff6600';
-      } else if (map.waterMask.get(gx, gz) > 0) {
+      } else if (map.getLayer?.("waterMask")?.get(gx, gz) > 0) {
         ctx.fillStyle = '#2266cc';
       } else {
         ctx.fillStyle = '#ddeedd';
@@ -148,11 +148,11 @@ export function renderRoadGrid(ctx, map) {
   // Overlay roads
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
-      if (map.roadGrid.get(gx, gz) > 0) {
+      if (map.getLayer?.("roadGrid")?.get(gx, gz) > 0) {
         ctx.fillStyle = 'rgba(60, 60, 60, 0.8)';
         ctx.fillRect(gx, gz, 1, 1);
       }
-      if (map.waterMask.get(gx, gz) > 0) {
+      if (map.getLayer?.("waterMask")?.get(gx, gz) > 0) {
         ctx.fillStyle = 'rgba(34, 102, 204, 0.7)';
         ctx.fillRect(gx, gz, 1, 1);
       }
@@ -172,7 +172,7 @@ export function renderComposite(ctx, map) {
   // Water overlay
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
-      if (map.waterMask.get(gx, gz) > 0) {
+      if (map.getLayer?.("waterMask")?.get(gx, gz) > 0) {
         ctx.fillStyle = 'rgba(34, 102, 204, 0.7)';
         ctx.fillRect(gx, gz, 1, 1);
       }
@@ -182,11 +182,11 @@ export function renderComposite(ctx, map) {
   // Road overlay
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
-      if (map.roadGrid.get(gx, gz) > 0) {
+      if (map.getLayer?.("roadGrid")?.get(gx, gz) > 0) {
         ctx.fillStyle = 'rgba(60, 60, 60, 0.8)';
         ctx.fillRect(gx, gz, 1, 1);
       }
-      if (map.bridgeGrid.get(gx, gz) > 0) {
+      if (map.getLayer?.("bridgeGrid")?.get(gx, gz) > 0) {
         ctx.fillStyle = 'rgba(255, 102, 0, 0.8)';
         ctx.fillRect(gx, gz, 1, 1);
       }
@@ -276,12 +276,12 @@ export function renderLandValue(ctx, map) {
 
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
-      if (map.waterMask.get(gx, gz) > 0) {
+      if (map.getLayer?.("waterMask")?.get(gx, gz) > 0) {
         ctx.fillStyle = '#1a3355';
         ctx.fillRect(gx, gz, 1, 1);
         continue;
       }
-      const v = map.landValue.get(gx, gz);
+      const v = map.getLayer?.("landValue")?.get(gx, gz);
       // Purple (low) → orange (mid) → yellow (high)
       const r = Math.round(Math.min(255, v * 400));
       const g = Math.round(Math.min(255, v * v * 300));
@@ -317,7 +317,7 @@ export function renderRoadPopularity(ctx, map) {
 
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
-      if (map.waterMask.get(gx, gz) > 0) {
+      if (map.getLayer?.("waterMask")?.get(gx, gz) > 0) {
         ctx.fillStyle = '#0a1a2e';
       } else {
         const pop = map.roadPopularity.get(gx, gz);
@@ -346,7 +346,7 @@ export function renderWaterDepth(ctx, map) {
 
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
-      if (map.waterMask.get(gx, gz) === 0) {
+      if (map.getLayer?.("waterMask")?.get(gx, gz) === 0) {
         ctx.fillStyle = '#ddeedd';
       } else {
         const depth = map.waterDepth.get(gx, gz);
@@ -371,7 +371,7 @@ export function renderRoadSources(ctx, map) {
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
       // Dark base
-      if (map.waterMask.get(gx, gz) > 0) {
+      if (map.getLayer?.("waterMask")?.get(gx, gz) > 0) {
         ctx.fillStyle = '#0a1a2e';
       } else {
         ctx.fillStyle = '#1a1a1a';
@@ -402,7 +402,7 @@ export function renderCityBlocks(ctx, map) {
   // Dark background
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
-      if (map.waterMask.get(gx, gz) > 0) {
+      if (map.getLayer?.("waterMask")?.get(gx, gz) > 0) {
         ctx.fillStyle = '#1a3355';
       } else {
         ctx.fillStyle = '#1a1a1a';
@@ -463,7 +463,7 @@ export function renderCityBlocks(ctx, map) {
   // Overlay roads on top
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
-      if (map.roadGrid.get(gx, gz) > 0) {
+      if (map.getLayer?.("roadGrid")?.get(gx, gz) > 0) {
         ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
         ctx.fillRect(gx, gz, 1, 1);
       }
@@ -482,7 +482,7 @@ export function renderDevZones(ctx, map) {
   // Water
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
-      if (map.waterMask.get(gx, gz) > 0) {
+      if (map.getLayer?.("waterMask")?.get(gx, gz) > 0) {
         ctx.fillStyle = 'rgba(34, 102, 204, 0.7)';
         ctx.fillRect(gx, gz, 1, 1);
       }
@@ -519,7 +519,7 @@ export function renderDevZones(ctx, map) {
   // Roads
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
-      if (map.roadGrid.get(gx, gz) > 0) {
+      if (map.getLayer?.("roadGrid")?.get(gx, gz) > 0) {
         ctx.fillStyle = 'rgba(60, 60, 60, 0.8)';
         ctx.fillRect(gx, gz, 1, 1);
       }
@@ -548,7 +548,7 @@ export function renderZonePriority(ctx, map) {
 
   for (let gz = 0; gz < height; gz++) {
     for (let gx = 0; gx < width; gx++) {
-      if (map.waterMask.get(gx, gz) > 0) {
+      if (map.getLayer?.("waterMask")?.get(gx, gz) > 0) {
         ctx.fillStyle = 'rgba(34, 102, 204, 0.7)';
         ctx.fillRect(gx, gz, 1, 1);
       }
