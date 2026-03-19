@@ -114,30 +114,7 @@ function addRoadToMap(map, polyline, source, width = 6, hierarchy = 'local', imp
     importance,
     source,
   });
-
-  const graph = map.graph;
-  const snapDist = map.cellSize * 3;
-
-  const startPt = polyline[0];
-  const endPt = polyline[polyline.length - 1];
-
-  const startNodeId = findOrCreateNode(graph, startPt.x, startPt.z, snapDist);
-  const endNodeId = findOrCreateNode(graph, endPt.x, endPt.z, snapDist);
-
-  if (startNodeId === endNodeId) return null;
-
-  const points = polyline.slice(1, -1).map(p => ({ x: p.x, z: p.z }));
-  graph.addEdge(startNodeId, endNodeId, { points, width, hierarchy });
-
-  return { startNodeId, endNodeId };
-}
-
-function findOrCreateNode(graph, x, z, snapDist) {
-  const nearest = graph.nearestNode(x, z);
-  if (nearest && nearest.dist < snapDist) {
-    return nearest.id;
-  }
-  return graph.addNode(x, z);
+  return true;
 }
 
 export class OffsetInfill {

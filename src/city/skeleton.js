@@ -389,10 +389,11 @@ function _connectDisconnectedNuclei(map) {
     const result = findPath(n.gx, n.gz, bestGx, bestGz, map.width, map.height, costFn);
     if (!result || result.path.length < 2) continue;
 
-    // Stamp road grid + debug grid
-    for (const p of result.path) {
-      map.roadGrid.set(p.gx, p.gz, 1);
-      if (map.debugMstGrid) map.debugMstGrid.set(p.gx, p.gz, 1);
+    // Stamp debug grid (roadGrid stamping handled by addFeature below)
+    if (map.debugMstGrid) {
+      for (const p of result.path) {
+        map.debugMstGrid.set(p.gx, p.gz, 1);
+      }
     }
 
     // Simplify and smooth
