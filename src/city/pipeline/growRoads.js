@@ -10,7 +10,7 @@
  * Grow roads from ribbon allocation results.
  *
  * @param {object} opts
- * @param {Grid2D} opts.roadGrid - road grid (read + write)
+ * @param {Grid2D} opts.roadGrid - road grid (read + write when no roadNetwork)
  * @param {Grid2D|null} opts.waterMask - water mask (read only, skip water cells)
  * @param {Array<{gx,gz}>} opts.ribbonGaps - gap cells from ribbon allocation
  * @param {Array<{gx,gz,dx,dz}>} opts.ribbonEndpoints - cross street start points
@@ -18,10 +18,12 @@
  * @param {number} opts.h - grid height
  * @param {number} opts.maxCrossStreetLength - max cells for cross streets
  * @param {number} opts.pathClosingDistance - max gap to bridge between endpoints
+ * @param {RoadNetwork|null} [opts.roadNetwork] - when provided, roads are added
+ *   as proper Road objects via addFromCells() instead of direct grid writes
  */
 export function growRoads({
   roadGrid, waterMask, ribbonGaps, ribbonEndpoints, w, h,
-  maxCrossStreetLength, pathClosingDistance,
+  maxCrossStreetLength, pathClosingDistance, roadNetwork,
 }) {
   const isWater = (gx, gz) =>
     waterMask && gx >= 0 && gx < w && gz >= 0 && gz < h && waterMask.get(gx, gz) > 0;
@@ -30,9 +32,21 @@ export function growRoads({
     gx >= 0 && gx < w && gz >= 0 && gz < h && !isWater(gx, gz);
 
   // Step 1: Mark ribbon gaps as road cells (skip water)
-  for (const g of ribbonGaps) {
-    if (canPlace(g.gx, g.gz)) {
-      roadGrid.set(g.gx, g.gz, 1);
+  if (roadNetwork) {
+    const gapCells = [];
+    for (const g of ribbonGaps) {
+      if (canPlace(g.gx, g.gz)) {
+        gapCells.push({ gx: g.gx, gz: g.gz });
+      }
+    }
+    if (gapCells.length >= 2) {
+      roadNetwork.addFromCells(gapCells, { hierarchy: 'local', source: 'growth-ribbon' });
+    }
+  } else {
+    for (const g of ribbonGaps) {
+      if (canPlace(g.gx, g.gz)) {
+        roadGrid.set(g.gx, g.gz, 1);
+      }
     }
   }
 
@@ -45,8 +59,14 @@ export function growRoads({
 
     if (dx === 0 && dz === 0) continue;
 
+    const streetCells = [];
+
     if (canPlace(gx, gz) && roadGrid.get(gx, gz) === 0) {
-      roadGrid.set(gx, gz, 1);
+      if (roadNetwork) {
+        streetCells.push({ gx, gz });
+      } else {
+        roadGrid.set(gx, gz, 1);
+      }
     }
 
     for (let i = 0; i < maxCrossStreetLength; i++) {
@@ -66,7 +86,11 @@ export function growRoads({
             if (!canPlace(gx + dx * b, gz + dz * b)) { bridgeOk = false; break; }
           }
           if (bridgeOk) {
-            for (let b = 0; b < d; b++) roadGrid.set(gx + dx * b, gz + dz * b, 1);
+            if (roadNetwork) {
+              for (let b = 0; b < d; b++) streetCells.push({ gx: gx + dx * b, gz: gz + dz * b });
+            } else {
+              for (let b = 0; b < d; b++) roadGrid.set(gx + dx * b, gz + dz * b, 1);
+            }
             nearRoad = true;
           }
           break;
@@ -74,7 +98,15 @@ export function growRoads({
       }
       if (nearRoad) break;
 
-      roadGrid.set(gx, gz, 1);
+      if (roadNetwork) {
+        streetCells.push({ gx, gz });
+      } else {
+        roadGrid.set(gx, gz, 1);
+      }
+    }
+
+    if (roadNetwork && streetCells.length >= 2) {
+      roadNetwork.addFromCells(streetCells, { hierarchy: 'local', source: 'growth-cross' });
     }
   }
 
@@ -117,9 +149,20 @@ export function growRoads({
       }
       if (blocked) continue;
 
-      for (let s = 0; s <= steps; s++) {
-        const t = s / steps;
-        roadGrid.set(Math.round(a.gx + dx * t), Math.round(a.gz + dz * t), 1);
+      if (roadNetwork) {
+        const closingCells = [];
+        for (let s = 0; s <= steps; s++) {
+          const t = s / steps;
+          closingCells.push({ gx: Math.round(a.gx + dx * t), gz: Math.round(a.gz + dz * t) });
+        }
+        if (closingCells.length >= 2) {
+          roadNetwork.addFromCells(closingCells, { hierarchy: 'local', source: 'growth-closing' });
+        }
+      } else {
+        for (let s = 0; s <= steps; s++) {
+          const t = s / steps;
+          roadGrid.set(Math.round(a.gx + dx * t), Math.round(a.gz + dz * t), 1);
+        }
       }
 
       connected.add(i);
