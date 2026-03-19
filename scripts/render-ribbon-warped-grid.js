@@ -1,18 +1,11 @@
 #!/usr/bin/env bun
 /**
- * Experiment 007r: Grid between two non-parallel anchor roads.
+ * Experiment 007s: Warped grid between two non-parallel anchor roads.
  *
- * Finds a zone bounded by two roads at an angle, then lays a street grid
- * that compromises between being perpendicular to both roads.
- *
- * Approach:
- * - Find the two road edges of the zone
- * - Compute perpendicular direction for each
- * - Subdivide each road edge at regular intervals
- * - Connect corresponding points between the two edges
- *   (these become cross streets that gradually rotate from one road's
- *   perpendicular to the other's)
- * - Fill between adjacent cross streets with parallel streets
+ * Builds on 007r's angled-road zone finder but uses bilinear interpolation
+ * to warp the grid through the zone. Finds the road intersection point,
+ * computes perpendicular construction lines to an apex, then generates
+ * a (u,v) grid via bilinear interpolation between the two road edges.
  */
 
 import { generateRegionFromSeed } from '../src/ui/regionHelper.js';
@@ -29,7 +22,7 @@ import { execSync } from 'child_process';
 const seed = parseInt(process.argv[2]) || 884469;
 const gx = parseInt(process.argv[3]) || 27;
 const gz = parseInt(process.argv[4]) || 95;
-const outDir = process.argv[5] || 'experiments/007r-output';
+const outDir = process.argv[5] || 'experiments/007s-output';
 if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
 const t0 = performance.now();
@@ -107,7 +100,7 @@ function findAngledZone() {
     const angleDiff = Math.abs(edgeInfo[0].angle - edgeInfo[1].angle);
     const normalised = angleDiff > 90 ? 180 - angleDiff : angleDiff;
 
-    if (normalised > 20 && normalised < 80) {
+    if (normalised > 10 && normalised < 80) {
       return { zone, edges: edgeInfo, angleDiff: normalised };
     }
   }
@@ -137,77 +130,150 @@ for (const edge of edges) {
   }
 }
 
-// === Subdivide both road edges at regular intervals ===
-const CROSS_SPACING = 60; // metres between cross street start points
+// === Find where the two anchor road LINES intersect ===
+// Extend the road edge directions to find their intersection point
+const zoneSet = new Set(zone.cells.map(c => c.gz * W + c.gx));
 
-function subdivideEdge(edge, spacing) {
-  const pts = edge.points;
-  const result = [{ x: pts[0].x, z: pts[0].z }];
-  let accum = 0;
-  for (let i = 1; i < pts.length; i++) {
-    const dx = pts[i].x - pts[i - 1].x, dz = pts[i].z - pts[i - 1].z;
-    accum += Math.sqrt(dx * dx + dz * dz);
-    if (accum >= spacing) {
-      result.push({ x: pts[i].x, z: pts[i].z });
-      accum = 0;
-    }
-  }
-  // Always include last point
-  const last = pts[pts.length - 1];
-  if (result.length === 0 || (result[result.length-1].x !== last.x || result[result.length-1].z !== last.z)) {
-    result.push({ x: last.x, z: last.z });
-  }
-  return result;
+const A0_orig = edges[0].points[0];
+const A1_orig = edges[0].points[edges[0].points.length - 1];
+const B0_orig = edges[1].points[0];
+const B1_orig = edges[1].points[edges[1].points.length - 1];
+
+// Road A line: A0 + t * dirA, Road B line: B0 + s * dirB
+const dA = edges[0].dir, dB = edges[1].dir;
+const det = dA.x * (-dB.z) - dA.z * (-dB.x);
+let roadIntersection;
+
+if (Math.abs(det) > 0.001) {
+  const dmx = B0_orig.x - A0_orig.x, dmz = B0_orig.z - A0_orig.z;
+  const t = (dmx * (-dB.z) - dmz * (-dB.x)) / det;
+  roadIntersection = { x: A0_orig.x + t * dA.x, z: A0_orig.z + t * dA.z };
+  console.log(`  Road lines intersect at (${roadIntersection.x.toFixed(0)}, ${roadIntersection.z.toFixed(0)})`);
+} else {
+  roadIntersection = { x: centX, z: centZ };
+  console.log(`  Roads are parallel — using centroid`);
 }
 
-const ptsA = subdivideEdge(edges[0], CROSS_SPACING);
-const ptsB = subdivideEdge(edges[1], CROSS_SPACING);
+// === Find the point on each edge FURTHEST from the road intersection ===
+function furthestFromPoint(edgePts, px, pz) {
+  let maxDist = 0, best = edgePts[0];
+  for (const p of edgePts) {
+    const d = Math.sqrt((p.x - px) ** 2 + (p.z - pz) ** 2);
+    if (d > maxDist) { maxDist = d; best = p; }
+  }
+  return { point: best, dist: maxDist };
+}
 
-console.log(`  Edge A: ${ptsA.length} subdivided points`);
-console.log(`  Edge B: ${ptsB.length} subdivided points`);
+const farA = furthestFromPoint(edges[0].points, roadIntersection.x, roadIntersection.z);
+const farB = furthestFromPoint(edges[1].points, roadIntersection.x, roadIntersection.z);
 
-// === Connect corresponding points: cross streets ===
-// Match by normalised position along each edge (0 to 1)
-const count = Math.min(ptsA.length, ptsB.length);
+console.log(`  Furthest on A: dist=${farA.dist.toFixed(0)}m`);
+console.log(`  Furthest on B: dist=${farB.dist.toFixed(0)}m`);
+
+// === Draw perpendicular lines from these furthest points into the zone ===
+// perpA from farA.point into the zone along edges[0].perp
+// perpB from farB.point into the zone along edges[1].perp
+
+// Find where these two perpendicular lines intersect — that's the apex
+const pA = edges[0].perp, pB = edges[1].perp;
+const detPerp = pA.x * (-pB.z) - pA.z * (-pB.x);
+let apex;
+
+if (Math.abs(detPerp) > 0.001) {
+  const dmx = farB.point.x - farA.point.x, dmz = farB.point.z - farA.point.z;
+  const t = (dmx * (-pB.z) - dmz * (-pB.x)) / detPerp;
+  apex = { x: farA.point.x + t * pA.x, z: farA.point.z + t * pA.z };
+} else {
+  apex = { x: centX, z: centZ };
+}
+
+// Truncate both perp lines to the apex distance
+const perpLenA = Math.sqrt((apex.x - farA.point.x) ** 2 + (apex.z - farA.point.z) ** 2);
+const perpLenB = Math.sqrt((apex.x - farB.point.x) ** 2 + (apex.z - farB.point.z) ** 2);
+console.log(`  Apex at (${apex.x.toFixed(0)}, ${apex.z.toFixed(0)}), perpA=${perpLenA.toFixed(0)}m, perpB=${perpLenB.toFixed(0)}m`);
+
+// === Build the quadrilateral ===
+// Four corners: start of edge A, end of edge A, apex (from A side), apex (from B side)
+// Actually: the quad is edge A on one side, edge B on the other, with two "side edges"
+// connecting them through or near the apex.
+//
+// Side edge 1: from start of edge A to start of edge B (or through apex)
+// Side edge 2: from end of edge A to end of edge B (or through apex)
+//
+// Simpler model: treat it as a quad with:
+//   Top: edge A (road A)
+//   Bottom: edge B (road B)
+//   Left: line from edgeA[0] to edgeB[0]
+//   Right: line from edgeA[last] to edgeB[last]
+// But push the interior toward the apex.
+//
+// Even simpler: bilinear interpolation.
+// The quad corners are: A_start, A_end, B_start, B_end
+// For any (u, v) in [0,1]x[0,1]:
+//   point = (1-v)*lerp(A_start, A_end, u) + v*lerp(B_start, B_end, u)
+// But warp v to push through apex.
+
+// The quad: edge A (road A) on one side, edge B (road B) on the other,
+// connected by two side edges through/near the apex.
+// We use the full road edges (A0-A1, B0-B1) as opposite sides of the quad.
+const A0 = edges[0].points[0];
+const A1 = edges[0].points[edges[0].points.length - 1];
+const B0 = edges[1].points[0];
+const B1 = edges[1].points[edges[1].points.length - 1];
+
+// Subdivide edges and connect
+const CROSS_SPACING = 60;
+const PARALLEL_SPACING = 35;
+const NUM_U = Math.max(3, Math.round(Math.max(edges[0].length, edges[1].length) / CROSS_SPACING));
+
+// Cross street length (A to B direction)
+const avgCrossLen = (
+  Math.sqrt((B0.x-A0.x)**2 + (B0.z-A0.z)**2) +
+  Math.sqrt((B1.x-A1.x)**2 + (B1.z-A1.z)**2)
+) / 2;
+const NUM_V = Math.max(3, Math.round(avgCrossLen / PARALLEL_SPACING));
+
+console.log(`  Grid: ${NUM_U} x ${NUM_V}`);
+
+// Generate grid points via bilinear interpolation
+// u goes along edges (0=start, 1=end), v goes between edges (0=A, 1=B)
+function gridPoint(u, v) {
+  // Point on edge A at fraction u
+  const ax = A0.x + (A1.x - A0.x) * u;
+  const az = A0.z + (A1.z - A0.z) * u;
+  // Point on edge B at fraction u
+  const bx = B0.x + (B1.x - B0.x) * u;
+  const bz = B0.z + (B1.z - B0.z) * u;
+  // Interpolate between A and B
+  return {
+    x: ax + (bx - ax) * v,
+    z: az + (bz - az) * v,
+  };
+}
+
+// Cross streets: lines at constant u (connecting A to B)
 const crossStreets = [];
-
-for (let i = 0; i < count; i++) {
-  const tA = ptsA.length === 1 ? 0 : i / (count - 1);
-  const tB = ptsB.length === 1 ? 0 : i / (count - 1);
-  const idxA = Math.min(ptsA.length - 1, Math.round(tA * (ptsA.length - 1)));
-  const idxB = Math.min(ptsB.length - 1, Math.round(tB * (ptsB.length - 1)));
-  crossStreets.push([ptsA[idxA], ptsB[idxB]]);
-}
-
-console.log(`  ${crossStreets.length} cross streets connecting edges`);
-
-// === Fill parallel streets between adjacent cross streets ===
-const PARALLEL_SPACING = 35; // metres
-const parallelStreets = [];
-
-for (let i = 0; i < crossStreets.length - 1; i++) {
-  const [a1, a2] = crossStreets[i];     // cross street i: from edge A to edge B
-  const [b1, b2] = crossStreets[i + 1]; // cross street i+1
-
-  // Length of each cross street
-  const lenLeft = Math.sqrt((a2.x - a1.x) ** 2 + (a2.z - a1.z) ** 2);
-  const lenRight = Math.sqrt((b2.x - b1.x) ** 2 + (b2.z - b1.z) ** 2);
-  const avgLen = (lenLeft + lenRight) / 2;
-  const steps = Math.max(1, Math.floor(avgLen / PARALLEL_SPACING));
-
-  for (let s = 1; s < steps; s++) {
-    const t = s / steps;
-    // Point on cross street i at fraction t
-    const lx = a1.x + (a2.x - a1.x) * t;
-    const lz = a1.z + (a2.z - a1.z) * t;
-    // Point on cross street i+1 at fraction t
-    const rx = b1.x + (b2.x - b1.x) * t;
-    const rz = b1.z + (b2.z - b1.z) * t;
-    parallelStreets.push([{ x: lx, z: lz }, { x: rx, z: rz }]);
+for (let ui = 0; ui <= NUM_U; ui++) {
+  const u = ui / NUM_U;
+  const pts = [];
+  for (let vi = 0; vi <= NUM_V; vi++) {
+    pts.push(gridPoint(u, vi / NUM_V));
   }
+  crossStreets.push(pts);
 }
 
-console.log(`  ${parallelStreets.length} parallel streets`);
+// Parallel streets: lines at constant v (following along edges)
+const parallelStreets = [];
+for (let vi = 0; vi <= NUM_V; vi++) {
+  const v = vi / NUM_V;
+  const pts = [];
+  for (let ui = 0; ui <= NUM_U; ui++) {
+    pts.push(gridPoint(ui / NUM_U, v));
+  }
+  parallelStreets.push(pts);
+}
+
+console.log(`  ${crossStreets.length} cross streets, ${parallelStreets.length} parallel streets`);
 
 // === Render cropped to zone ===
 let minGx = W, maxGx = 0, minGz = H, maxGz = 0;
@@ -292,38 +358,54 @@ for (const p of edges[1].points) {
   }
 }
 
-// Cross streets (magenta, 1px)
-for (const [a, b] of crossStreets) {
-  bres(pixels, cropW, cropH,
-    Math.round((a.x - ox) / cs) - minGx, Math.round((a.z - oz) / cs) - minGz,
-    Math.round((b.x - ox) / cs) - minGx, Math.round((b.z - oz) / cs) - minGz,
-    255, 0, 255);
-}
+// Perpendicular construction lines (green, 1px)
+bres(pixels, cropW, cropH,
+  Math.round((farA.point.x - ox) / cs) - minGx, Math.round((farA.point.z - oz) / cs) - minGz,
+  Math.round((apex.x - ox) / cs) - minGx, Math.round((apex.z - oz) / cs) - minGz,
+  0, 200, 0);
+bres(pixels, cropW, cropH,
+  Math.round((farB.point.x - ox) / cs) - minGx, Math.round((farB.point.z - oz) / cs) - minGz,
+  Math.round((apex.x - ox) / cs) - minGx, Math.round((apex.z - oz) / cs) - minGz,
+  0, 200, 0);
 
-// Parallel streets (cyan, 1px)
-for (const [a, b] of parallelStreets) {
-  bres(pixels, cropW, cropH,
-    Math.round((a.x - ox) / cs) - minGx, Math.round((a.z - oz) / cs) - minGz,
-    Math.round((b.x - ox) / cs) - minGx, Math.round((b.z - oz) / cs) - minGz,
-    0, 220, 220);
-}
-
-// Subdivision points on edges (white dots)
-for (const p of ptsA) {
-  const x = Math.round((p.x - ox) / cs) - minGx;
-  const z = Math.round((p.z - oz) / cs) - minGz;
-  for (let dz = -1; dz <= 1; dz++)
-    for (let dx = -1; dx <= 1; dx++)
-      if (x+dx >= 0 && x+dx < cropW && z+dz >= 0 && z+dz < cropH) {
-        const idx = ((z+dz) * cropW + (x+dx)) * 3;
-        pixels[idx] = 255; pixels[idx+1] = 255; pixels[idx+2] = 255;
+// Apex (bright green dot)
+{
+  const ax = Math.round((apex.x - ox) / cs) - minGx;
+  const az = Math.round((apex.z - oz) / cs) - minGz;
+  for (let dz = -2; dz <= 2; dz++)
+    for (let dx = -2; dx <= 2; dx++)
+      if (ax+dx >= 0 && ax+dx < cropW && az+dz >= 0 && az+dz < cropH) {
+        const idx = ((az+dz) * cropW + (ax+dx)) * 3;
+        pixels[idx] = 0; pixels[idx+1] = 255; pixels[idx+2] = 0;
       }
 }
-for (const p of ptsB) {
+
+// Cross streets (magenta, 1px) — polylines
+for (const pts of crossStreets) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    bres(pixels, cropW, cropH,
+      Math.round((pts[i].x - ox) / cs) - minGx, Math.round((pts[i].z - oz) / cs) - minGz,
+      Math.round((pts[i+1].x - ox) / cs) - minGx, Math.round((pts[i+1].z - oz) / cs) - minGz,
+      255, 0, 255);
+  }
+}
+
+// Parallel streets (cyan, 1px) — polylines
+for (const pts of parallelStreets) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    bres(pixels, cropW, cropH,
+      Math.round((pts[i].x - ox) / cs) - minGx, Math.round((pts[i].z - oz) / cs) - minGz,
+      Math.round((pts[i+1].x - ox) / cs) - minGx, Math.round((pts[i+1].z - oz) / cs) - minGz,
+      0, 220, 220);
+  }
+}
+
+// Furthest points on edges (white dots)
+for (const p of [farA.point, farB.point]) {
   const x = Math.round((p.x - ox) / cs) - minGx;
   const z = Math.round((p.z - oz) / cs) - minGz;
-  for (let dz = -1; dz <= 1; dz++)
-    for (let dx = -1; dx <= 1; dx++)
+  for (let dz = -2; dz <= 2; dz++)
+    for (let dx = -2; dx <= 2; dx++)
       if (x+dx >= 0 && x+dx < cropW && z+dz >= 0 && z+dz < cropH) {
         const idx = ((z+dz) * cropW + (x+dx)) * 3;
         pixels[idx] = 255; pixels[idx+1] = 255; pixels[idx+2] = 255;

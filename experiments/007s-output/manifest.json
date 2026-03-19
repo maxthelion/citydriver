@@ -1,17 +1,17 @@
 {
-  "experiment": "007r",
-  "generated": "2026-03-19T11:15:26.251Z",
+  "experiment": "007s",
+  "generated": "2026-03-19T11:15:35.312Z",
   "seeds": [
     "884469"
   ],
   "layers": null,
   "archetype": null,
   "ticks": null,
-  "script": "render-ribbon-angled-roads.js",
+  "script": "render-ribbon-warped-grid.js",
   "images": [
     {
       "file": "ribbon-zone-zoomed-seed884469.png",
-      "path": "007r-output/ribbon-zone-zoomed-seed884469.png",
+      "path": "007s-output/ribbon-zone-zoomed-seed884469.png",
       "layer": "ribbon-zone-zoomed",
       "seed": "884469",
       "tick": null

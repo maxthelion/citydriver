@@ -53,10 +53,40 @@ KEEP or REVERT. If KEEP, this becomes the baseline for the next experiment.
 
 1. **Document** — write the experiment file describing problems and hypothesis
 2. **Change** — make the code/config change
-3. **Render** — run `bun scripts/render-reservations.js` for 2-3 seeds
+3. **Render** — run through `run-experiment.js` (see below). **Never run render scripts directly** — only `run-experiment.js` updates the manifests needed by the experiment viewer.
 4. **Evaluate** — look at the output, update the experiment file with results
 5. **Decide** — KEEP (commit) or REVERT (`git checkout -- .`)
 6. **Next** — increment the experiment number, describe remaining problems
+
+## Rendering
+
+**Always use `run-experiment.js`** to render experiments. This script runs the render, converts PPM to PNG, writes per-experiment manifests, and updates the root `experiments/manifest.json` so experiments appear in the viewer.
+
+For pipeline-layer experiments:
+```bash
+bun scripts/run-experiment.js --experiment 004 \
+  --seeds "884469:27:95,42:15:50,12345:20:60" \
+  --ticks 28 --layers reservations,zones \
+  --archetype marketTown
+```
+
+For custom render scripts (most 007-series experiments):
+```bash
+bun scripts/run-experiment.js --experiment 007p \
+  --script render-ribbon-smooth-curve.js \
+  --seeds "884469:27:95"
+```
+
+Custom render scripts must accept `seed gx gz outDir` as command-line arguments and write output as `outDir/layer-seedNNN.ppm` (with optional PNG conversion via ImageMagick `convert`).
+
+## Experiment Viewer
+
+The viewer (`experiments/index.html`) reads from two manifest files:
+
+- **`experiments/manifest.json`** — root index listing all experiments with their images, slugs, and markdown filenames
+- **`experiments/NNN-output/manifest.json`** — per-experiment manifest with image metadata (layer, seed, tick)
+
+Both are written automatically by `run-experiment.js`. If an experiment doesn't appear in the viewer, re-run it through `run-experiment.js`.
 
 ## Rules
 

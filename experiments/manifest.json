@@ -461,5 +461,122 @@
         "tick": null
       }
     ]
+  },
+  {
+    "num": "007r",
+    "slug": "angled-roads",
+    "md": "007r-angled-roads.md",
+    "images": [
+      {
+        "path": "007r-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007s",
+    "slug": "warped-grid",
+    "md": "007s-warped-grid.md",
+    "images": [
+      {
+        "path": "007s-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007s1",
+    "slug": "perp-subdivision",
+    "md": "007s1-perp-subdivision.md",
+    "images": [
+      {
+        "path": "007s1-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007s2",
+    "slug": "reversed-connections",
+    "md": "007s2-reversed-connections.md",
+    "images": [
+      {
+        "path": "007s2-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007s3",
+    "slug": "diagnostic-overlay",
+    "md": "007s3-diagnostic-overlay.md",
+    "images": [
+      {
+        "path": "007s3-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007s4",
+    "slug": "opposite-roads",
+    "md": "007s4-opposite-roads.md",
+    "images": [
+      {
+        "path": "007s4-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007s5",
+    "slug": "boundary-edges",
+    "md": "007s5-boundary-edges.md",
+    "images": [
+      {
+        "path": "007s5-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007s6",
+    "slug": "perpendicular-pair",
+    "md": "007s6-perpendicular-pair.md",
+    "images": [
+      {
+        "path": "007s6-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007s7",
+    "slug": "straightness",
+    "md": "007s7-straightness.md",
+    "images": [
+      {
+        "path": "007s7-output/ribbon-zone-zoomed-seed884469.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
   }
 ]

@@ -75,7 +75,9 @@ export function subdivideLargeZones(map, options = {}) {
 
     // Project to the far side of the map — the walk stops when it hits a road
     // Add some randomness (±20% angle variation)
-    const angle = Math.atan2(perpZ, perpX) + (Math.random() - 0.5) * 0.4;
+    const rng = map.rng;
+    const jitter = rng ? (rng.next() - 0.5) * 0.4 : (Math.random() - 0.5) * 0.4;
+    const angle = Math.atan2(perpZ, perpX) + jitter;
     const mapDiag = Math.sqrt(w * w + h * h) * cs;
     const targetX = midX + Math.cos(angle) * mapDiag;
     const targetZ = midZ + Math.sin(angle) * mapDiag;
