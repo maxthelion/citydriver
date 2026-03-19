@@ -1,0 +1,20 @@
+{
+  "experiment": "007m",
+  "generated": "2026-03-19T09:52:40.025Z",
+  "seeds": [
+    "884469"
+  ],
+  "layers": null,
+  "archetype": null,
+  "ticks": null,
+  "script": "render-ribbon-from-road.js",
+  "images": [
+    {
+      "file": "ribbon-zone-zoomed-seed884469.png",
+      "path": "007m-output/ribbon-zone-zoomed-seed884469.png",
+      "layer": "ribbon-zone-zoomed",
+      "seed": "884469",
+      "tick": null
+    }
+  ]
+}
