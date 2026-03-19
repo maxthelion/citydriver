@@ -12,7 +12,6 @@ import { findPath, gridPathToWorldPolyline } from '../core/pathfinding.js';
 import { buildRoadNetwork } from '../core/buildRoadNetwork.js';
 import { UnionFind } from '../core/UnionFind.js';
 import { distance2D } from '../core/math.js';
-import { PlanarGraph } from '../core/PlanarGraph.js';
 import { Grid2D } from '../core/Grid2D.js';
 import { placeBridges } from './bridges.js';
 import { clipPolylineToBounds } from '../core/clipPolyline.js';
@@ -410,43 +409,6 @@ function _connectDisconnectedNuclei(map) {
       source: 'skeleton',
     });
   }
-}
-
-// ============================================================
-// Graph helpers
-// ============================================================
-
-/**
- * Add a road polyline to the PlanarGraph.
- */
-export function addRoadToGraph(map, polyline, width, hierarchy) {
-  if (polyline.length < 2) return;
-
-  const graph = map.graph;
-  const snapDist = map.cellSize * 3;
-
-  const startPt = polyline[0];
-  const endPt = polyline[polyline.length - 1];
-
-  const startNodeId = _findOrCreateNode(graph, startPt.x, startPt.z, snapDist);
-  const endNodeId = _findOrCreateNode(graph, endPt.x, endPt.z, snapDist);
-
-  if (startNodeId === endNodeId) return;
-
-  // Skip if there's already an edge between these nodes (prevents duplicate
-  // edges that break the half-edge face extraction algorithm)
-  if (graph.neighbors(startNodeId).includes(endNodeId)) return;
-
-  const points = polyline.slice(1, -1).map(p => ({ x: p.x, z: p.z }));
-  graph.addEdge(startNodeId, endNodeId, { points, width, hierarchy });
-}
-
-function _findOrCreateNode(graph, x, z, snapDist) {
-  const nearest = graph.nearestNode(x, z);
-  if (nearest && nearest.dist < snapDist) {
-    return nearest.id;
-  }
-  return graph.addNode(x, z);
 }
 
 // ============================================================

@@ -10,7 +10,6 @@
  */
 
 import { Grid2D } from './Grid2D.js';
-import { PlanarGraph } from './PlanarGraph.js';
 import { RoadNetwork } from './RoadNetwork.js';
 import { riverHalfWidth, channelProfile } from './riverGeometry.js';
 import { RIVER_STAMP_FRACTION, STAMP_STEP_FRACTION } from '../city/constants.js';
