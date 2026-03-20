@@ -36,6 +36,14 @@ describe('LandFirstDevelopment', { timeout: 120000 }, () => {
     expect(sharedMap.roads.length).toBeGreaterThan(0);
   });
 
+  it('smooths road polylines via smooth-roads step', () => {
+    const longerRoads = sharedMap.roads.filter(r => r.polyline.length >= 3);
+    expect(longerRoads.length).toBeGreaterThan(0);
+
+    const smoothedRoads = sharedMap.roads.filter(r => r.polyline.length >= 9);
+    expect(smoothedRoads.length).toBeGreaterThan(0);
+  });
+
   it('produces development zones', () => {
     expect(sharedMap.developmentZones).toBeDefined();
     expect(sharedMap.developmentZones.length).toBeGreaterThan(0);

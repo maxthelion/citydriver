@@ -7,15 +7,16 @@
  * Step sequence:
  *   skeleton   → land-value → zones → spatial
  *   → growth-1 … growth-N  (organic loop, archetype-driven)
- *   → connect
+ *   → connect → smooth-roads
  *
  * For archetypes without growth config, falls back to:
- *   reserve → ribbons → connect
+ *   reserve → ribbons → connect → smooth-roads
  *
  * Spec: specs/v5/next-steps.md § Step 1
  */
 
 import { step } from './PipelineRunner.js';
+import { chaikinSmooth } from '../../core/math.js';
 import { buildSkeletonRoads } from './buildSkeletonRoads.js';
 import { computeLandValue } from './computeLandValue.js';
 import { extractZones } from './extractZones.js';
@@ -66,6 +67,14 @@ export function* cityPipeline(map, archetype) {
   }
 
   yield step('connect', () => connectToNetwork(map));
+  yield step('smooth-roads', () => {
+    for (const road of map.roads) {
+      if (!road.polyline || road.polyline.length < 3) continue;
+      let poly = road.polyline;
+      for (let i = 0; i < 2; i++) poly = chaikinSmooth(poly);
+      road._replacePolyline(poly);
+    }
+  });
 }
 
 /**
