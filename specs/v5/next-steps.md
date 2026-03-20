@@ -7,9 +7,13 @@ Update it as steps complete or priorities shift.
 
 ---
 
-## Where We Are
+## Status: Steps 1–7 complete (March 2026)
 
-The pipeline refactor is done:
+---
+
+## Where We Are (after 7-step sequence)
+
+All 7 planned steps are complete. The pipeline refactor is done:
 
 - **Road Network Abstraction** — `RoadNetwork` owns roads, graph, roadGrid, bridgeGrid. Single mutation point.
 - **Pipeline Functions Extracted** — every tick is a standalone `(map) → map` function in `src/city/pipeline/`.
@@ -22,7 +26,7 @@ The archived strategies (frontagePressure, faceSubdivision, offsetInfill, etc.) 
 
 ---
 
-## Step 1: PipelineRunner + Generator Pipeline
+## ✅ Step 1: PipelineRunner + Generator Pipeline
 
 **Why first:** Everything else depends on it. Invariant testing, timing hooks, sub-step observability, and multi-strategy composition all require a pipeline with named steps and a hook mechanism. The current state machine in `LandFirstDevelopment` has no step identity and can't be hooked without modification.
 
@@ -80,7 +84,7 @@ export function* cityPipeline(map, archetype) {
 
 ---
 
-## Step 2: Pipeline Invariant Testing
+## ✅ Step 2: Pipeline Invariant Testing
 
 **Why now:** The main deliverable this infrastructure was built for. With named steps and hooks, invariant checking drops in as a hook without touching pipeline code.
 
@@ -151,7 +155,7 @@ describe('pipeline invariants', () => {
 
 ---
 
-## Step 3: Zone Re-extraction Feedback Loop
+## ✅ Step 3: Zone Re-extraction Feedback Loop
 
 **Why:** The wiki (`city-growth-model.md`) is explicit: after skeleton roads are placed, zone boundary roads should be added along zone edges, then zones re-extracted. The new secondary roads split large zones into finer parcels. Currently zones are extracted once (tick 3) and never updated.
 
@@ -178,7 +182,7 @@ With graph faces, re-extraction is correct automatically — adding zone boundar
 
 ---
 
-## Step 4: Street Connectivity
+## ✅ Step 4: Street Connectivity
 
 **Why:** From `urban-economics-and-connectivity.md` — cross streets within zones don't form proper T-junctions in the graph. Individual ribbon streets are disconnected from each other. After `connectToNetwork`, zone spines connect to skeleton but individual parallel streets may not.
 
@@ -200,7 +204,7 @@ Add as an invariant check (step 2 above): `allLocalRoadsReachSkeleton`.
 
 ---
 
-## Step 5: Terrain Face Streets
+## ✅ Step 5: Terrain Face Streets
 
 **Why:** From `wiki/pages/terrain-face-streets.md` — the current ribbon layout picks one orientation per zone (slope direction or nucleus direction). On zones with varying terrain — a mix of slope directions, ridges, valleys — this produces inconsistent streets.
 
@@ -221,7 +225,7 @@ Add as an invariant check (step 2 above): `allLocalRoadsReachSkeleton`.
 
 ---
 
-## Step 6: Generator Growth Strategies
+## ✅ Step 6: Generator Growth Strategies
 
 **Why:** From `pipeline-abstraction.md` — the growth tick is currently one monolithic function in `growthTick.js`. Converting it to a generator unlocks: sub-step observability (inspect state between influence and allocation), sub-step invariant checks, and eventually the planned/haussmann growth strategies.
 
@@ -250,7 +254,7 @@ This unlocks: stopping the pipeline at `growth-3:influence` to inspect value lay
 
 ---
 
-## Step 7: Update Stale Documentation
+## ✅ Step 7: Update Stale Documentation
 
 Several docs describe the old state:
 

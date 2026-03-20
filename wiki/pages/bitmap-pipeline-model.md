@@ -24,8 +24,7 @@ Computed once during setup or early pipeline stages. Don't change after creation
 | waterType | setupCity | uint8 | Categorical: sea/lake/river/land |
 | waterDist | setupCity | float32 | Distance from land to water |
 | waterDepth | setupCity | float32 | Distance from shore into water |
-| buildability | setupCity | float32 | 0-1 suitability for building |
-| terrainSuitability | setupCity | float32 | Pure terrain assessment (slope + elevation) |
+| terrainSuitability | setupCity | float32 | 0-1 terrain suitability (slope + elevation); replaces old buildability layer |
 
 ### Derived Layers
 

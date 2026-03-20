@@ -1,6 +1,6 @@
 # Architectural Discussion: Unified Feature Map
 
-## Status: Proposal (not implemented)
+## Status: Implemented (pipeline refactor complete — layer bag, RoadNetwork, FeatureMap cleaned)
 
 ## The Problem
 

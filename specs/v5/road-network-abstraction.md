@@ -1,6 +1,6 @@
 # Road Network Abstraction
 
-## Status: Proposal (not implemented)
+## Status: Implemented (pipeline refactor complete)
 
 ## Problem Statement
 
