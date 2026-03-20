@@ -8,6 +8,7 @@ import {
   computeRibbonOrientation, layoutRibbonStreets, adjustStreetToContour,
   CONTOUR_SLOPE_THRESHOLD,
 } from '../ribbonLayout.js';
+import { segmentZoneIntoFaces } from './segmentTerrainFaces.js';
 
 const MIN_CLIP_SEGMENT = 20; // meters
 const CLIP_SAMPLE_STEP = 2;  // meters
@@ -21,19 +22,28 @@ export function layoutRibbons(map) {
   if (!zones || zones.length === 0) return map;
 
   for (const zone of zones) {
-    const nucleus = map.nuclei[zone.nucleusIdx];
-    const direction = computeRibbonOrientation(zone, nucleus, map.cellSize);
+    // Step 5: Terrain face segmentation.
+    // Split the zone into terrain faces (consistent slope direction/steepness) and
+    // lay out ribbons per face. Falls back to [zone] if elevation is unavailable.
+    const faces = segmentZoneIntoFaces(zone, map);
+
+    const allClippedParallel = [];
+    const allClippedCross = [];
+
+    for (const face of faces) {
+    const nucleus = map.nuclei[face.nucleusIdx ?? zone.nucleusIdx];
+    const direction = computeRibbonOrientation(face, nucleus, map.cellSize);
 
     const streets = layoutRibbonStreets(
-      zone, direction, map.cellSize, map.originX, map.originZ
+      face, direction, map.cellSize, map.originX, map.originZ
     );
 
-    // Contour adjustment for sloped zones
-    if (zone.avgSlope > CONTOUR_SLOPE_THRESHOLD) {
+    // Contour adjustment for sloped faces
+    if (face.avgSlope > CONTOUR_SLOPE_THRESHOLD) {
       const elevation = map.hasLayer ? map.getLayer('elevation') : map.elevation;
       for (let i = 0; i < streets.parallel.length; i++) {
         streets.parallel[i] = adjustStreetToContour(
-          streets.parallel[i], elevation, zone.slopeDir,
+          streets.parallel[i], elevation, face.slopeDir,
           map.cellSize, map.originX, map.originZ
         );
       }
@@ -52,7 +62,6 @@ export function layoutRibbons(map) {
     }
 
     // Add parallel streets and track their graph edge IDs for T-junction splitting.
-    // Only the parallel streets of THIS zone need to be split at cross endpoints.
     const parallelEdgesBeforeAdd = new Set(map.graph ? [...map.graph.edges.keys()] : []);
     for (const st of clippedParallel) {
       if (st.length < 2) continue;
@@ -67,18 +76,19 @@ export function layoutRibbons(map) {
       _addRoad(map, st, 'local', 6);
     }
 
-    // Store on zone for building placement and connection phase
-    zone._spine = streets.spine;
-    zone._streets = clippedParallel;
-    zone._crossStreets = clippedCross;
-    zone._spacing = streets.spacing;
-
-    // Step 4a: T-junction splitting.
-    // Cross street endpoints land in the middle of parallel street edges,
-    // but the graph only has nodes at endpoints — no junction exists.
-    // Only scan the parallel edges from THIS zone (not the full graph),
-    // since cross streets can only T into the parallels they were generated from.
+    // Step 4a: T-junction splitting (scoped to this face's parallel edges).
     _splitTJunctions(map, clippedCross, parallelEdgeIds);
+
+    // Store the first face's spine on the zone for connectToNetwork
+    if (!zone._spine && streets.spine) zone._spine = streets.spine;
+    allClippedParallel.push(...clippedParallel);
+    allClippedCross.push(...clippedCross);
+    } // end for face
+
+    // Store on zone for building placement and connection phase
+    zone._streets = allClippedParallel;
+    zone._crossStreets = allClippedCross;
+    zone._spacing = null; // spacing varies per face
   }
 
   return map;
@@ -171,7 +181,7 @@ function _clipStreetToGrid(street, map) {
   const waterMask = map.getLayer('waterMask');
   const cs = map.cellSize;
   const ox = map.originX, oz = map.originZ;
-  const roadHalf = 3;
+  const roadHalf = 6; // metres — buffer around existing roads; ceil(6/5)=2 cells
 
   // Densify into evenly spaced samples
   const samples = [];
