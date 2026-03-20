@@ -24,8 +24,9 @@ import { computeRibbonOrientation, adjustStreetToContour, CONTOUR_SLOPE_THRESHOL
 import { ribbonSpacingForPressure } from '../src/city/developmentPressure.js';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { execSync } from 'child_process';
+import { runToStep } from './pipeline-utils.js';
 
-const seed = parseInt(process.argv[2]) || 884469;
+const seed = parseInt(process.argv[2]) || 42;
 const gx = parseInt(process.argv[3]) || 27;
 const gz = parseInt(process.argv[4]) || 95;
 const outDir = process.argv[5] || 'experiments/007c-output';
@@ -43,7 +44,7 @@ const map = setupCity(layers, settlement, rng.fork('city'));
 const strategy = new LandFirstDevelopment(map, { archetype: ARCHETYPES.marketTown });
 
 // Run through tick 4 (spatial layers)
-for (let i = 0; i < 4; i++) strategy.tick();
+runToStep(strategy, 'spatial');
 
 // Add zone boundary roads + subdivide
 createZoneBoundaryRoads(map);

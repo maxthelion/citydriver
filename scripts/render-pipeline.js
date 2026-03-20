@@ -131,14 +131,17 @@ if (hasFlag('list-layers')) {
 const seed = parseInt(getArg('seed', '884469'));
 const gxArg = parseInt(getArg('gx', '27'));
 const gzArg = parseInt(getArg('gz', '95'));
-const maxTicks = parseInt(getArg('ticks', '28'));
+// --step: named pipeline step to stop after (e.g. 'spatial', 'growth-3:roads', 'connect')
+// --ticks: legacy raw step count (kept for backward compat; ignored if --step is given)
+const stopStep = getArg('step', null);
+const maxTicks = stopStep ? Infinity : parseInt(getArg('ticks', '50'));
 const outDir = getArg('out', 'output');
 const archetypeName = getArg('archetype', 'marketTown');
 const layerNames = (getArg('layers', 'reservations')).split(',').map(s => s.trim());
 
 if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
-console.log(`Pipeline: seed=${seed} gx=${gxArg} gz=${gzArg} ticks=${maxTicks} archetype=${archetypeName}`);
+console.log(`Pipeline: seed=${seed} gx=${gxArg} gz=${gzArg} stop=${stopStep ?? `tick ${maxTicks}`} archetype=${archetypeName}`);
 console.log(`Layers: ${layerNames.join(', ')}`);
 console.log(`Output: ${outDir}/`);
 
@@ -152,7 +155,7 @@ const archetype = ARCHETYPES[archetypeName];
 if (!archetype) { console.error(`Unknown archetype: ${archetypeName}`); process.exit(1); }
 const strategy = new LandFirstDevelopment(map, { archetype });
 
-// Snapshot skeleton roads after tick 4
+// Snapshot skeleton roads (taken right after the skeleton step)
 let skeletonRoadSnapshot = null;
 
 let tick = 0;
@@ -160,9 +163,10 @@ while (tick < maxTicks) {
   const t0 = performance.now();
   const more = strategy.tick();
   tick++;
-  console.log(`  tick ${tick}: ${(performance.now() - t0).toFixed(0)}ms${more ? '' : ' (done)'}`);
+  const stepId = strategy.runner.currentStep;
+  console.log(`  ${stepId} (${tick}): ${(performance.now() - t0).toFixed(0)}ms${more ? '' : ' (done)'}`);
 
-  if (tick === 4 && !skeletonRoadSnapshot) {
+  if (stepId === 'skeleton' && !skeletonRoadSnapshot) {
     const rg = map.hasLayer('roadGrid') ? map.getLayer('roadGrid') : null;
     if (rg) {
       skeletonRoadSnapshot = new Uint8Array(rg.data.length);
@@ -170,9 +174,10 @@ while (tick < maxTicks) {
     }
   }
 
+  if (stopStep && stepId === stopStep) break;
   if (!more) break;
 }
-console.log(`Completed ${tick} ticks\n`);
+console.log(`Completed at: ${strategy.runner.currentStep ?? 'done'}\n`);
 
 // ── Render requested layers ─────────────────────────────────────────
 const w = map.width, h = map.height;
