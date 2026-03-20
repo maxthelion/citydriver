@@ -1,0 +1,20 @@
+{
+  "experiment": "007s8",
+  "generated": "2026-03-20T17:23:36.032Z",
+  "seeds": [
+    "42"
+  ],
+  "layers": null,
+  "archetype": null,
+  "ticks": null,
+  "script": "render-ribbon-overlay-v5.js",
+  "images": [
+    {
+      "file": "ribbon-zone-zoomed-seed42.png",
+      "path": "007s8-output/ribbon-zone-zoomed-seed42.png",
+      "layer": "ribbon-zone-zoomed",
+      "seed": "42",
+      "tick": null
+    }
+  ]
+}

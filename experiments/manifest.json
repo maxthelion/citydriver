@@ -373,6 +373,19 @@
     ]
   },
   {
+    "num": "007k4",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "007k4-output/ribbon-zone-zoomed-seed42.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "42",
+        "tick": null
+      }
+    ]
+  },
+  {
     "num": "007l",
     "slug": "road-blend",
     "md": "007l-road-blend.md",
@@ -581,6 +594,19 @@
         "path": "007s7-output/ribbon-zone-zoomed-seed884469.png",
         "layer": "ribbon-zone-zoomed",
         "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "007s8",
+    "slug": "straightness-repro",
+    "md": "007s8-straightness-repro.md",
+    "images": [
+      {
+        "path": "007s8-output/ribbon-zone-zoomed-seed42.png",
+        "layer": "ribbon-zone-zoomed",
+        "seed": "42",
         "tick": null
       }
     ]
