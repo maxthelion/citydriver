@@ -24,7 +24,6 @@ import { setupCity } from '../src/city/setup.js';
 import { LandFirstDevelopment } from '../src/city/strategies/landFirstDevelopment.js';
 import { ARCHETYPES } from '../src/city/archetypes.js';
 import { SeededRandom } from '../src/core/rng.js';
-import { createZoneBoundaryRoads } from '../src/city/pipeline/zoneBoundaryRoads.js';
 import { subdivideLargeZones } from '../src/city/pipeline/subdivideZones.js';
 import { extractZones } from '../src/city/pipeline/extractZones.js';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
@@ -46,9 +45,11 @@ const map = setupCity(layers, settlement, rng.fork('city'));
 const strategy = new LandFirstDevelopment(map, { archetype: ARCHETYPES.marketTown });
 runToStep(strategy, 'spatial');
 
-createZoneBoundaryRoads(map);
+// Pipeline already runs zone-boundary + zones-refine. Only subdivide large zones
+// (which cuts interior roads) and re-extract using flood-fill so the new road
+// barriers are respected.
 subdivideLargeZones(map);
-extractZones(map);
+extractZones(map, { forceFloodFill: true });
 
 const zones = map.developmentZones;
 const W = map.width, H = map.height;

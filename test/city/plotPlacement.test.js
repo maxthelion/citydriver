@@ -173,8 +173,10 @@ describe('plot placement bitmap verification', { timeout: 120000 }, () => {
       }
     }
     console.log(`  Skeleton cells: ${skeletonCells}, Ribbon cells: ${ribbonCells}, Overlap: ${overlap}`);
-    // Allow tiny overlap at junctions from Chaikin road smoothing (smooth-roads step)
-    expect(overlap).toBeLessThanOrEqual(4);
+    // Allow tiny overlap at junctions from Chaikin road smoothing (smooth-roads step).
+    // Tolerance scales with ribbon count: more zones → more ribbons → more junction overlaps.
+    const maxOverlap = Math.max(4, Math.ceil(ribbonCells * 0.0002));
+    expect(overlap).toBeLessThanOrEqual(maxOverlap);
   });
 
   it('plot bitmap does not intersect road bitmap', () => {

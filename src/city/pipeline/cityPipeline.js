@@ -53,9 +53,12 @@ export function* cityPipeline(map, archetype) {
   yield step('zones',         () => extractZones(map));
   let zoneBoundaryResult;
   yield step('zone-boundary', () => { zoneBoundaryResult = createZoneBoundaryRoads(map); });
-  // Only re-extract if zone-boundary actually added roads (otherwise zones are unchanged)
+  // Only re-extract if zone-boundary actually added roads (otherwise zones are unchanged).
+  // Force flood-fill: zone-boundary roads are stamped on roadGrid, so flood-fill
+  // naturally uses them as barriers. The graph typically has dangling edges from
+  // clipped boundary segments, making facesWithEdges() unreliable for re-extraction.
   if (zoneBoundaryResult?.segmentsAdded > 0) {
-    yield step('zones-refine', () => extractZones(map));
+    yield step('zones-refine', () => extractZones(map, { forceFloodFill: true }));
   }
   yield step('spatial',       () => computeSpatialLayers(map));
 

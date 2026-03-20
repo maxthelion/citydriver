@@ -187,12 +187,19 @@ function extractBlocksFromGraph(map) {
 
 /**
  * @param {object} map - FeatureMap with getLayer/setLayer, nuclei, graph
+ * @param {object} [options]
+ * @param {boolean} [options.forceFloodFill=false] - Skip graph-based extraction
+ *   and use bitmap flood-fill. Use this for zones-refine: zone-boundary roads
+ *   are stamped on roadGrid, so flood-fill naturally uses them as barriers,
+ *   while the graph may have too many dangling edges to form proper faces.
  * @returns {object} map (for chaining)
  */
-export function extractZones(map) {
+export function extractZones(map, options = {}) {
+  const { forceFloodFill = false } = options;
+
   // Prefer graph-based extraction (Phase 5); fall back to bitmap if no graph
   let zones = null;
-  if (map.graph && map.graph.edges.size > 0 && map.nuclei && map.nuclei.length > 0) {
+  if (!forceFloodFill && map.graph && map.graph.edges.size > 0 && map.nuclei && map.nuclei.length > 0) {
     zones = extractBlocksFromGraph(map);
   }
   if (!zones) {
