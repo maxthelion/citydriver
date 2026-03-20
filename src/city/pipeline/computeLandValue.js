@@ -33,25 +33,45 @@ export function computeLandValue(map) {
   const terrainSuitability = map.hasLayer('terrainSuitability')
     ? map.getLayer('terrainSuitability') : null;
 
-  // Pre-compute local flatness: average slope in a radius around each cell
+  // Pre-compute local flatness: average slope in a radius around each cell.
+  // Separated two-pass box blur: horizontal then vertical.
+  // O(n × 2r) instead of O(n × (2r+1)²) — ~3.5× faster for r=3.
   const flatnessR = Math.max(1, Math.round(LV_FLATNESS_RADIUS_M / cs));
   const kernelSize = (2 * flatnessR + 1);
-  console.log(`[computeLandValue] flatness radius=${flatnessR} cells (${kernelSize}×${kernelSize} kernel, ${w*h*kernelSize*kernelSize} ops)`);
+  console.log(`[computeLandValue] flatness radius=${flatnessR} cells (${kernelSize}×${kernelSize} kernel, separated ${2*w*h*kernelSize} ops)`);
   const flatness = new Float32Array(w * h);
   if (slope) {
+    const tmp = new Float32Array(w * h);
+
+    // Horizontal pass: for each cell, average slope over gx ± r
     for (let gz = 0; gz < h; gz++) {
+      // Build prefix sum along this row
+      let sum = 0;
+      const rowPrefix = new Float64Array(w + 1);
       for (let gx = 0; gx < w; gx++) {
-        let sum = 0, count = 0;
-        const r = flatnessR;
-        const gxMin = Math.max(0, gx - r), gxMax = Math.min(w - 1, gx + r);
-        const gzMin = Math.max(0, gz - r), gzMax = Math.min(h - 1, gz + r);
-        for (let nz = gzMin; nz <= gzMax; nz++) {
-          for (let nx = gxMin; nx <= gxMax; nx++) {
-            sum += slope.get(nx, nz);
-            count++;
-          }
-        }
-        const avgSlope = sum / count;
+        sum += slope.get(gx, gz);
+        rowPrefix[gx + 1] = sum;
+      }
+      for (let gx = 0; gx < w; gx++) {
+        const lo = Math.max(0, gx - flatnessR);
+        const hi = Math.min(w - 1, gx + flatnessR);
+        tmp[gz * w + gx] = (rowPrefix[hi + 1] - rowPrefix[lo]) / (hi - lo + 1);
+      }
+    }
+
+    // Vertical pass: for each cell, average tmp[] values over gz ± r
+    for (let gx = 0; gx < w; gx++) {
+      // Build prefix sum along this column
+      let colSum = 0;
+      const colPrefix = new Float64Array(h + 1);
+      for (let gz = 0; gz < h; gz++) {
+        colSum += tmp[gz * w + gx];
+        colPrefix[gz + 1] = colSum;
+      }
+      for (let gz = 0; gz < h; gz++) {
+        const lo = Math.max(0, gz - flatnessR);
+        const hi = Math.min(h - 1, gz + flatnessR);
+        const avgSlope = (colPrefix[hi + 1] - colPrefix[lo]) / (hi - lo + 1);
         flatness[gz * w + gx] = 1.0 - Math.min(1, avgSlope / LV_FLATNESS_MAX_SLOPE);
       }
     }

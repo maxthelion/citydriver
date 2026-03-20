@@ -44,8 +44,12 @@ export function* cityPipeline(map, archetype) {
   // Then zone boundary roads split large faces into finer parcels.
   // Second extraction: re-run so graph faces reflect the new secondary roads.
   yield step('zones',         () => extractZones(map));
-  yield step('zone-boundary', () => createZoneBoundaryRoads(map));
-  yield step('zones-refine',  () => extractZones(map));
+  let zoneBoundaryResult;
+  yield step('zone-boundary', () => { zoneBoundaryResult = createZoneBoundaryRoads(map); });
+  // Only re-extract if zone-boundary actually added roads (otherwise zones are unchanged)
+  if (zoneBoundaryResult?.segmentsAdded > 0) {
+    yield step('zones-refine', () => extractZones(map));
+  }
   yield step('spatial',       () => computeSpatialLayers(map));
 
   if (archetype && archetype.growth) {

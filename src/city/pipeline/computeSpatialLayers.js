@@ -62,22 +62,41 @@ export function computeSpatialLayers(map) {
   map.setLayer('edgeness', edgeness);
 
   // --- Road Frontage ---
+  // Separated two-pass box blur: horizontal then vertical.
+  // O(n × 2r) instead of O(n × (2r+1)²) — resolves the 3.3× spatial variance.
   const roadFrontage = new Grid2D(width, height, opts);
   if (roadGrid) {
     const r = ROAD_BLUR_RADIUS;
-    let maxVal = 0;
+    const tmp = new Float32Array(width * height);
+
+    // Horizontal pass with prefix sums
     for (let gz = 0; gz < height; gz++) {
+      let rowSum = 0;
+      const rowPrefix = new Float64Array(width + 1);
       for (let gx = 0; gx < width; gx++) {
-        let sum = 0;
-        const x0 = Math.max(0, gx - r), x1 = Math.min(width - 1, gx + r);
-        const z0 = Math.max(0, gz - r), z1 = Math.min(height - 1, gz + r);
-        for (let nz = z0; nz <= z1; nz++) {
-          for (let nx = x0; nx <= x1; nx++) {
-            sum += roadGrid.get(nx, nz);
-          }
-        }
-        roadFrontage.set(gx, gz, sum);
-        if (sum > maxVal) maxVal = sum;
+        rowSum += roadGrid.get(gx, gz);
+        rowPrefix[gx + 1] = rowSum;
+      }
+      for (let gx = 0; gx < width; gx++) {
+        const lo = Math.max(0, gx - r), hi = Math.min(width - 1, gx + r);
+        tmp[gz * width + gx] = (rowPrefix[hi + 1] - rowPrefix[lo]) / (hi - lo + 1);
+      }
+    }
+
+    // Vertical pass with prefix sums + normalise
+    let maxVal = 0;
+    for (let gx = 0; gx < width; gx++) {
+      let colSum = 0;
+      const colPrefix = new Float64Array(height + 1);
+      for (let gz = 0; gz < height; gz++) {
+        colSum += tmp[gz * width + gx];
+        colPrefix[gz + 1] = colSum;
+      }
+      for (let gz = 0; gz < height; gz++) {
+        const lo = Math.max(0, gz - r), hi = Math.min(height - 1, gz + r);
+        const v = (colPrefix[hi + 1] - colPrefix[lo]) / (hi - lo + 1);
+        roadFrontage.set(gx, gz, v);
+        if (v > maxVal) maxVal = v;
       }
     }
     if (maxVal > 0) {
