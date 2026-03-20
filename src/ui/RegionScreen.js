@@ -175,16 +175,36 @@ export class RegionScreen {
     archRow.appendChild(this._archetypeSelect);
     this._controlPanel.appendChild(archRow);
 
-    // Tick input
-    const { row: tickRow } = makeRow('Tick');
-    this._tickInput = document.createElement('input');
-    this._tickInput.type = 'number';
-    this._tickInput.min = '0';
-    this._tickInput.max = '20';
-    this._tickInput.value = '5';
-    this._tickInput.style.cssText = selectStyle;
-    tickRow.appendChild(this._tickInput);
-    this._controlPanel.appendChild(tickRow);
+    // Stop-after dropdown
+    const { row: stepRow } = makeRow('Stop after');
+    this._stepSelect = document.createElement('select');
+    this._stepSelect.style.cssText = selectStyle;
+    [
+      { value: 'complete', label: 'Complete (all growth)' },
+      { value: 'spatial',  label: 'Spatial layers (before growth)' },
+      { value: 'growth',   label: 'After N growth ticks →' },
+      { value: 'zones',    label: 'Zone extraction' },
+      { value: 'skeleton', label: 'Skeleton roads only' },
+    ].forEach(({ value, label }) => {
+      const opt = document.createElement('option');
+      opt.value = value; opt.textContent = label;
+      this._stepSelect.appendChild(opt);
+    });
+    this._stepSelect.addEventListener('change', () => this._onStepChange());
+    stepRow.appendChild(this._stepSelect);
+    this._controlPanel.appendChild(stepRow);
+
+    // Growth-ticks spinner (only shown when stop-after = 'growth')
+    const { row: growthRow } = makeRow('Growth ticks');
+    this._growthRow = growthRow;
+    this._growthInput = document.createElement('input');
+    this._growthInput.type = 'number';
+    this._growthInput.min = '1';
+    this._growthInput.max = '20';
+    this._growthInput.value = '5';
+    this._growthInput.style.cssText = selectStyle;
+    growthRow.appendChild(this._growthInput);
+    this._controlPanel.appendChild(growthRow);
 
     // Debug Layer dropdown (only shown for debug / compare modes)
     const { row: lensRow } = makeRow('Debug Layer');
@@ -205,8 +225,9 @@ export class RegionScreen {
     this._goBtn.style.cssText = this._goBtn.style.cssText + ';background:#335;border-color:#557;margin-top:4px';
     this._controlPanel.appendChild(this._goBtn);
 
-    // Apply initial mode visibility
+    // Apply initial mode/step visibility
     this._onModeChange();
+    this._onStepChange();
 
     // Score panel
     this._scorePanel = createScorePanel();
@@ -216,22 +237,35 @@ export class RegionScreen {
     rightPanel.appendChild(this._scorePanel);
   }
 
-  /** Toggle lens row visibility based on selected mode. */
+  /** Toggle lens/growth row visibility based on selected mode/step. */
   _onModeChange() {
     const mode = this._modeSelect ? this._modeSelect.value : 'city';
     const needsLens = mode === 'debug' || mode === 'compare-archetypes';
     this._lensRow.style.display = needsLens ? 'flex' : 'none';
+    // City mode doesn't need the stop-after controls at all
+    const needsStep = mode !== 'city';
+    if (this._stepSelect) {
+      this._stepSelect.closest('div').style.display = needsStep ? 'flex' : 'none';
+      this._onStepChange();
+    }
+  }
+
+  /** Toggle growth-ticks row based on selected stop-after value. */
+  _onStepChange() {
+    const step = this._stepSelect ? this._stepSelect.value : 'complete';
+    this._growthRow.style.display = step === 'growth' ? 'flex' : 'none';
   }
 
   /** Called when the Go button is clicked. */
   _onGo() {
     if (!this._layers || !this._selectedSettlement) return;
-    const mode = this._modeSelect.value;
+    const mode     = this._modeSelect.value;
     const archetype = this._archetypeSelect.value;
-    const tick = parseInt(this._tickInput.value) || 0;
-    const lens = this._lensSelect.value;
+    const step     = this._stepSelect ? this._stepSelect.value : 'complete';
+    const growth   = step === 'growth' ? (parseInt(this._growthInput.value) || 5) : 0;
+    const lens     = this._lensSelect.value;
 
-    const opts = { archetype, tick, lens };
+    const opts = { archetype, step: step === 'complete' ? null : step, growth, lens };
 
     // Use unified onGo if provided, otherwise fall back to legacy callbacks
     if (this.onGo) {

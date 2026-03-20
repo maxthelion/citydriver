@@ -37,10 +37,11 @@ function goBack() {
 
 function enterSubScreen(mode, layers, settlement, seed, opts = {}) {
   disposeAll();
-  const { archetype, tick, lens } = opts;
+  const { archetype, step, growth, lens } = opts;
   let url = `?seed=${seed}&mode=${mode}&gx=${settlement.gx}&gz=${settlement.gz}`;
   if (archetype && archetype !== 'auto') url += `&archetype=${archetype}`;
-  if (tick != null && tick !== 0) url += `&tick=${tick}`;
+  if (step) url += `&step=${step}`;
+  if (step === 'growth' && growth) url += `&growth=${growth}`;
   if (lens && (mode === 'debug' || mode === 'compare-archetypes')) url += `&lens=${lens}`;
   history.pushState(null, '', url);
 

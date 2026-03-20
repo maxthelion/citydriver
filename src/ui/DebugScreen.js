@@ -14,10 +14,53 @@ import { LAYERS, layerSlug, layerIndexFromSlug } from '../rendering/debugLayers.
 import { renderMap, drawRivers, drawRoads, drawSettlements } from '../rendering/mapRenderer.js';
 import { SeededRandom } from '../core/rng.js';
 
-const TICK_LABELS = [
-  'setup', 'skeleton', 'land value', 'zones',
-  'spatial layers', 'reservations', 'ribbons', 'connections',
-];
+// ── Pipeline step helpers ─────────────────────────────────────────────────────
+
+/** Human-readable label for a pipeline step ID. */
+function stepToLabel(stepId) {
+  if (!stepId) return 'not started';
+  const labels = {
+    'skeleton': 'Skeleton roads', 'land-value': 'Land value',
+    'zones': 'Zones', 'zone-boundary': 'Zone boundary roads',
+    'zones-refine': 'Zones (refined)', 'spatial': 'Spatial layers',
+    'growth:gpu-init': 'GPU init', 'connect': 'Connect to network',
+  };
+  if (labels[stepId]) return labels[stepId];
+  const m = stepId.match(/^growth-(\d+):(.+)$/);
+  if (m) return `Growth ${m[1]} — ${m[2]}`;
+  return stepId;
+}
+
+/**
+ * Return true when we should stop advancing after running stepId.
+ * targetStep: URL param value ('skeleton','land-value','zones','spatial','growth','connect')
+ * growthCount: number of growth ticks (for targetStep==='growth')
+ */
+function shouldStopAfter(stepId, targetStep, growthCount) {
+  if (!targetStep || targetStep === 'connect') return false; // run to completion
+  if (targetStep === 'skeleton')   return stepId === 'skeleton';
+  if (targetStep === 'land-value') return stepId === 'land-value';
+  if (targetStep === 'zones')      return stepId === 'zones' || stepId === 'zones-refine';
+  if (targetStep === 'spatial')    return stepId === 'spatial';
+  if (targetStep === 'growth') {
+    const m = stepId.match(/^growth-(\d+):roads$/);
+    return m ? parseInt(m[1]) >= growthCount : false;
+  }
+  return false;
+}
+
+/** Convert the current runner step ID back to URL params {step, growth}. */
+function stepIdToParams(stepId) {
+  if (!stepId) return {};
+  if (stepId === 'skeleton')  return { step: 'skeleton' };
+  if (stepId === 'land-value') return { step: 'land-value' };
+  if (['zones', 'zone-boundary', 'zones-refine'].includes(stepId)) return { step: 'zones' };
+  if (['spatial', 'growth:gpu-init'].includes(stepId)) return { step: 'spatial' };
+  const m = stepId.match(/^growth-(\d+):/);
+  if (m) return { step: 'growth', growth: parseInt(m[1]) };
+  if (stepId === 'connect') return { step: 'connect' };
+  return { step: stepId };
+}
 
 const GRID_DIVISIONS = 6; // city split into 6x6 cells
 const DETAIL_SCALE = 4;   // detail view renders at 4x grid resolution
@@ -37,8 +80,24 @@ export class DebugScreen {
     // Read URL params for initial state
     const params = new URLSearchParams(location.search);
     this._initialArchetype = params.get('archetype') || 'auto';
-    this._initialTick = Math.min(7, parseInt(params.get('tick')) || 0);
-    this._initialLens = params.get('lens') || null;
+    this._initialLens      = params.get('lens') || null;
+
+    // Step-based navigation: ?step=spatial or ?step=growth&growth=3
+    // Backward compat: ?tick=N (old raw-count scheme) → approximate step
+    if (params.has('step')) {
+      this._initialStep   = params.get('step');
+      this._initialGrowth = parseInt(params.get('growth')) || 5;
+    } else if (params.has('tick')) {
+      const t = parseInt(params.get('tick')) || 0;
+      if (t <= 0)      { this._initialStep = null;       this._initialGrowth = 0; }
+      else if (t <= 1) { this._initialStep = 'skeleton'; this._initialGrowth = 0; }
+      else if (t <= 3) { this._initialStep = 'zones';    this._initialGrowth = 0; }
+      else if (t <= 6) { this._initialStep = 'spatial';  this._initialGrowth = 0; }
+      else             { this._initialStep = 'growth';   this._initialGrowth = Math.max(1, t - 6); }
+    } else {
+      this._initialStep   = null;
+      this._initialGrowth = 0;
+    }
 
     // Cell detail state
     this._selectedCell = null; // { col, row } or null = overview mode
@@ -139,12 +198,12 @@ export class DebugScreen {
     tickRow.style.cssText = 'display:flex; gap:6px; align-items:center;';
 
     this.tickLabel = document.createElement('span');
-    this.tickLabel.style.cssText = 'font-size:13px; min-width:80px;';
-    this.tickLabel.textContent = 'Tick: -';
+    this.tickLabel.style.cssText = 'font-size:11px; min-width:80px; color:#aaa;';
+    this.tickLabel.textContent = '—';
     tickRow.appendChild(this.tickLabel);
 
     const nextBtn = document.createElement('button');
-    nextBtn.textContent = 'Next Tick';
+    nextBtn.textContent = 'Next Step';
     nextBtn.style.cssText = 'background:#335; color:#eee; border:1px solid #557; padding:4px 10px; cursor:pointer; font-family:monospace;';
     nextBtn.onclick = () => this._nextTick();
     tickRow.appendChild(nextBtn);
@@ -193,7 +252,12 @@ export class DebugScreen {
       url.searchParams.delete('archetype');
       url.searchParams.delete('col');
       url.searchParams.delete('row');
-      url.searchParams.set('tick', this.currentTick);
+      const stepId = this._strategy?.runner?.currentStep;
+      if (stepId) {
+        const { step, growth } = stepIdToParams(stepId);
+        if (step) url.searchParams.set('step', step);
+        if (step === 'growth' && growth) url.searchParams.set('growth', String(growth));
+      }
       url.searchParams.set('lens', layerSlug(LAYERS[this.currentLayerIndex].name));
       location.href = url.toString();
     };
@@ -272,7 +336,7 @@ export class DebugScreen {
 
     this.currentTick = 0;
     this._selectedCell = null;
-    this.tickLabel.textContent = 'Tick: 0 (setup)';
+    this.tickLabel.textContent = '—';
 
     this._updateURL();
 
@@ -281,22 +345,23 @@ export class DebugScreen {
     this._renderMinimap();
     this._render();
 
-    // Auto-advance to URL-requested tick.
-    // Runs as a self-contained async block so GPU steps (if WebGPU is available)
-    // are properly awaited. The outer _generate() stays synchronous so callers
-    // need no changes — the async work fires as a microtask.
-    if (this._initialTick > 0) {
-      const target = this._initialTick;
-      this._initialTick = 0; // only on first generate
+    // Auto-advance to URL-requested step.
+    // Async IIFE so GPU steps are awaited; outer _generate() stays synchronous.
+    if (this._initialStep) {
+      const targetStep   = this._initialStep;
+      const growthCount  = this._initialGrowth;
+      this._initialStep  = null; // only on first generate
       (async () => {
-        for (let i = 0; i < target && this._strategy; i++) {
+        while (this._strategy && !this._strategy.done) {
           const result = this._strategy.tick();
           if (result instanceof Promise) await result;
           this.currentTick++;
+          const stepId = this._strategy.runner.currentStep;
+          this.tickLabel.textContent = stepToLabel(stepId);
+          if (shouldStopAfter(stepId, targetStep, growthCount)) break;
         }
-        const label = TICK_LABELS[this.currentTick] || 'done';
-        this.tickLabel.textContent = `Tick: ${this.currentTick} (${label})`;
         this._updateInfo();
+        this._updateURL();
         this._render();
       })();
     }
@@ -309,9 +374,8 @@ export class DebugScreen {
 
     const handleDone = (more) => {
       this.currentTick++;
-      const label = TICK_LABELS[this.currentTick] || 'done';
-      this.tickLabel.textContent = `Tick: ${this.currentTick} (${label})`;
-      if (!more) this.tickLabel.textContent += ' — complete';
+      const stepId = this._strategy.runner.currentStep;
+      this.tickLabel.textContent = stepToLabel(stepId) + (more ? '' : ' — complete');
       this._updateInfo();
       this._render();
       this._updateURL();
@@ -378,8 +442,18 @@ export class DebugScreen {
       url.searchParams.set('archetype', archVal);
     }
 
-    // Tick
-    url.searchParams.set('tick', this.currentTick);
+    // Step (named, not raw count)
+    const stepId = this._strategy?.runner?.currentStep;
+    if (stepId) {
+      const { step, growth } = stepIdToParams(stepId);
+      if (step) url.searchParams.set('step', step);
+      else url.searchParams.delete('step');
+      if (step === 'growth' && growth) url.searchParams.set('growth', String(growth));
+      else url.searchParams.delete('growth');
+    } else {
+      url.searchParams.delete('step');
+      url.searchParams.delete('growth');
+    }
 
     // Lens
     const currentLayer = LAYERS[this.currentLayerIndex];

@@ -6,11 +6,23 @@ import { SeededRandom } from '../core/rng.js';
 
 const ARCHETYPE_KEYS = Object.keys(ARCHETYPES);
 
-const TICK_LABELS = [
-  'setup', 'skeleton', 'land value', 'zones (coarse)',
-  'zone boundary roads', 'zones (refined)', 'spatial layers',
-  'growth', 'growth', 'growth', 'connections',
-];
+// Human-readable label for a pipeline step ID (same logic as DebugScreen).
+function stepToLabel(stepId) {
+  if (!stepId) return '?';
+  const labels = {
+    'skeleton': 'Skeleton', 'land-value': 'Land value',
+    'zones': 'Zones', 'zone-boundary': 'Zone boundary', 'zones-refine': 'Zones (refined)',
+    'spatial': 'Spatial', 'growth:gpu-init': 'GPU init', 'connect': 'Connect',
+  };
+  if (labels[stepId]) return labels[stepId];
+  const m = stepId.match(/^growth-(\d+):(.+)$/);
+  if (m) return `Growth ${m[1]}:${m[2]}`;
+  return stepId;
+}
+
+// Maximum raw step count to navigate to in the compare view.
+// 7 fixed steps + 20 growth ticks × 5 phases + 1 connect = generous ceiling.
+const MAX_COMPARE_TICKS = 110;
 
 /** Yield to the browser so it can repaint. */
 function yieldFrame() {
@@ -32,7 +44,9 @@ export class CompareArchetypesScreen {
     this.selectedArchetypes = archParam
       ? archParam.split(',').filter(k => ARCHETYPES[k])
       : [...ARCHETYPE_KEYS];
-    this.currentTick = Math.min(10, parseInt(params.get('tick')) || 0);
+    // Support both old ?tick=N and new ?step= params (step is not yet implemented
+    // for CompareArchetypes — currentTick is still a raw step count here).
+    this.currentTick = Math.min(MAX_COMPARE_TICKS, parseInt(params.get('tick')) || 0);
     const lensParam = params.get('lens');
     this.currentLayerIndex = (lensParam && layerIndexFromSlug(lensParam) >= 0)
       ? layerIndexFromSlug(lensParam)
@@ -77,7 +91,7 @@ export class CompareArchetypesScreen {
     const nextBtn = document.createElement('button');
     nextBtn.textContent = '▶';
     nextBtn.style.cssText = 'background:#335; color:#eee; border:1px solid #557; padding:2px 8px; cursor:pointer; font-family:monospace;';
-    nextBtn.onclick = () => this._setTick(Math.min(10, this.currentTick + 1));
+    nextBtn.onclick = () => this._setTick(Math.min(MAX_COMPARE_TICKS, this.currentTick + 1));
     tickRow.appendChild(nextBtn);
     controls.appendChild(tickRow);
 
@@ -143,7 +157,7 @@ export class CompareArchetypesScreen {
 
     // Keyboard shortcut
     this._onKeyDown = (e) => {
-      if (e.key === 'ArrowRight') this._setTick(Math.min(10, this.currentTick + 1));
+      if (e.key === 'ArrowRight') this._setTick(Math.min(MAX_COMPARE_TICKS, this.currentTick + 1));
       if (e.key === 'ArrowLeft') this._setTick(Math.max(0, this.currentTick - 1));
     };
     document.addEventListener('keydown', this._onKeyDown);
@@ -211,11 +225,10 @@ export class CompareArchetypesScreen {
   }
 
   async _generate() {
-    // Ticks 1-4 are archetype-independent (skeleton, land value, zones, spatial layers).
-    // Only tick 5+ (reservations, ribbons, connections) uses the archetype.
-    // Run shared ticks once on the base map, then clone for archetype-specific ticks.
-    const FIRST_ARCHETYPE_TICK = 7; // ticks 1-6 are shared (skeleton→zones-refine→spatial)
-
+    // Steps up to and including 'spatial' + 'growth:gpu-init' are archetype-independent.
+    // We detect this boundary dynamically by running the shared strategy until it reaches
+    // growth:gpu-init, rather than using a hardcoded count (which breaks when
+    // zone-boundary / zones-refine are conditional).
     this._generationId = (this._generationId || 0) + 1;
     const id = this._generationId;
 
@@ -231,24 +244,31 @@ export class CompareArchetypesScreen {
     const baseMap = setupCity(this.layers, this.settlement, rng.fork('city'));
     console.log(`[compare] setupCity: ${(performance.now() - t0).toFixed(0)}ms`);
 
-    // Run shared ticks on the base map
-    const sharedTicks = Math.min(this.currentTick, FIRST_ARCHETYPE_TICK - 1);
+    // Run shared steps on base map until growth:gpu-init (or currentTick, whichever first).
+    // growth:gpu-init is the last step before archetypes diverge.
     const sharedStrategy = new LandFirstDevelopment(baseMap, {});
-    for (let t = 0; t < sharedTicks; t++) {
-      const stepLabel = TICK_LABELS[t + 1] || '?';
-      this._showProgress(`${stepLabel}...`);
+    let sharedCount = 0;
+    while (!sharedStrategy.done && sharedCount < this.currentTick) {
+      const label = sharedStrategy.runner.currentStep
+        ? stepToLabel(sharedStrategy.runner.currentStep)
+        : 'setup';
+      this._showProgress(`${label}…`);
       await yieldFrame();
       if (this._disposed || id !== this._generationId) return;
       t0 = performance.now();
       await Promise.resolve(sharedStrategy.tick());
-      console.log(`[compare] shared tick ${t + 1} (${stepLabel}): ${(performance.now() - t0).toFixed(0)}ms`);
+      const stepId = sharedStrategy.runner.currentStep;
+      console.log(`[compare] shared ${sharedCount + 1} (${stepToLabel(stepId)}): ${(performance.now() - t0).toFixed(0)}ms`);
+      sharedCount++;
+      // Stop sharing when we hit growth:gpu-init — next step diverges by archetype
+      if (stepId === 'growth:gpu-init') break;
     }
 
     // Clone per archetype and run remaining ticks
     for (const key of this.selectedArchetypes) {
       if (this._disposed || id !== this._generationId) return;
 
-      this._showProgress(`${ARCHETYPES[key].name}...`);
+      this._showProgress(`${ARCHETYPES[key].name}…`);
       await yieldFrame();
       if (this._disposed || id !== this._generationId) return;
 
@@ -256,16 +276,20 @@ export class CompareArchetypesScreen {
       const map = baseMap.clone();
       console.log(`[compare] clone for ${key}: ${(performance.now() - t0).toFixed(0)}ms`);
       const strategy = new LandFirstDevelopment(map, { archetype: ARCHETYPES[key] });
-      strategy._tick = sharedTicks;
+      // Skip the shared steps (map state already has their results from the clone)
+      strategy._tick = sharedCount;
 
-      for (let t = sharedTicks; t < this.currentTick; t++) {
-        const stepLabel = TICK_LABELS[t + 1] || '?';
-        this._showProgress(`${ARCHETYPES[key].name}: ${stepLabel}...`);
+      for (let t = sharedCount; t < this.currentTick; t++) {
+        const label = strategy.runner.currentStep
+          ? stepToLabel(strategy.runner.currentStep)
+          : '…';
+        this._showProgress(`${ARCHETYPES[key].name}: ${label}…`);
         await yieldFrame();
         if (this._disposed || id !== this._generationId) return;
         t0 = performance.now();
         await Promise.resolve(strategy.tick());
-        console.log(`[compare] ${key} tick ${t + 1} (${stepLabel}): ${(performance.now() - t0).toFixed(0)}ms`);
+        const stepId = strategy.runner.currentStep;
+        console.log(`[compare] ${key} tick ${t + 1} (${stepToLabel(stepId)}): ${(performance.now() - t0).toFixed(0)}ms`);
       }
 
       this.maps[key] = map;
@@ -290,11 +314,10 @@ export class CompareArchetypesScreen {
       console.log(`[compare] _setTick forward: ${this.currentTick} → ${tick}`);
 
       while (this.currentTick < tick) {
-        const nextTick = this.currentTick + 1;
-        const stepLabel = TICK_LABELS[nextTick] || '?';
-
         for (const key of this.selectedArchetypes) {
-          this._showProgress(`${ARCHETYPES[key].name}: ${stepLabel}...`);
+          const stepId = this.strategies[key]?.runner?.currentStep;
+          const label  = stepId ? stepToLabel(stepId) : '…';
+          this._showProgress(`${ARCHETYPES[key].name}: ${label}…`);
           await yieldFrame();
           if (this._disposed || id !== this._generationId) return;
           const t0 = performance.now();
@@ -317,8 +340,12 @@ export class CompareArchetypesScreen {
   }
 
   _updateTickLabel() {
-    const label = TICK_LABELS[this.currentTick] || 'done';
-    this.tickLabel.textContent = `Tick: ${this.currentTick} (${label})`;
+    // Show the step name from whichever strategy ran last, or a raw count fallback.
+    const firstKey = this.selectedArchetypes[0];
+    const strategy = firstKey ? this.strategies[firstKey] : null;
+    const stepId   = strategy?.runner?.currentStep;
+    const label    = stepId ? stepToLabel(stepId) : (this.currentTick === 0 ? 'start' : `step ${this.currentTick}`);
+    this.tickLabel.textContent = label;
   }
 
   _updateURL() {
