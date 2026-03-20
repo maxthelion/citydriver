@@ -289,7 +289,14 @@ export class RoadNetwork {
     const startNode = this.#findOrCreateNode(startPt.x, startPt.z, snapDist);
     const endNode = this.#findOrCreateNode(endPt.x, endPt.z, snapDist);
 
-    if (startNode === endNode) return;
+    if (startNode === endNode) {
+      // Degenerate road: both endpoints snapped to the same node.
+      // If startNode was newly created (degree 0), remove it to avoid orphan.
+      if (this._graph.degree(startNode) === 0) {
+        this._graph.removeNode(startNode);
+      }
+      return;
+    }
 
     // Check if already connected
     const neighbors = this._graph.neighbors(startNode);

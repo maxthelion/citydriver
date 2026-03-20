@@ -7,8 +7,9 @@ import { SeededRandom } from '../core/rng.js';
 const ARCHETYPE_KEYS = Object.keys(ARCHETYPES);
 
 const TICK_LABELS = [
-  'setup', 'skeleton', 'land value', 'zones',
-  'spatial layers', 'reservations', 'ribbons', 'connections',
+  'setup', 'skeleton', 'land value', 'zones (coarse)',
+  'zone boundary roads', 'zones (refined)', 'spatial layers',
+  'growth', 'growth', 'growth', 'connections',
 ];
 
 /** Yield to the browser so it can repaint. */
@@ -31,7 +32,7 @@ export class CompareArchetypesScreen {
     this.selectedArchetypes = archParam
       ? archParam.split(',').filter(k => ARCHETYPES[k])
       : [...ARCHETYPE_KEYS];
-    this.currentTick = Math.min(7, parseInt(params.get('tick')) || 0);
+    this.currentTick = Math.min(10, parseInt(params.get('tick')) || 0);
     const lensParam = params.get('lens');
     this.currentLayerIndex = (lensParam && layerIndexFromSlug(lensParam) >= 0)
       ? layerIndexFromSlug(lensParam)
@@ -76,7 +77,7 @@ export class CompareArchetypesScreen {
     const nextBtn = document.createElement('button');
     nextBtn.textContent = '▶';
     nextBtn.style.cssText = 'background:#335; color:#eee; border:1px solid #557; padding:2px 8px; cursor:pointer; font-family:monospace;';
-    nextBtn.onclick = () => this._setTick(Math.min(7, this.currentTick + 1));
+    nextBtn.onclick = () => this._setTick(Math.min(10, this.currentTick + 1));
     tickRow.appendChild(nextBtn);
     controls.appendChild(tickRow);
 
@@ -142,7 +143,7 @@ export class CompareArchetypesScreen {
 
     // Keyboard shortcut
     this._onKeyDown = (e) => {
-      if (e.key === 'ArrowRight') this._setTick(Math.min(7, this.currentTick + 1));
+      if (e.key === 'ArrowRight') this._setTick(Math.min(10, this.currentTick + 1));
       if (e.key === 'ArrowLeft') this._setTick(Math.max(0, this.currentTick - 1));
     };
     document.addEventListener('keydown', this._onKeyDown);
@@ -213,7 +214,7 @@ export class CompareArchetypesScreen {
     // Ticks 1-4 are archetype-independent (skeleton, land value, zones, spatial layers).
     // Only tick 5+ (reservations, ribbons, connections) uses the archetype.
     // Run shared ticks once on the base map, then clone for archetype-specific ticks.
-    const FIRST_ARCHETYPE_TICK = 5;
+    const FIRST_ARCHETYPE_TICK = 7; // ticks 1-6 are shared (skeleton→zones-refine→spatial)
 
     this._generationId = (this._generationId || 0) + 1;
     const id = this._generationId;

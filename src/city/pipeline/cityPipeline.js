@@ -24,6 +24,7 @@ import { reserveLandUse } from './reserveLandUse.js';
 import { layoutRibbons } from './layoutRibbons.js';
 import { connectToNetwork } from './connectToNetwork.js';
 import { initGrowthState, runGrowthTick } from './growthTick.js';
+import { createZoneBoundaryRoads } from './zoneBoundaryRoads.js';
 
 /**
  * Main city pipeline generator.
@@ -33,10 +34,16 @@ import { initGrowthState, runGrowthTick } from './growthTick.js';
  * @yields {import('./PipelineRunner.js').StepDescriptor}
  */
 export function* cityPipeline(map, archetype) {
-  yield step('skeleton',   () => buildSkeletonRoads(map));
-  yield step('land-value', () => computeLandValue(map));
-  yield step('zones',      () => extractZones(map));
-  yield step('spatial',    () => computeSpatialLayers(map));
+  yield step('skeleton',      () => buildSkeletonRoads(map));
+  yield step('land-value',    () => computeLandValue(map));
+  // Step 3: Zone re-extraction feedback loop (specs/v5/next-steps.md § Step 3)
+  // First extraction: coarse zones from skeleton faces only.
+  // Then zone boundary roads split large faces into finer parcels.
+  // Second extraction: re-run so graph faces reflect the new secondary roads.
+  yield step('zones',         () => extractZones(map));
+  yield step('zone-boundary', () => createZoneBoundaryRoads(map));
+  yield step('zones-refine',  () => extractZones(map));
+  yield step('spatial',       () => computeSpatialLayers(map));
 
   if (archetype && archetype.growth) {
     yield* organicGrowthPipeline(map, archetype);

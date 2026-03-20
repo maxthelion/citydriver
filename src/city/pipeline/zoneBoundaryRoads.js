@@ -148,6 +148,16 @@ export function createZoneBoundaryRoads(map) {
     console.log(`[zoneBoundaryRoads] skeleton-walk merge: ${mergeCount} zone boundary nodes merged onto skeleton`);
   }
 
+  // Clean up any degree-0 nodes left by split+merge operations.
+  if (map.graph) {
+    for (const [id] of [...map.graph.nodes]) {
+      if (map.graph.degree(id) === 0) {
+        map.graph.nodes.delete(id);
+        map.graph._adjacency.delete(id);
+      }
+    }
+  }
+
   const segmentsAdded = map.roads.length - roadsBefore;
   console.log(`[zoneBoundaryRoads] ${candidateBoundaries.length} boundaries → ${segmentsAdded} road segments`);
   return { segmentsAdded };
