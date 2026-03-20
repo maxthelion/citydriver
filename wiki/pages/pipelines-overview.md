@@ -1,111 +1,172 @@
 ---
 title: "Pipelines Overview"
 category: "pipeline"
-tags: [pipeline, regional, city, archetypes, overview]
-summary: "Index of all generation pipelines: regional, city, and per-archetype city growth."
+tags: [pipeline, regional, city, archetypes, overview, generator, hooks]
+summary: "How the regional and city generation pipelines work after the pipeline refactor: generator-based, hook-driven, with named steps at every level."
 last-modified-by: user
 ---
 
 ## Overview
 
-The generator runs two main pipelines in sequence. The **regional pipeline** produces a complete landscape with terrain, rivers, settlements, roads, and railways. The **city pipeline** then zooms into a single settlement, extracts and refines regional features, and grows the city through a series of ticks driven by the settlement's [[city-archetypes|archetype]].
+The generator runs two main pipelines in sequence.
 
-## 1. Regional Pipeline
+1. The **regional pipeline** builds a complete landscape: terrain, rivers, roads, railways, settlements.
+2. The **city pipeline** zooms into one settlement, inherits regional data, and grows the city through a sequence of named steps driven by the settlement's [[city-archetypes|archetype]].
 
-Generates the full regional map from a seed. Each phase enriches a shared LayerStack. Settlements and roads use a feedback loop — roads attract new settlements, which attract more roads.
+Both pipelines produce grids and graph structures. The city pipeline is implemented as a JavaScript generator with a `PipelineRunner` executor — every step has a stable string ID and can be hooked, timed, or inspected individually.
 
-See [[regional-pipeline]] for the full phase-by-phase breakdown, LayerStack contents, and entry point.
+---
 
-| Phase | Detail Page | Summary |
-|-------|------------|---------|
-| A0/A0b | [[regional-pipeline]] | Tectonics + river corridor planning |
-| A1 | [[regional-geology]] | Rock types, erosion resistance, soil fertility |
-| A2 | [[regional-pipeline]] | Terrain from layered noise + geology + corridor depression |
-| A4 | [[regional-coasts]] | Erosion-shaped coastline with bays, headlands, harbours |
-| A3 | [[regional-rivers]] | River networks, valley carving, floodplains |
-| A6 | [[regional-settlements]] | Settlements, farms, market towns (feedback loop with roads) |
-| A7 | [[regional-roads]] | Terrain-aware A* road network (two passes) |
-| A8 | [[regional-railways-pipeline]] | Off-map cities and railway routing with settlement bonus |
+## Regional Pipeline
 
-## 2. City Pipeline
+Generates the full 128×128-cell regional map from a seed. Each phase enriches a shared `LayerStack`. See [[regional-pipeline]] for the full breakdown.
 
-Takes a regional LayerStack and a settlement position, extracts a window of regional data, refines it to city resolution (5m cells), and grows the city through 7 ticks.
+| Phase | Summary |
+|-------|---------|
+| A0/A0b | Tectonic plates + river corridor planning |
+| A2 | Terrain from layered noise + geology + corridor depression |
+| A3 | River networks, valley carving, floodplains |
+| A4 | Coastline erosion (bays, headlands, harbours) |
+| A6 | Settlements, farms, market towns (feedback loop with roads) |
+| A7 | Terrain-aware A* road network |
+| A8 | Off-map cities and railway routing |
 
-The archetype determines how tick 5 (land reservation) allocates land, and in future will control more of the pipeline — see [[archetype-data-model]] for planned extensions.
+---
 
-See [[city-generation-pipeline]] for the full tick sequence.
+## City Pipeline
 
-| Tick | Step | What it produces |
-|------|------|-----------------|
-| 0 | [[city-region-inheritance]] | Inherit terrain, rivers, railways, water from region; refine; place nuclei |
-| 1 | Skeleton roads | Arterial network connecting nuclei via MST + A* |
-| 2 | Land value | Nucleus-aware land value (flatness + proximity + waterfront) |
-| 3 | Development zones | Voronoi + threshold + morphological close + flood-fill |
-| 4 | Spatial layers | Centrality, waterfrontness, edgeness, road frontage, downwindness |
-| 5 | [[land-reservation]] | Archetype-driven land use reservation (commercial, industrial, civic, open space) |
-| 6 | Ribbon layout | Parallel streets within zones, contour-following on slopes |
-| 7 | Network connection | Connect zone spines to skeleton via A* |
+Takes a regional `LayerStack` and a settlement, extracts a 1200×1200-cell window at 5m resolution, and generates the city through a generator-based pipeline.
 
-## 3. City Archetypes
+### Architecture
 
-Each settlement is scored against all archetypes; the best fit is selected. The archetype controls land reservation and will eventually control more pipeline steps.
+```
+LandFirstDevelopment.tick()
+  └── PipelineRunner.advance()
+        └── cityPipeline(map, archetype)  ← generator
+              yields step('skeleton',   fn)
+              yields step('land-value', fn)
+              ...
+              yields* organicGrowthPipeline(map, archetype)
+              yields step('connect',    fn)
+```
 
-See [[city-archetypes]] for the full descriptions and [[archetype-data-model]] for the schema.
+`LandFirstDevelopment` is a thin wrapper — it calls `runner.advance()` once per `tick()`. `cityPipeline` is a generator that yields step descriptors `{ id, fn }`. The runner executes `fn()`, fires hooks, and advances.
 
-| Archetype | Character | Key trait |
-|-----------|-----------|-----------|
-| [[archetype-market-town]] | Medieval organic town | Civic core, commercial along approach roads |
-| [[archetype-port-city]] | Waterfront-driven | Industrial warehouses at harbour, commerce one block back |
-| [[archetype-grid-town]] | Colonial planned grid | Central plaza, regular blocks, railway-era industrial edge |
-| [[archetype-industrial-town]] | Single-industry dominated | Large central works, worker housing clusters around factory |
-| [[archetype-civic-centre]] | Cathedral/university city | Institutional campus at centre, generous open space |
+**Hook system:** attach timing, invariant checks, or bitmap loggers without touching pipeline code:
 
-## 4. Per-Archetype Pipelines
+```js
+strategy.runner.addHook({
+  onAfter(stepId, result, ms) {
+    timingLog.push({ stepId, ms });
+    if (stepId === 'zones') checkInvariants(map);
+  }
+});
+```
 
-Each archetype defines a set of starting variables and eligibility rules that determine which settlements it can apply to, and how the city growth ticks behave.
+### Step Sequence
 
-### [[archetype-market-town]]
+| Step ID | What it does |
+|---------|-------------|
+| `setup` | Region inheritance, terrain refinement, nucleus placement (pre-runner) |
+| `skeleton` | Arterial network via MST + A* pathfinding; writes `roadGrid`, planar graph |
+| `land-value` | Nucleus-aware land value: flatness + proximity + water bonus |
+| `zones` | Extract development zones as **graph faces** (first pass, coarse) |
+| `zone-boundary` | Add collector roads along zone polygons → splits large zones into finer parcels |
+| `zones-refine` | Re-extract zones after new roads; finer faces now visible in graph |
+| `spatial` | Centrality, waterfrontness, edgeness, road frontage, downwindness |
+| `growth-N:influence` | BFS blur reservation → proximity gradients; agriculture retreat |
+| `growth-N:value` | Compose per-agent value bitmaps from spatial + influence layers |
+| `growth-N:ribbons` | Throttled ribbon layout into high-value zones (Phase 2.5) |
+| `growth-N:allocate` | Agent allocation loop (blob / frontage / ribbon allocators) |
+| `growth-N:roads` | Grow roads from ribbon gaps; agriculture fill |
+| `connect` | Connect zone spines to skeleton; full connectivity check |
 
-*Stub — detailed pipeline on the archetypes branch.*
+For archetypes without organic growth config, `growth-N:*` is replaced by `reserve` → `ribbons`.
 
-**Eligibility:** Default fallback; viable for any settlement. Bonus if 'market' nucleus present or 3+ roads converge.
+The growth loop runs N = 1, 2, … until all agent budgets are exhausted or `maxGrowthTicks` is reached.
 
-**Starting variables:** Civic first, commercial follows road frontage. 67% residential remainder. Organic street pattern.
+### Zone Extraction
 
-### [[archetype-port-city]]
+Zones are extracted as **planar graph faces** (`PlanarGraph.facesWithEdges()`), not bitmap flood-fills. Each zone has:
+- `cells` — rasterized grid cells
+- `polygon` / `boundingEdgeIds` / `boundingNodeIds` — topological references
+- `centroid`, `avgSlope`, `slopeDir`, `avgLandValue`
 
-*Stub — detailed pipeline on the archetypes branch.*
+The two-pass extraction (`zones` → `zone-boundary` → `zones-refine`) ensures that zone boundary roads are reflected in the face graph before growth begins.
 
-**Eligibility:** Requires 10%+ waterfront cells in development zones. Scored by waterfront fraction.
+### Terrain Face Streets
 
-**Starting variables:** Industrial claims waterfront first. Directional growth parallel to water edge. Steep density gradient inland.
+Within each zone, `layoutRibbons` calls `segmentZoneIntoFaces` to split the zone into terrain faces (groups of cells with consistent slope direction and steepness). Each face gets its own ribbon orientation. A flat face gets a regular grid; a sloped face gets contour-following streets.
 
-### [[archetype-grid-town]]
+### Street Connectivity
 
-*Stub — detailed pipeline on the archetypes branch.*
+After ribbon layout, two connectivity mechanisms fire:
+1. **T-junction splitting** — cross street endpoints that land on a parallel street edge split that edge, creating a proper graph junction.
+2. **Full connectivity check** (`connectToNetwork`) — disconnected local-road components are connected to the nearest skeleton node via pathfinding.
 
-**Eligibility:** Penalised by terrain variance > 0.04. Needs relatively flat land for regular grid.
+---
 
-**Starting variables:** Civic plaza at centre, commercial main street. Regular block sizes. Railway defines industrial edge.
+## Archetypes
 
-### [[archetype-industrial-town]]
+Each settlement is scored against all archetypes; the best fit is selected. The archetype controls:
+- Growth agent budgets and priorities
+- Ribbon street density
+- Value layer composition weights
+- Whether organic growth or simple reservation runs
 
-*Stub — detailed pipeline on the archetypes branch.*
+| Archetype | Key trait | Growth path |
+|-----------|-----------|-------------|
+| `marketTown` | Medieval organic town | Organic growth (8 ticks) |
+| `portCity` | Waterfront-driven | Simple reservation |
+| `gridTown` | Colonial planned grid | Simple reservation |
+| `industrialTown` | Single-industry dominated | Simple reservation |
+| `civicCentre` | Cathedral/university city | Simple reservation |
 
-**Eligibility:** Benefits from rivers (water power) and flat buildable land.
+Only `marketTown` currently uses the organic growth pipeline. Planned and Haussmann growth strategies are described in [[pipeline-abstraction]] but not yet implemented.
 
-**Starting variables:** Industrial zone is primary (22% of land), not peripheral. Radial growth from works. Minimal open space.
+---
 
-### [[archetype-civic-centre]]
+## Pipeline Integrity
 
-*Stub — detailed pipeline on the archetypes branch.*
+Three layers of invariant checking run as `PipelineRunner` hooks:
 
-**Eligibility:** Favours higher-tier settlements (tier 1-2). Benefits from road count.
+- **Bitmap invariants** — single grid pass after every step: `noRoadOnWater`, `noZoneOnWater`, `noResOutsideZone`, `bridgesOnlyOnWater`
+- **Polyline invariants** — road structure: no degenerate roads, no out-of-bounds points, graph/network agreement, no orphan nodes
+- **Block invariants** — zone structure: no stale edge refs (checked at extraction steps), no cell overlaps
 
-**Starting variables:** Civic 18%, open space 14% — largest non-residential allocation. Industrial minimal (4%) and pushed far downwind.
+See [[pipeline-invariant-tests]] for the integration test suite.
 
-## 5. Pipeline Integrity
+---
 
-The pipeline produces multiple grid layers that must maintain invariant relationships — water cells can't be road cells, buildings can't sit on railways, etc.
+## Benchmarking
 
-See [[bitmap-invariants]] for the full list of layer relationships, and [[pipeline-invariant-tests]] for the integration test strategy that checks these at every pipeline step across multiple seeds.
+The pipeline exposes per-step timing via hooks. `scripts/benchmark-pipeline.js` runs many cities and aggregates per-step statistics:
+
+```bash
+# All settlements, auto-select archetype
+bun scripts/benchmark-pipeline.js --seeds 42,100,255,999
+
+# Force organic growth path for all cities
+bun scripts/benchmark-pipeline.js --seeds 42,100,255 --archetype marketTown
+
+# Measure only skeleton step
+bun scripts/benchmark-pipeline.js --seeds $(seq -s, 1 20) --stop-after skeleton
+```
+
+Output: per-city timings + aggregate (mean/p50/p95/p99/max) per step, plus growth phase totals across all ticks. See [[pipeline-performance]] for interpretation.
+
+---
+
+## Related Docs
+
+| Doc | Content |
+|-----|---------|
+| [[city-generation-pipeline]] | Detailed step-by-step description of the city pipeline |
+| [[pipeline-abstraction]] | PipelineRunner design, generator composition, strategy registry |
+| [[pipeline-invariant-tests]] | Integration test strategy for bitmap/polyline/block invariants |
+| [[pipeline-performance]] | Benchmark script, how to read results, what to look for |
+| [[pipeline-observability]] | Hook-based bitmap tracing and comparative views |
+| [[regional-pipeline]] | Regional pipeline phase-by-phase breakdown |
+| [[land-reservation]] | Detailed doc on organic growth agent allocation |
+| [[terrain-face-streets]] | Per-face ribbon layout algorithm |
+| [[city-archetypes]] | Archetype descriptions and selection criteria |
