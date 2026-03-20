@@ -27,8 +27,20 @@ export class PipelineRunner {
   }
 
   /**
-   * Advance by one step. Returns true if more steps remain.
-   * @returns {boolean}
+   * Advance by one step.
+   *
+   * Returns `true` (boolean) when the step function is synchronous, or a
+   * `Promise<true>` when the step function is async.  In both cases a falsy
+   * value (false) means the pipeline is complete.
+   *
+   * Callers that only run in non-GPU environments (Node.js, tests) always
+   * receive a plain boolean and need no changes.  GPU-aware callers must
+   * handle the Promise case:
+   *
+   *   const result = runner.advance();
+   *   const more = (result instanceof Promise) ? await result : result;
+   *
+   * @returns {boolean | Promise<boolean>}
    */
   advance() {
     if (this._done) return false;
@@ -37,21 +49,40 @@ export class PipelineRunner {
     if (done) { this._done = true; return false; }
 
     this.currentStep = descriptor.id;
-
     const t0 = performance.now();
     for (const h of this.hooks) h.onBefore?.(descriptor.id);
 
-    this._lastResult = descriptor.fn();
+    const result = descriptor.fn();
 
+    if (result instanceof Promise) {
+      // Async step function (e.g. GPU compute) — return a Promise that resolves
+      // to true once the step has finished, preserving the hook contract.
+      return result.then(res => {
+        this._lastResult = res;
+        const ms = performance.now() - t0;
+        for (const h of this.hooks) h.onAfter?.(descriptor.id, this._lastResult, ms);
+        return true;
+      });
+    }
+
+    // Synchronous path — unchanged behaviour.
+    this._lastResult = result;
     const ms = performance.now() - t0;
     for (const h of this.hooks) h.onAfter?.(descriptor.id, this._lastResult, ms);
-
     return true;
   }
 
-  /** Run to completion. */
-  runToCompletion() {
-    while (this.advance()) {}
+  /**
+   * Run to completion. Async-aware: handles pipelines that contain GPU steps.
+   * In the CPU-only case (no async steps), resolves synchronously via microtask.
+   * @returns {Promise<void>}
+   */
+  async runToCompletion() {
+    let more = true;
+    while (more) {
+      const result = this.advance();
+      more = (result instanceof Promise) ? await result : result;
+    }
   }
 
   /**

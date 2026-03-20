@@ -28,6 +28,12 @@ import {
   runInfluencePhase, runValuePhase, runRibbonPhase, runAllocatePhase, runRoadsPhase,
 } from './growthTick.js';
 import { createZoneBoundaryRoads } from './zoneBoundaryRoads.js';
+import { RESERVATION } from './growthAgents.js';
+import { GPUDevice } from '../../core/gpu/GPUDevice.js';
+import { GPUValueSession } from './valueLayersGPU.js';
+import { GPUInfluenceSession } from './influenceLayersGPU.js';
+
+const DEV_PROXIMITY_THRESHOLD = 0.01;
 
 /**
  * Main city pipeline generator.
@@ -64,14 +70,17 @@ export function* cityPipeline(map, archetype) {
 
 /**
  * Organic growth pipeline — exposes each phase as a named yield:
+ *   growth:gpu-init     → initialise GPU sessions (async in browser, sync no-op in Node.js)
  *   growth-N:influence  → computeInfluenceLayers + agriculture retreat
  *   growth-N:value      → composeAllValueLayers
  *   growth-N:ribbons    → throttled layoutRibbons (Phase 2.5)
  *   growth-N:allocate   → agent allocation loop
  *   growth-N:roads      → growRoads + agriculture fill
  *
- * This enables stopping the pipeline at any sub-step to inspect intermediate state
- * (e.g. pause at growth-3:influence to see value layers before allocation runs).
+ * GPU acceleration is transparent: when WebGPU is available the influence and value
+ * step functions become async and PipelineRunner returns a Promise from advance().
+ * In Node.js (no navigator.gpu / globalThis.gpu) GPUDevice.isDefinitelyUnavailable()
+ * returns true → the gpu-init step is synchronous → all tick() calls remain boolean.
  *
  * @param {import('../../core/FeatureMap.js').FeatureMap} map
  * @param {object} archetype
@@ -81,26 +90,94 @@ function* organicGrowthPipeline(map, archetype) {
   const state    = initGrowthState(map, archetype);
   const maxTicks = archetype.growth.maxGrowthTicks || 8;
 
+  // Closed-over GPU session references — set during gpu-init step if WebGPU is available.
+  let gpuValue    = null;
+  let gpuInfluence = null;
+
+  // ── GPU initialisation step ──────────────────────────────────────────────
+  // Returns synchronously (undefined) in Node.js / non-GPU environments so that
+  // PipelineRunner.advance() stays synchronous and existing callers are unchanged.
+  // In a WebGPU-capable browser this returns a Promise → advance() returns a Promise.
+  yield step('growth:gpu-init', () => {
+    if (GPUDevice.isDefinitelyUnavailable()) return; // fast sync exit in Node.js
+    return (async () => {
+      try {
+        const gpu = await GPUDevice.get();
+        if (!gpu.available) return;
+        gpuValue    = GPUValueSession.create(gpu.device, map, archetype);
+        gpuInfluence = GPUInfluenceSession.create(gpu.device, map, archetype);
+        console.log('[cityPipeline] GPU sessions ready (value + influence)');
+      } catch (e) {
+        console.warn('[cityPipeline] GPU session init failed, using CPU:', e?.message ?? e);
+        gpuValue = null;
+        gpuInfluence = null;
+      }
+    })();
+  });
+
+  // Upload static spatial layers to GPU once, immediately after gpu-init.
+  // This runs synchronously when the generator resumes after gpu-init.
+  // gpuValue is already set (or null) at this point.
+  if (gpuValue) gpuValue.uploadStaticLayers(map);
+
+  // ── Growth loop ────────────────────────────────────────────────────────────
   while (state.tick < maxTicks) {
     state.tick++;
     const t = state.tick;
 
     let influenceResult, valueResult, allocResult;
 
-    yield step(`growth-${t}:influence`, () => {
-      influenceResult = runInfluencePhase(map, archetype);
-    });
+    // ── Influence phase (GPU or CPU) ─────────────────────────────────────
+    yield step(`growth-${t}:influence`,
+      gpuInfluence
+        ? async () => {
+            const resGrid = map.getLayer('reservationGrid');
+            const influenceLayers = await gpuInfluence.compute(
+              resGrid, map.width, map.height,
+              archetype.growth.influenceRadii || {},
+              map.nuclei || [],
+            );
+            const devProximity = influenceLayers.developmentProximity;
 
-    yield step(`growth-${t}:value`, () => {
-      valueResult = runValuePhase(map, archetype, influenceResult.influenceLayers);
-    });
+            // Agriculture retreat: cells near development revert to NONE (CPU, cheap)
+            const n = map.width * map.height;
+            for (let i = 0; i < n; i++) {
+              if (resGrid.data[i] === RESERVATION.AGRICULTURE &&
+                  devProximity[i] >= DEV_PROXIMITY_THRESHOLD) {
+                resGrid.data[i] = RESERVATION.NONE;
+              }
+            }
+
+            influenceResult = { influenceLayers, devProximity };
+            map._influenceLayers = influenceLayers;
+          }
+        : () => {
+            influenceResult = runInfluencePhase(map, archetype);
+          },
+    );
+
+    // ── Value phase (GPU or CPU) ────────────────────────────────────────
+    yield step(`growth-${t}:value`,
+      gpuValue
+        ? async () => {
+            const valueLayers = await gpuValue.compose(influenceResult.influenceLayers);
+            map._valueLayers = valueLayers;
+            map._influenceLayers = influenceResult.influenceLayers;
+            valueResult = { valueLayers };
+          }
+        : () => {
+            valueResult = runValuePhase(map, archetype, influenceResult.influenceLayers);
+          },
+    );
 
     yield step(`growth-${t}:ribbons`, () => {
       runRibbonPhase(map, archetype, state, influenceResult.devProximity);
     });
 
     yield step(`growth-${t}:allocate`, () => {
-      allocResult = runAllocatePhase(map, archetype, state, valueResult.valueLayers, influenceResult.devProximity);
+      allocResult = runAllocatePhase(
+        map, archetype, state, valueResult.valueLayers, influenceResult.devProximity,
+      );
     });
 
     let isDone = false;
@@ -110,4 +187,8 @@ function* organicGrowthPipeline(map, archetype) {
 
     if (isDone) break;
   }
+
+  // Cleanup GPU resources when the growth loop exits
+  gpuValue?.destroy();
+  gpuInfluence?.destroy();
 }

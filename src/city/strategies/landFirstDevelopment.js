@@ -33,12 +33,37 @@ export class LandFirstDevelopment {
 
   /**
    * Advance the pipeline by one step.
-   * @returns {boolean} true if a step was executed (more may remain), false when complete.
+   *
+   * Returns `true` when a synchronous step ran and more steps remain, `false`
+   * when the pipeline is complete, or a `Promise<boolean>` when the current
+   * step is asynchronous (GPU compute).  In Node.js (no WebGPU) this always
+   * returns a plain boolean — all existing callers need no changes.
+   *
+   * @returns {boolean | Promise<boolean>}
    */
   tick() {
-    const ran = this._runner.advance();
-    if (ran) this._stepsRun++;
-    return ran;
+    const result = this._runner.advance();
+    if (result instanceof Promise) {
+      return result.then(ran => {
+        if (ran) this._stepsRun++;
+        return ran;
+      });
+    }
+    if (result) this._stepsRun++;
+    return result;
+  }
+
+  /**
+   * Run the entire pipeline to completion.
+   * Handles both sync (CPU) and async (GPU) steps transparently.
+   * @returns {Promise<void>}
+   */
+  async runToCompletion() {
+    let more = true;
+    while (more) {
+      const result = this.tick();
+      more = (result instanceof Promise) ? await result : result;
+    }
   }
 
   /**

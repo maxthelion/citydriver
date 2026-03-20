@@ -56,19 +56,19 @@ export class CityScreen {
     }
 
     const strategy = new LandFirstDevelopment(map, { archetype: bestArchetype });
-    while (strategy.tick()) { /* run all ticks */ }
 
-    // Smooth road polylines in-place (2 Chaikin iterations).
-    // Done once here so all consumers (rendering, building placement) see the same curves.
-    // roadGrid is already stamped from the cell-based paths, so grid data is unaffected.
-    for (const road of map.roads) {
-      if (!road.polyline || road.polyline.length < 3) continue;
-      for (let i = 0; i < 2; i++) road.polyline = chaikinSmooth(road.polyline);
-    }
-
-    this._map = map;
-
-    this._buildScene();
+    // Run pipeline — async-aware so GPU steps (if WebGPU is available) are awaited.
+    // In CPU-only mode (Node.js / old browsers) runToCompletion() completes via
+    // microtask with no visible delay.
+    this._ready = strategy.runToCompletion().then(() => {
+      // Smooth road polylines in-place (2 Chaikin iterations).
+      for (const road of map.roads) {
+        if (!road.polyline || road.polyline.length < 3) continue;
+        for (let i = 0; i < 2; i++) road.polyline = chaikinSmooth(road.polyline);
+      }
+      this._map = map;
+      this._buildScene();
+    });
   }
 
   _buildScene() {

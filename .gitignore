@@ -4,3 +4,8 @@ debug-*/
 debug-latest
 debug.png
 .worktrees/
+
+# CodeHealth
+.codehealth/local/
+.codehealth/quarantine.json
+.codehealth/.worktree-tmp/

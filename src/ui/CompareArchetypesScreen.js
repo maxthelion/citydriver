@@ -240,7 +240,7 @@ export class CompareArchetypesScreen {
       await yieldFrame();
       if (this._disposed || id !== this._generationId) return;
       t0 = performance.now();
-      sharedStrategy.tick();
+      await Promise.resolve(sharedStrategy.tick());
       console.log(`[compare] shared tick ${t + 1} (${stepLabel}): ${(performance.now() - t0).toFixed(0)}ms`);
     }
 
@@ -264,7 +264,7 @@ export class CompareArchetypesScreen {
         await yieldFrame();
         if (this._disposed || id !== this._generationId) return;
         t0 = performance.now();
-        strategy.tick();
+        await Promise.resolve(strategy.tick());
         console.log(`[compare] ${key} tick ${t + 1} (${stepLabel}): ${(performance.now() - t0).toFixed(0)}ms`);
       }
 
@@ -298,7 +298,7 @@ export class CompareArchetypesScreen {
           await yieldFrame();
           if (this._disposed || id !== this._generationId) return;
           const t0 = performance.now();
-          if (this.strategies[key]) this.strategies[key].tick();
+          if (this.strategies[key]) await Promise.resolve(this.strategies[key].tick());
           console.log(`[compare] ${key} tick ${nextTick} (${stepLabel}): ${(performance.now() - t0).toFixed(0)}ms`);
         }
         this.currentTick++;

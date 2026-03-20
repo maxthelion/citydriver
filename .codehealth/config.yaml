@@ -1,0 +1,84 @@
+# .codehealth/config.yaml
+version: 1
+
+# Commit sampling strategy.
+# Options: merges-to-main | weekly | every-commit
+sampling: merges-to-main
+
+# Number of historical commits to scan on first run.
+# Subsequent runs are incremental.
+history_depth: 50
+
+# Main branch name.
+main_branch: v5
+
+# Static metrics — always collected, no test runner required.
+static_metrics:
+  - loc
+  - cyclomatic
+  - cognitive
+  - duplication
+  - dead_exports
+  - churn
+  - coupling
+  - versioned_symbols
+
+# Dynamic metrics — require running the test suite.
+dynamic_metrics:
+  coverage: false
+  test_command: npx nyc npm test
+
+# LLM assessments — nightly pass over changed and flagged files.
+llm_assessments:
+  enabled: true
+  model_file: claude-haiku-4-5
+  model_synthesis: claude-sonnet-4-6
+  min_confidence_to_act: 0.75
+  max_files_per_night: 40
+
+# Thresholds. warn = amber, fail = red.
+thresholds:
+  loc_warn: 200
+  loc_fail: 500
+  function_loc_warn: 25
+  function_loc_fail: 60
+  cyclomatic_warn: 7
+  cyclomatic_fail: 12
+  cognitive_warn: 10
+  cognitive_fail: 20
+  duplication_warn: 0.05
+  duplication_fail: 0.15
+  parameter_count_warn: 3
+  parameter_count_fail: 5
+  coverage_warn: 0.80
+  coverage_fail: 0.60
+  coupling_fan_out_warn: 7
+  coupling_fan_out_fail: 12
+  dead_export_warn: 3
+  dead_export_fail: 8
+
+# Module definitions.
+modules:
+  - path: src/
+    label: Application
+  - path: tests/
+    label: Tests
+    exclude_from_scoring: true
+
+# Remediation agent settings.
+remediation:
+  enabled: true
+  branch_prefix: codehealth/fix
+  max_files_per_night: 10
+  quarantine_after_failures: 3
+  scope:
+    allow:
+      - rename_symbol
+      - extract_function
+      - consolidate_duplicate
+      - update_docstring
+      - remove_dead_export
+    deny:
+      - change_interface
+      - modify_exports
+      - alter_data_structure

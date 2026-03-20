@@ -299,19 +299,24 @@ export class DebugScreen {
   _nextTick() {
     if (!this.map || !this._strategy) return;
 
-    const more = this._strategy.tick();
-    this.currentTick++;
+    const result = this._strategy.tick();
 
-    const label = TICK_LABELS[this.currentTick] || 'done';
-    this.tickLabel.textContent = `Tick: ${this.currentTick} (${label})`;
+    const handleDone = (more) => {
+      this.currentTick++;
+      const label = TICK_LABELS[this.currentTick] || 'done';
+      this.tickLabel.textContent = `Tick: ${this.currentTick} (${label})`;
+      if (!more) this.tickLabel.textContent += ' — complete';
+      this._updateInfo();
+      this._render();
+      this._updateURL();
+    };
 
-    if (!more) {
-      this.tickLabel.textContent += ' — complete';
+    // Handle both synchronous (CPU) and async (GPU) step results.
+    if (result instanceof Promise) {
+      result.then(handleDone);
+    } else {
+      handleDone(result);
     }
-
-    this._updateInfo();
-    this._render();
-    this._updateURL();
   }
 
   _reset() {
