@@ -3,17 +3,17 @@
  * Unified pipeline renderer.
  *
  * Usage:
- *   bun scripts/render-pipeline.js --seed 884469 --gx 27 --gz 95 --ticks 28 \
+ *   bun scripts/render-pipeline.js --seed 884469 --gx 27 --gz 95 \
  *     --layers reservations,zones,roadGrid,commercialValue \
  *     --out experiments/004-output
  *
- *   bun scripts/render-pipeline.js --seed 884469 --gx 27 --gz 95 --ticks 28 --list-layers
+ *   bun scripts/render-pipeline.js --seed 884469 --gx 27 --gz 95 --list-layers
  *
  * Flags:
  *   --seed N          City seed (default: 884469)
  *   --gx N            Settlement grid X (default: 27)
  *   --gz N            Settlement grid Z (default: 95)
- *   --ticks N         Max ticks to run (default: 28)
+ *   --step NAME       Named pipeline step to stop after (default: run to completion)
  *   --layers a,b,c    Comma-separated layer names to render (default: reservations)
  *   --out DIR         Output directory (default: output)
  *   --list-layers     Print available layers and exit
@@ -132,16 +132,15 @@ const seed = parseInt(getArg('seed', '884469'));
 const gxArg = parseInt(getArg('gx', '27'));
 const gzArg = parseInt(getArg('gz', '95'));
 // --step: named pipeline step to stop after (e.g. 'spatial', 'growth-3:roads', 'connect')
-// --ticks: legacy raw step count (kept for backward compat; ignored if --step is given)
+// Without --step, runs to completion (no raw tick counting)
 const stopStep = getArg('step', null);
-const maxTicks = stopStep ? Infinity : parseInt(getArg('ticks', '50'));
 const outDir = getArg('out', 'output');
 const archetypeName = getArg('archetype', 'marketTown');
 const layerNames = (getArg('layers', 'reservations')).split(',').map(s => s.trim());
 
 if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
-console.log(`Pipeline: seed=${seed} gx=${gxArg} gz=${gzArg} stop=${stopStep ?? `tick ${maxTicks}`} archetype=${archetypeName}`);
+console.log(`Pipeline: seed=${seed} gx=${gxArg} gz=${gzArg} stop=${stopStep ?? 'completion'} archetype=${archetypeName}`);
 console.log(`Layers: ${layerNames.join(', ')}`);
 console.log(`Output: ${outDir}/`);
 
@@ -159,7 +158,7 @@ const strategy = new LandFirstDevelopment(map, { archetype });
 let skeletonRoadSnapshot = null;
 
 let tick = 0;
-while (tick < maxTicks) {
+while (!strategy.done) {
   const t0 = performance.now();
   const more = strategy.tick();
   tick++;
