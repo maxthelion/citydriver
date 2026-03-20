@@ -23,7 +23,10 @@ import { computeSpatialLayers } from './computeSpatialLayers.js';
 import { reserveLandUse } from './reserveLandUse.js';
 import { layoutRibbons } from './layoutRibbons.js';
 import { connectToNetwork } from './connectToNetwork.js';
-import { initGrowthState, runGrowthTick } from './growthTick.js';
+import {
+  initGrowthState,
+  runInfluencePhase, runValuePhase, runRibbonPhase, runAllocatePhase, runRoadsPhase,
+} from './growthTick.js';
 import { createZoneBoundaryRoads } from './zoneBoundaryRoads.js';
 
 /**
@@ -56,24 +59,51 @@ export function* cityPipeline(map, archetype) {
 }
 
 /**
- * Organic growth pipeline — influence → value → allocate → roads, repeated per tick.
- * Terminates when runGrowthTick signals completion (all agent caps reached).
+ * Organic growth pipeline — exposes each phase as a named yield:
+ *   growth-N:influence  → computeInfluenceLayers + agriculture retreat
+ *   growth-N:value      → composeAllValueLayers
+ *   growth-N:ribbons    → throttled layoutRibbons (Phase 2.5)
+ *   growth-N:allocate   → agent allocation loop
+ *   growth-N:roads      → growRoads + agriculture fill
  *
- * Step ids: 'growth-1', 'growth-2', …
+ * This enables stopping the pipeline at any sub-step to inspect intermediate state
+ * (e.g. pause at growth-3:influence to see value layers before allocation runs).
  *
  * @param {import('../../core/FeatureMap.js').FeatureMap} map
  * @param {object} archetype
  * @yields {import('./PipelineRunner.js').StepDescriptor}
  */
 function* organicGrowthPipeline(map, archetype) {
-  const state = initGrowthState(map, archetype);
-  let tick = 0;
-  let isDone = false;
+  const state    = initGrowthState(map, archetype);
+  const maxTicks = archetype.growth.maxGrowthTicks || 8;
 
-  while (!isDone) {
-    tick++;
-    // yield the step; the runner executes fn() and passes the result back via next().
-    // runGrowthTick returns true when growth is complete.
-    isDone = yield step(`growth-${tick}`, () => runGrowthTick(map, archetype, state));
+  while (state.tick < maxTicks) {
+    state.tick++;
+    const t = state.tick;
+
+    let influenceResult, valueResult, allocResult;
+
+    yield step(`growth-${t}:influence`, () => {
+      influenceResult = runInfluencePhase(map, archetype);
+    });
+
+    yield step(`growth-${t}:value`, () => {
+      valueResult = runValuePhase(map, archetype, influenceResult.influenceLayers);
+    });
+
+    yield step(`growth-${t}:ribbons`, () => {
+      runRibbonPhase(map, archetype, state, influenceResult.devProximity);
+    });
+
+    yield step(`growth-${t}:allocate`, () => {
+      allocResult = runAllocatePhase(map, archetype, state, valueResult.valueLayers, influenceResult.devProximity);
+    });
+
+    let isDone = false;
+    yield step(`growth-${t}:roads`, () => {
+      isDone = runRoadsPhase(map, archetype, state, allocResult);
+    });
+
+    if (isDone) break;
   }
 }
