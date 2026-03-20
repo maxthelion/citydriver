@@ -5,17 +5,12 @@
  */
 
 import * as THREE from 'three';
-import { setupCity } from '../city/setup.js';
-import { LandFirstDevelopment } from '../city/strategies/landFirstDevelopment.js';
-import { ARCHETYPES } from '../city/archetypes.js';
-import { scoreSettlement } from '../city/archetypeScoring.js';
 import { prepareCityScene } from '../rendering/prepareCityScene.js';
 import { getRoadMaterial, getRiverMaterial } from '../rendering/materials.js';
 import { FlyCamera } from './FlyCamera.js';
 import { renderMap, drawRivers, drawRoads, drawRailways, drawSettlements } from '../rendering/mapRenderer.js';
 import { CITY_RADIUS } from '../city/constants.js';
 import { placeBuildings, placeTerracedRows } from '../city/placeBuildings.js';
-import { chaikinSmooth } from '../core/math.js';
 import { LAYERS } from '../rendering/debugLayers.js';
 import { computeCoverageLayers } from '../city/coverageLayers.js';
 
@@ -36,39 +31,18 @@ const PAVED_COLOR = [0.55, 0.53, 0.5];
 const BALLAST_COLOR = [0.45, 0.42, 0.38];
 
 export class CityScreen {
-  constructor(container, layers, settlement, rng, seed, onBack) {
+  constructor(container, map, seed, onBack) {
     this.container = container;
     this.onBack = onBack;
-    this._regionalLayers = layers;
-    this._settlement = settlement;
     this._seed = seed || 42;
     this._hud = [];
+    this._map = map;
 
-    // Run city pipeline with land-first development strategy
-    const map = setupCity(layers, settlement, rng);
+    // Regional data is stashed on the map by buildCityMap so the minimap can render.
+    this._regionalLayers = map.regionalLayers;
+    this._settlement = map.settlement;
 
-    // Auto-select best-fit archetype from geography
-    const scores = scoreSettlement(map);
-    const bestArchetype = scores[0].archetype;
-    console.log(`City archetype: ${bestArchetype.name} (score ${scores[0].score.toFixed(2)})`);
-    for (const s of scores) {
-      console.log(`  ${s.archetype.name}: ${s.score.toFixed(2)} — ${s.factors.join(', ')}`);
-    }
-
-    const strategy = new LandFirstDevelopment(map, { archetype: bestArchetype });
-
-    // Run pipeline — async-aware so GPU steps (if WebGPU is available) are awaited.
-    // In CPU-only mode (Node.js / old browsers) runToCompletion() completes via
-    // microtask with no visible delay.
-    this._ready = strategy.runToCompletion().then(() => {
-      // Smooth road polylines in-place (2 Chaikin iterations).
-      for (const road of map.roads) {
-        if (!road.polyline || road.polyline.length < 3) continue;
-        for (let i = 0; i < 2; i++) road.polyline = chaikinSmooth(road.polyline);
-      }
-      this._map = map;
-      this._buildScene();
-    });
+    this._ready = Promise.resolve().then(() => this._buildScene());
   }
 
   _buildScene() {
