@@ -7,7 +7,7 @@ import { BuildingStyleScreen } from './ui/BuildingStyleScreen.js';
 import { TerracedRowScreen } from './ui/TerracedRowScreen.js';
 import { RailwayScreen } from './ui/RailwayScreen.js';
 import { generateRegionFromSeed } from './ui/regionHelper.js';
-import { SeededRandom } from './core/rng.js';
+import { buildCityMap } from './city/buildCityMap.js';
 
 const container = document.getElementById('game-container');
 let regionScreen = null;
@@ -46,8 +46,9 @@ function enterSubScreen(mode, layers, settlement, seed, opts = {}) {
   history.pushState(null, '', url);
 
   if (mode === 'city') {
-    const rng = new SeededRandom(seed || 42);
-    cityScreen = new CityScreen(container, layers, settlement, rng.fork('city'), seed, goBack);
+    buildCityMap({ seed, layers, settlement, archetype, step, growth }).then(({ map }) => {
+      cityScreen = new CityScreen(container, map, seed, goBack);
+    });
   } else if (mode === 'compare') {
     compareScreen = new CompareScreen(container, layers, settlement, seed, goBack);
   } else if (mode === 'compare-archetypes') {
@@ -113,8 +114,9 @@ window.addEventListener('popstate', () => {
     const { layers, settlement } = generateRegionFromSeed(seed, gx, gz);
     if (settlement) {
       if (mode === 'city') {
-        const rng = new SeededRandom(seed);
-        cityScreen = new CityScreen(container, layers, settlement, rng.fork('city'), seed, goBack);
+        buildCityMap({ seed, layers, settlement }).then(({ map }) => {
+          cityScreen = new CityScreen(container, map, seed, goBack);
+        });
       } else if (mode === 'compare') {
         compareScreen = new CompareScreen(container, layers, settlement, seed, goBack);
       } else if (mode === 'compare-archetypes') {
@@ -154,8 +156,9 @@ if (urlMode === 'buildings') {
     history.pushState(null, '', fullSearch);
 
     if (urlMode === 'city') {
-      const rng = new SeededRandom(urlSeed);
-      cityScreen = new CityScreen(container, layers, settlement, rng.fork('city'), urlSeed, goBack);
+      buildCityMap({ seed: urlSeed, layers, settlement }).then(({ map }) => {
+        cityScreen = new CityScreen(container, map, urlSeed, goBack);
+      });
     } else if (urlMode === 'compare') {
       compareScreen = new CompareScreen(container, layers, settlement, urlSeed, goBack);
     } else if (urlMode === 'compare-archetypes') {
