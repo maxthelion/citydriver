@@ -281,18 +281,24 @@ export class DebugScreen {
     this._renderMinimap();
     this._render();
 
-    // Auto-advance to URL-requested tick
+    // Auto-advance to URL-requested tick.
+    // Runs as a self-contained async block so GPU steps (if WebGPU is available)
+    // are properly awaited. The outer _generate() stays synchronous so callers
+    // need no changes — the async work fires as a microtask.
     if (this._initialTick > 0) {
       const target = this._initialTick;
       this._initialTick = 0; // only on first generate
-      for (let i = 0; i < target && this._strategy; i++) {
-        this._strategy.tick();
-        this.currentTick++;
-      }
-      const label = TICK_LABELS[this.currentTick] || 'done';
-      this.tickLabel.textContent = `Tick: ${this.currentTick} (${label})`;
-      this._updateInfo();
-      this._render();
+      (async () => {
+        for (let i = 0; i < target && this._strategy; i++) {
+          const result = this._strategy.tick();
+          if (result instanceof Promise) await result;
+          this.currentTick++;
+        }
+        const label = TICK_LABELS[this.currentTick] || 'done';
+        this.tickLabel.textContent = `Tick: ${this.currentTick} (${label})`;
+        this._updateInfo();
+        this._render();
+      })();
     }
   }
 

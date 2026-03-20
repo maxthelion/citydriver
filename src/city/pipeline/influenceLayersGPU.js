@@ -148,13 +148,17 @@ export class GPUInfluenceSession {
       compute: { module: blurModule, entryPoint: 'blurV' },
     });
 
-    // Bind group layout is the same for H and V (src→dst with a uniform)
-    const bgl = this._hPipeline.getBindGroupLayout(0);
+    // Each pipeline gets its own bind group layout object — with layout:'auto'
+    // the spec does not consider two implicit layouts equal even if structurally
+    // identical, so we must use each pipeline's own layout when creating its
+    // bind groups.
+    const hbgl = this._hPipeline.getBindGroupLayout(0);
+    const vbgl = this._vPipeline.getBindGroupLayout(0);
 
     // H bind groups: src[i] → tmp[i] (with uniform[i])
     this._hBindGroups = this._srcBuffers.map((src, i) =>
       device.createBindGroup({
-        layout: bgl,
+        layout: hbgl,
         entries: [
           { binding: 0, resource: { buffer: src } },
           { binding: 1, resource: { buffer: this._uniformBuffers[i] } },
@@ -166,7 +170,7 @@ export class GPUInfluenceSession {
     // V bind groups: tmp[i] → dst[i] (with uniform[i])
     this._vBindGroups = this._tmpBuffers.map((tmp, i) =>
       device.createBindGroup({
-        layout: bgl,
+        layout: vbgl,
         entries: [
           { binding: 0, resource: { buffer: tmp } },
           { binding: 1, resource: { buffer: this._uniformBuffers[i] } },
