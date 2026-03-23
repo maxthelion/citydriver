@@ -880,15 +880,59 @@ export async function run(root, state) {
   mkdirSync(join(root, '.petri'), { recursive: true });
   appendFileSync(logPath, logEntry);
 
-  console.log(`[petri] ${failures.length} seed(s) failed. Report appended to fitness-log.md.`);
-  console.log('[petri] Agent should investigate and fix the regression.');
+  console.log(`[petri] ${failures.length} seed(s) failed. Dispatching fix subagent...`);
 
-  // The actual fix will be made by the agent reading the report
-  // and modifying pipeline code. This action just diagnoses.
-  throw new Error(
-    `Seed regression detected: ${failures.map(f => f.seed).join(', ')}. ` +
-    `Check .petri/fitness-log.md for details. Investigate and fix the pipeline code.`
-  );
+  // Invoke a subagent to investigate and fix the regression
+  const { execFileSync } = await import('node:child_process');
+  const fixPrompt = [
+    'You are fixing a seed regression in the city generator pipeline.',
+    'The following seeds failed to produce usable output:',
+    '',
+    report,
+    '',
+    'Context:',
+    '- Seed 884469 stopped producing usable zones after the v5 refactor (see commit 19a8873)',
+    '- Experiment 007s7 was the last known good state for this seed',
+    '- Check git log for recent refactoring changes',
+    '- Read specs/v5/zones-refine-fix-plan.md for the zones-refine bug investigation',
+    '- Read the experiment notes in experiments/007s7-straightness.md and experiments/007s8-straightness-repro.md',
+    '',
+    'Investigate the root cause and make a targeted fix. Commit your changes.',
+    'Focus on making all standard seeds produce usable zones again.',
+  ].join('\n');
+
+  try {
+    execFileSync('claude', ['-p', '--output-format', 'text'], {
+      input: fixPrompt,
+      cwd: root,
+      timeout: 600000, // 10 min — regression fixes may need investigation
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    // Verify the fix worked by re-rendering
+    let stillBroken = false;
+    for (const { seed, gx, gz } of seeds) {
+      try {
+        execSync(
+          `node scripts/render-pipeline.js --seed ${seed} --gx ${gx} --gz ${gz} --layers zones --out .petri/state/regression-check`,
+          { cwd: root, timeout: 120000, encoding: 'utf-8', stdio: 'pipe' }
+        );
+      } catch {
+        stillBroken = true;
+      }
+    }
+
+    if (!stillBroken) {
+      const { writeFileSync } = await import('node:fs');
+      writeFileSync(join(root, '.petri', 'state', 'seeds-ok'), '');
+      console.log('[petri] Regression fixed! All seeds producing output.');
+    } else {
+      console.log('[petri] Fix attempt did not resolve all seeds. Will retry next tick.');
+    }
+  } catch (err) {
+    console.log('[petri] Fix subagent failed:', err.message);
+    console.log('[petri] Will retry next tick.');
+  }
 }
 ```
 
@@ -1108,9 +1152,14 @@ export async function run(root, state) {
 
   console.log('[petri] Executing mutation from work item...');
 
-  // Phase 1: Invoke Claude subagent to make code changes
+  // Save current HEAD so we can detect if the subagent committed anything
+  const headBefore = execSync('git rev-parse HEAD', { cwd: root, encoding: 'utf-8', stdio: 'pipe' }).trim();
+
+  // Phase 1: Invoke Claude subagent to make code changes.
+  // Prompt piped via stdin to avoid shell escaping issues.
   console.log('[petri] Dispatching mutation subagent...');
   try {
+    const { execFileSync } = await import('node:child_process');
     const mutationPrompt = [
       'You are implementing a code mutation for the petri loop experiment system.',
       'Read the work item below and make the EXACT code changes described.',
@@ -1119,10 +1168,12 @@ export async function run(root, state) {
       '',
       workItem,
     ].join('\n');
-    execSync(
-      `claude --print -p "${mutationPrompt.replace(/"/g, '\\"')}"`,
-      { cwd: root, timeout: 300000, stdio: 'pipe' }
-    );
+    execFileSync('claude', ['-p', '--output-format', 'text'], {
+      input: mutationPrompt,
+      cwd: root,
+      timeout: 300000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
   } catch (err) {
     console.log('[petri] Mutation subagent failed.');
     writeFileSync(join(petri, 'state', 'verdict.md'),
@@ -1132,18 +1183,15 @@ export async function run(root, state) {
   }
 
   // Check that the subagent actually committed something
-  try {
-    const diff = execSync('git diff HEAD~1 --stat', { cwd: root, encoding: 'utf-8', stdio: 'pipe' });
-    if (!diff.trim()) {
-      writeFileSync(join(petri, 'state', 'verdict.md'),
-        '# Verdict\n\n**Decision:** REJECT\n**Reason:** Mutation subagent made no code changes.\n'
-      );
-      return;
-    }
-    console.log(`[petri] Mutation committed. Changes:\n${diff}`);
-  } catch {
-    // git diff failed — probably no commits, continue anyway
+  const headAfter = execSync('git rev-parse HEAD', { cwd: root, encoding: 'utf-8', stdio: 'pipe' }).trim();
+  if (headAfter === headBefore) {
+    writeFileSync(join(petri, 'state', 'verdict.md'),
+      '# Verdict\n\n**Decision:** REJECT\n**Reason:** Mutation subagent made no code changes.\n'
+    );
+    return;
   }
+  const diff = execSync(`git diff ${headBefore}..HEAD --stat`, { cwd: root, encoding: 'utf-8', stdio: 'pipe' });
+  console.log(`[petri] Mutation committed. Changes:\n${diff}`);
 
   // Phase 2: Evaluate the mutation
   console.log('[petri] Evaluating mutation...');
@@ -1333,22 +1381,26 @@ export async function run(root, state) {
   // Create marker to prevent re-dispatch on next tick
   writeFileSync(join(petri, 'state', 'judge-dispatched'), '');
 
-  // Invoke Claude CLI as a subagent with the judge prompt.
-  // The subagent reads the prompt, examines the images, and writes verdict.md.
+  // Invoke Claude CLI as a subagent WITH tool access (no --print flag).
+  // The subagent needs the Read tool to view PNG images from disk.
+  // Prompt is piped via stdin to avoid shell escaping issues.
   console.log('[petri] Dispatching judge subagent...');
   try {
-    execSync(
-      `claude --print -p "$(cat ${join(petri, 'state', 'judge-prompt.md')})" > ${join(petri, 'state', 'verdict.md')}`,
-      { cwd: root, timeout: 300000, stdio: 'pipe' }
-    );
+    const { execFileSync } = await import('node:child_process');
+    const verdictPath = join(petri, 'state', 'verdict.md');
+    // Use -p with stdin pipe. The subagent gets full tool access
+    // and can use Read to examine the PNG files listed in the prompt.
+    execFileSync('claude', ['-p', '--output-format', 'text'], {
+      input: judgePrompt + `\n\nWrite your verdict to: ${verdictPath}`,
+      cwd: root,
+      timeout: 300000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     // Clean up dispatch marker now that verdict exists
     rmSync(join(petri, 'state', 'judge-dispatched'), { force: true });
     console.log('[petri] Judge verdict written.');
   } catch (err) {
     console.log('[petri] Judge subagent failed:', err.message);
-    // Leave judge-dispatched marker so we don't retry immediately.
-    // The apply-verdict condition won't fire without verdict.md.
-    // On next tick, tree will fall through to hypothesise (skipping judge).
     rmSync(join(petri, 'state', 'judge-dispatched'), { force: true });
     // Write a default reject verdict so the cycle can continue
     writeFileSync(join(petri, 'state', 'verdict.md'),
