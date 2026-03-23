@@ -35,7 +35,7 @@ Conditions are pure functions against a `WorldState` snapshot read at tick start
 | seeds regressed? | Render standard seeds, check if any fail to produce usable zones or crash |
 | no baseline established? | `.petri/baseline/` directory missing or empty |
 | evidence awaiting judge? | `.petri/evidence/` exists and `.petri/verdict.md` does not |
-| verdict pending? | `.petri/verdict.md` exists |
+| verdict pending? | `.petri/state/verdict.md` exists |
 | work-item exists? | `.petri/state/work-item.md` exists |
 | always true | Fallback |
 
@@ -51,7 +51,7 @@ Conditions are pure functions against a `WorldState` snapshot read at tick start
 
 **spawn-judge** — Launches a separate agent with a fresh context. Passes it: baseline PNGs, evidence PNGs, tier 2 metric comparison, evaluation rubric, and fitness log with human corrections. Does NOT pass the mutation reasoning or code diff. The judge writes `.petri/verdict.md` with per-criterion scores and a keep/reject decision.
 
-**apply-verdict** — Reads `verdict.md`. If keep: promotes evidence to new baseline, logs success with scores. If reject: reverts the commit, logs failure with judge's reasoning. Either way, cleans up `work-item.md`, `evidence/`, and `verdict.md` so the tree falls through to `hypothesise` on next tick.
+**apply-verdict** — Reads `verdict.md`. If keep: promotes evidence to new baseline, logs success with scores. If reject: reverts the commit, logs failure with judge's reasoning. Either way, cleans up `state/work-item.md`, `evidence/`, and `state/verdict.md` so the tree falls through to `hypothesise` on next tick.
 
 ## Evaluation Pyramid
 
