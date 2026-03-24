@@ -15,7 +15,8 @@
  * Check all polyline/graph invariants.
  * @param {import('../../core/FeatureMap.js').FeatureMap} map
  * @returns {{ degenerateRoads: number, outOfBoundsPoints: number,
- *             graphEdgeMismatch: boolean, orphanNodes: number, bridgeBanksOnWater: number }}
+ *             graphEdgeMismatch: boolean, orphanNodes: number, bridgeBanksOnWater: number,
+ *             duplicateEdges: number, danglingEdges: number }}
  */
 export function checkAllPolylineInvariants(map) {
   const result = {
@@ -24,6 +25,8 @@ export function checkAllPolylineInvariants(map) {
     graphEdgeMismatch: false,
     orphanNodes:       0,
     bridgeBanksOnWater: 0,
+    duplicateEdges:    0,
+    danglingEdges:     0,
   };
 
   const network = map.roadNetwork;
@@ -96,6 +99,40 @@ export function checkAllPolylineInvariants(map) {
     }
   }
 
+  // Duplicate edges: two different edge IDs connecting the same node pair
+  if (graph.edges) {
+    const seen = new Set();
+    for (const [, edge] of graph.edges) {
+      const lo = Math.min(edge.from, edge.to);
+      const hi = Math.max(edge.from, edge.to);
+      const key = `${lo}-${hi}`;
+      if (seen.has(key)) {
+        result.duplicateEdges++;
+      } else {
+        seen.add(key);
+      }
+    }
+  }
+
+  // Dangling edges: degree-1 nodes NOT near the map boundary (within 2 cells of edge).
+  // These are dead-end graph nodes from clipped road segments that break DCEL face extraction.
+  if (graph.nodes) {
+    const boundaryMargin = cs * 2;
+    const worldW = w * cs;
+    const worldH = h * cs;
+    for (const [nodeId, node] of graph.nodes) {
+      if (graph.degree(nodeId) !== 1) continue;
+      const lx = node.x - ox;
+      const lz = node.z - oz;
+      const nearBoundary =
+        lx < boundaryMargin || lz < boundaryMargin ||
+        lx > worldW - boundaryMargin || lz > worldH - boundaryMargin;
+      if (!nearBoundary) {
+        result.danglingEdges++;
+      }
+    }
+  }
+
   return result;
 }
 
@@ -115,6 +152,8 @@ export function makePolylineInvariantHook(map, onViolation) {
       if (r.graphEdgeMismatch)      onViolation(stepId, 'graphEdgeMismatch', true);
       if (r.orphanNodes       > 0)  onViolation(stepId, 'orphanNodes',       r.orphanNodes);
       if (r.bridgeBanksOnWater > 0) onViolation(stepId, 'bridgeBanksOnWater', r.bridgeBanksOnWater);
+      if (r.duplicateEdges    > 0)  onViolation(stepId, 'duplicateEdges',    r.duplicateEdges);
+      if (r.danglingEdges     > 0)  onViolation(stepId, 'danglingEdges',     r.danglingEdges);
     },
   };
 }
