@@ -41,10 +41,10 @@ const seeds = seedsStr.split(',').map(s => {
   const [seed, gx, gz] = s.split(':');
   return { seed, gx: gx || '27', gz: gz || '95' };
 });
-const ticks = getArg('ticks', '28');
 const layersStr = getArg('layers', 'reservations');
 const archetype = getArg('archetype', 'marketTown');
 const customScript = getArg('script', null);
+const stopStep = getArg('step', null);
 
 if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
@@ -55,7 +55,7 @@ if (customScript) {
   console.log(`Script: ${customScript}`);
 } else {
   console.log(`Layers: ${layersStr}`);
-  console.log(`Ticks: ${ticks}, Archetype: ${archetype}`);
+  console.log(`Archetype: ${archetype}${stopStep ? ', Stop: ' + stopStep : ''}`);
 }
 console.log('');
 
@@ -73,7 +73,8 @@ for (const { seed, gx, gz } of seeds) {
       console.error(`Failed: ${e.message}`);
     }
   } else {
-    const cmd = `bun scripts/render-pipeline.js --seed ${seed} --gx ${gx} --gz ${gz} --ticks ${ticks} --layers ${layersStr} --archetype ${archetype} --out ${outDir}`;
+    const stepFlag = stopStep ? ` --step ${stopStep}` : '';
+    const cmd = `bun scripts/render-pipeline.js --seed ${seed} --gx ${gx} --gz ${gz} --layers ${layersStr} --archetype ${archetype}${stepFlag} --out ${outDir}`;
     try {
       const output = execSync(cmd, { encoding: 'utf-8', timeout: 300000 });
       console.log(output);
