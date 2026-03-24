@@ -236,7 +236,7 @@ describe('PlanarGraph', () => {
     expect(simpleFaces.length).toBe(4);
   });
 
-  it('mergeNodes rewires edges to survivor', () => {
+  it('mergeNodes rewires edges to survivor and deduplicates', () => {
     const g = new PlanarGraph();
     const a = g.addNode(0, 0);
     const b = g.addNode(5, 0);
@@ -248,8 +248,10 @@ describe('PlanarGraph', () => {
 
     expect(g.nodes.has(b)).toBe(false);
     expect(g.nodes.has(a)).toBe(true);
-    expect(g.degree(a)).toBe(2);
-    expect(g.degree(c)).toBe(2);
+    // After merge, A→C existed twice (original + rewired B→C).
+    // Deduplication removes the duplicate, leaving exactly 1 edge.
+    expect(g.degree(a)).toBe(1);
+    expect(g.degree(c)).toBe(1);
   });
 
   it('mergeNodes removes self-loops', () => {

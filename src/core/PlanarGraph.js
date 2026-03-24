@@ -416,6 +416,22 @@ export class PlanarGraph {
     // Delete the merged node
     this.nodes.delete(from);
     this._adjacency.delete(from);
+
+    // Remove duplicate edges: if `into` now has multiple edges to the same neighbor,
+    // keep only the first and remove the rest. Duplicates break face extraction.
+    const seenNeighbors = new Map(); // neighborId → first edgeId
+    const toRemove = [];
+    for (const entry of intoAdj) {
+      const prev = seenNeighbors.get(entry.neighborId);
+      if (prev !== undefined) {
+        toRemove.push(entry.edgeId);
+      } else {
+        seenNeighbors.set(entry.neighborId, entry.edgeId);
+      }
+    }
+    for (const edgeId of toRemove) {
+      this._removeEdge(edgeId);
+    }
   }
 
   /**

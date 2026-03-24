@@ -298,12 +298,10 @@ export class RoadNetwork {
       return;
     }
 
-    // Check if already connected
+    // Skip if already connected — duplicate edges break face extraction
     const neighbors = this._graph.neighbors(startNode);
     if (neighbors.includes(endNode)) {
-      console.warn(
-        `[RoadNetwork] Duplicate edge between nodes ${startNode} and ${endNode} — adding anyway`
-      );
+      return;
     }
 
     // Intermediate points (all polyline points except first and last)
