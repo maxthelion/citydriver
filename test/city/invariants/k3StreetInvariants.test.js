@@ -168,23 +168,16 @@ function runK3OnZone(zone, map) {
     for (const cs_ of crossStreets) {
       for (const pt of cs_.junctions) allJunctions.push(pt);
     }
-    // Connect junctions by closest elevation (not sequential index)
+    // Connect by sequential index, reject steep connections (>15%)
     for (let k = 0; k < crossStreets.length - 1; k++) {
       const jA = crossStreets[k].junctions, jB = crossStreets[k + 1].junctions;
-      const usedB = new Set();
-      for (const pA of jA) {
-        let bestIdx = -1, bestElevDiff = Infinity;
-        for (let bi = 0; bi < jB.length; bi++) {
-          if (usedB.has(bi)) continue;
-          const diff = Math.abs(pA.elev - jB[bi].elev);
-          if (diff < bestElevDiff) { bestElevDiff = diff; bestIdx = bi; }
-        }
-        if (bestIdx < 0) continue;
-        const pB = jB[bestIdx];
-        usedB.add(bestIdx);
+      const count = Math.min(jA.length, jB.length);
+      for (let idx = 0; idx < count; idx++) {
+        const pA = jA[idx], pB = jB[idx];
         const segLen = Math.hypot(pB.x - pA.x, pB.z - pA.z);
         if (segLen < MIN_STREET_LEN) continue;
-        if (bestElevDiff / segLen > 0.15) continue; // Skip steep connections
+        const elevDiff = Math.abs(pA.elev - pB.elev);
+        if (elevDiff / segLen > 0.15) continue;
         allParallel.push([{ x: pA.x, z: pA.z }, { x: pB.x, z: pB.z }]);
       }
     }

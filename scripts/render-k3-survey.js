@@ -289,9 +289,11 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       crossStreets.push({ ctOff, start: segStart, end: segEnd, junctions });
     }
 
-    // Connect junctions between adjacent cross streets by closest ELEVATION
-    // (not by sequential index — same index can be at very different elevations
-    // when contours curve)
+    // Connect junctions between adjacent cross streets by sequential index,
+    // but reject connections that are too steep (> 15% gradient).
+    // Index-based matching keeps parallels local and straight.
+    // Elevation filtering catches cases where contours curve and same-index
+    // junctions end up at very different heights.
     crossStreets.sort((a, b) => a.ctOff - b.ctOff);
 
     let faceCross = crossStreets.length;
@@ -306,24 +308,16 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
     for (let k = 0; k < crossStreets.length - 1; k++) {
       const jA = crossStreets[k].junctions;
       const jB = crossStreets[k + 1].junctions;
-      const usedB = new Set();
 
-      for (const pA of jA) {
-        // Find closest junction on next cross street by elevation
-        let bestIdx = -1, bestElevDiff = Infinity;
-        for (let bi = 0; bi < jB.length; bi++) {
-          if (usedB.has(bi)) continue;
-          const diff = Math.abs(pA.elev - jB[bi].elev);
-          if (diff < bestElevDiff) { bestElevDiff = diff; bestIdx = bi; }
-        }
-        if (bestIdx < 0) continue;
-        const pB = jB[bestIdx];
-        usedB.add(bestIdx);
+      const count = Math.min(jA.length, jB.length);
+      for (let idx = 0; idx < count; idx++) {
+        const pA = jA[idx], pB = jB[idx];
 
         const segLen = Math.sqrt((pB.x - pA.x) ** 2 + (pB.z - pA.z) ** 2);
         if (segLen < MIN_STREET_LEN) continue;
         // Skip if gradient is too steep (> 15%)
-        if (bestElevDiff / segLen > 0.15) continue;
+        const elevDiff = Math.abs(pA.elev - pB.elev);
+        if (elevDiff / segLen > 0.15) continue;
 
         allParallel.push([{ x: pA.x, z: pA.z }, { x: pB.x, z: pB.z }]);
         faceParallel++;
