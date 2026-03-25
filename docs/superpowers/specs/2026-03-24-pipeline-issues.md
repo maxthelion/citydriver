@@ -4,14 +4,29 @@ Found during zone extraction investigation and petri loop experimentation.
 
 ## Pipeline Issues
 
-### 1. Tree-skeleton produces no graph faces (DESIGN)
-The skeleton is an MST — trees have no cycles, so `facesWithEdges()` finds no enclosed faces. Seeds 42 and 99 get 2 zones from graph-face extraction where flood-fill gets 70+. The initial `zones` step is useless for tree-like skeletons. Affects most seeds to some degree.
+### 1. Graph-face extraction only has road edges — needs all boundary types (ROOT CAUSE)
+The `specs/v5/land-model.md` spec defines graph faces bounded by roads, water, map edges, railways, and planning lines. Currently only roads are in the planar graph. A tree-like skeleton (MST) has no cycles, so `facesWithEdges()` finds no enclosed faces. Adding water edges and map boundary edges to the graph would create enough faces even from a tree skeleton — each face bounded by a mix of roads and natural edges.
 
-### 2. Zone-boundary roads don't fire on small zones (CHICKEN-AND-EGG)
-`createZoneBoundaryRoads` requires zones >= 1000 cells. But graph-face zones are often tiny or empty (because no cycles). So no zone-boundary roads are added, no cycles are created, and zones-refine has to do all the work via flood-fill.
+This is the root cause of issues 2 and 3. The land-model migration step 2 ("unify zones and graph faces") was done without step 5 ("introduce boundary types"), which it depends on.
 
-### 3. `forceFloodFill` workaround still in pipeline (TECH DEBT)
-`zones-refine` explicitly uses flood-fill because graph faces are known to be unreliable after zone-boundary roads. The old flood-fill code path should be removable once graph integrity is solid. Currently two extraction methods coexist.
+**Fix:** Add coastline/river polylines and map boundary edges to the planar graph as non-road boundary edges. `facesWithEdges()` then produces full face coverage.
+
+### 2. Zone-boundary roads don't fire on small zones (CONSEQUENCE OF #1)
+`createZoneBoundaryRoads` requires zones >= 1000 cells. But without boundary types in the graph, graph-face zones are often tiny or empty. So no zone-boundary roads are added, no cycles are created, and zones-refine has to do all the work via flood-fill.
+
+### 3. `forceFloodFill` workaround still in pipeline (CONSEQUENCE OF #1)
+`zones-refine` explicitly uses flood-fill because graph faces are unreliable without boundary types. Once #1 is fixed and the graph produces full face coverage, the flood-fill path can be removed.
+
+### Land-model migration incomplete
+From `specs/v5/land-model.md`, the 5-step migration was partially completed:
+
+| Step | Description | Status |
+|------|-------------|--------|
+| 1. Add invariant checks | Bitmap/polyline/block invariants | Partial — land-model invariants (face coverage, cell exclusivity) not done |
+| 2. Unify zones and graph faces | Graph-face extraction as primary | Partial — works only when graph has cycles (needs step 5 first) |
+| 3. Add bidirectional references | Road↔block O(1) lookups | Not done |
+| 4. Add inset polygons | Width accounting | Not done |
+| 5. Introduce boundary types | Water, map edge, rail, planning lines | Not done — **prerequisite for step 2** |
 
 ### 4. Duplicate edges — FIXED
 `RoadNetwork.#addToGraph()` was adding duplicate edges with a warning. `PlanarGraph.mergeNodes()` created duplicates during skeleton-walk merge. Fixed in commit 73cc620. Seed 979728 went from 2 zones to 101.
@@ -45,4 +60,10 @@ Parameter tweaks are "visually imperceptible" at the rendered zoom level. Needs 
 
 ## Priority
 
-Issues 1 and 2 are the root cause of most zone extraction problems. Fix the skeleton to have cycles (or use flood-fill for initial zones), and everything downstream improves.
+Issue 1 is the root cause. The fix is NOT "add more roads" or "revert to flood-fill" — it's completing the land-model migration by adding boundary types to the graph:
+
+1. **Add water edges and map boundary to the planar graph** (land-model step 5, partially) — this creates enough face coverage for graph-face extraction to work on any skeleton
+2. **Remove `forceFloodFill`** — once face coverage is solid, one extraction method
+3. **Add face coverage invariant test** — "every non-road, non-water cell belongs to exactly one graph face"
+4. **Add bidirectional references** (land-model step 3) — road↔block lookups
+5. **Add inset polygons** (land-model step 4) — width accounting

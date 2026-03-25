@@ -8,9 +8,11 @@ last-modified-by: user
 
 ## Overview
 
-The generator produces multiple grid layers (bitmaps) that represent terrain, water, roads, railways, buildings, and land use. These layers have invariant relationships — a cell that is water cannot also be a road, a building cannot sit on a railway, etc. Violations indicate pipeline bugs where one step produces output that contradicts another.
+Bitmap invariant tests are a **testing mechanism** for verifying [world state invariants](world-state-invariants) at the grid/bitmap level. They check per-cell layer overlap rules cheaply and can run at every pipeline step.
 
-These invariants should be checked **at every pipeline step**, not just at the end. A violation introduced at step 3 is much easier to diagnose when caught at step 3 than when it causes a rendering glitch at step 7.
+The world rules themselves (what must/must not exist) are defined in [world-state-invariants](world-state-invariants). This page covers how to test them using bitmap checks.
+
+These checks should run **at every pipeline step**, not just at the end. A violation introduced at step 3 is much easier to diagnose when caught at step 3 than when it causes a rendering glitch at step 7.
 
 ## Layer Relationships
 
