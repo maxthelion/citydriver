@@ -1,5 +1,6 @@
 import { Grid2D } from '../core/Grid2D.js';
 import { ZONE_SLOPE_BASE, ZONE_SLOPE_LV_BONUS } from './constants.js';
+import { matchBoundaryToGraphEdges } from './pipeline/matchBoundaryEdges.js';
 
 // Zone extraction thresholds
 const ZONE_LV_THRESHOLD = 0.15;
@@ -323,9 +324,22 @@ export function extractDevelopmentZones(map) {
       const gradingCost = avgSlope > 0.15 ? (avgSlope - 0.15) * 2 : 0;
       const priority = (lvSum / Math.max(1, distFromNucleus)) * (1 - gradingCost);
 
+      // Match boundary polygon to graph edges for topology references
+      let boundingEdgeIds = [];
+      let boundingNodeIds = [];
+      if (map.graph && boundary.length >= 3) {
+        const tolerance = cellSize * 3;
+        const matched = matchBoundaryToGraphEdges(boundary, map.graph, tolerance);
+        boundingEdgeIds = matched.edgeIds;
+        boundingNodeIds = matched.nodeIds;
+      }
+
       allZones.push({
         ...zone,
         nucleusIdx: ni,
+        polygon: boundary,
+        boundingEdgeIds,
+        boundingNodeIds,
         avgSlope,
         avgLandValue,
         slopeDir,
