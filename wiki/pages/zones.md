@@ -107,19 +107,27 @@ Once a zone is assigned a use type, it gets filled:
 
 See [land-allocation-model](land-allocation-model) for detailed allocation strategies per type.
 
-## Current Limitations
+## Current State
 
-### Two extraction methods coexist
-Graph-face extraction is the intended approach (zones as graph faces with road references). Flood-fill is kept as a fallback. See [pipeline-step-postconditions](pipeline-step-postconditions) for the plan to unify these.
+### Unified extraction
+Zone extraction uses flood-fill to find buildable cell regions, traces their boundary polygons, then matches each boundary to graph edges via `matchBoundaryToGraphEdges`. Graph-face extraction was removed — flood-fill is more robust and gives the same result via boundary matching.
 
-### Zone boundaries don't include all boundary types yet
-The land-model spec (`specs/v5/land-model.md`) envisions zones bounded by roads, water, railways, and planning lines. Currently only roads and the map boundary are graph edges. See [world-state-invariants](world-state-invariants) for the migration status.
+### Boundary types partially implemented
+Roads, rivers, and the map boundary are graph edges. Railways and planning lines are not yet. See [world-state-invariants](world-state-invariants) for the migration status.
 
-### No bidirectional references yet
-A zone knows which roads bound it (`boundingEdgeIds`), but a road doesn't know which zones are on either side. This makes "give me the zones along this road" a spatial search instead of an O(1) lookup.
+### Bidirectional references implemented
+`buildEdgeLookups` builds `map.edgeZones` (which zones are on each side of an edge) and `map.edgeParcels` (which parcels front onto an edge). O(1) lookups via `RoadNetwork.zonesAlongRoad()` and `parcelsAlongRoad()`.
 
-### No width accounting
-Zone polygons don't account for road width. The raw graph face extends to the road centreline, but the actual buildable area is inset by half the road width + sidewalk. Inset polygons (the buildable envelope) aren't computed yet.
+### Inset polygons implemented
+`computeInsetPolygons` shrinks each zone polygon inward from road edges (half-width + sidewalk), water edges (bank buffer), and map edges (margin). Stored as `zone.insetPolygon`.
+
+### Parcels and plots
+Zones are subdivided into parcels (contiguous reservation regions with edge classification) and plots (individual building lots along ribbon streets). See [[spatial-concepts]] for the hierarchy.
+
+### Remaining limitations
+- Plot-to-plot collision detection not yet implemented
+- Building placement not yet fully wired through the plot system
+- Commercial and civic plots not yet created by `subdividePlots` (only residential ribbon plots)
 
 ## Related
 
