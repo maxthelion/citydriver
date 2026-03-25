@@ -49,7 +49,7 @@ runToStep(strategy, 'spatial');
 // (which cuts interior roads) and re-extract using flood-fill so the new road
 // barriers are respected.
 subdivideLargeZones(map);
-extractZones(map, { forceFloodFill: true });
+extractZones(map);
 
 const zones = map.developmentZones;
 const W = map.width, H = map.height;

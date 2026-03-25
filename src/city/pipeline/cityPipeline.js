@@ -48,17 +48,16 @@ export function* cityPipeline(map, archetype) {
   yield step('skeleton',      () => buildSkeletonRoads(map));
   yield step('boundaries',    () => addBoundaryEdges(map));
   yield step('land-value',    () => computeLandValue(map));
-  // Zone extraction from graph faces. Boundary edges (map perimeter + rivers)
-  // ensure full face coverage even from a tree-like skeleton.
+  // Zone extraction via flood-fill. Boundary edges (map perimeter + rivers)
+  // act as barriers (roads/water block the fill).
   yield step('zones',         () => extractZones(map));
   let zoneBoundaryResult;
   yield step('zone-boundary', () => { zoneBoundaryResult = createZoneBoundaryRoads(map); });
   // Only re-extract if zone-boundary actually added roads (otherwise zones are unchanged).
-  // Force flood-fill: zone-boundary roads are stamped on roadGrid, so flood-fill
-  // naturally uses them as barriers. The graph typically has dangling edges from
-  // clipped boundary segments, making facesWithEdges() unreliable for re-extraction.
+  // Zone-boundary roads are stamped on roadGrid, so flood-fill naturally uses them
+  // as barriers when re-extracting.
   if (zoneBoundaryResult?.segmentsAdded > 0) {
-    yield step('zones-refine', () => extractZones(map, { forceFloodFill: true }));
+    yield step('zones-refine', () => extractZones(map));
   }
   yield step('spatial',       () => computeSpatialLayers(map));
 
