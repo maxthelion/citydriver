@@ -213,7 +213,34 @@ function runK3OnZone(zone, map) {
     }
   }
 
-  // Collect existing road segments from roadGrid for crossing checks
+  // Remove self-crossings — for each crossing pair, remove the shorter segment
+  function segIntersect(a0, a1, b0, b1) {
+    const dax = a1.x - a0.x, daz = a1.z - a0.z;
+    const dbx = b1.x - b0.x, dbz = b1.z - b0.z;
+    const det = dax * dbz - daz * dbx;
+    if (Math.abs(det) < 1e-10) return false;
+    const dx = b0.x - a0.x, dz = b0.z - a0.z;
+    const t = (dx * dbz - dz * dbx) / det;
+    const u = (dx * daz - dz * dax) / det;
+    return t > 0.02 && t < 0.98 && u > 0.02 && u < 0.98;
+  }
+
+  const allK3 = [...allCross, ...allParallel];
+  const rmCross = new Set(), rmParallel = new Set();
+  for (let i = 0; i < allK3.length; i++) {
+    for (let j = i + 1; j < allK3.length; j++) {
+      if (segIntersect(allK3[i][0], allK3[i][1], allK3[j][0], allK3[j][1])) {
+        const lenI = Math.hypot(allK3[i][1].x - allK3[i][0].x, allK3[i][1].z - allK3[i][0].z);
+        const lenJ = Math.hypot(allK3[j][1].x - allK3[j][0].x, allK3[j][1].z - allK3[j][0].z);
+        const rm = lenI < lenJ ? i : j;
+        if (rm < allCross.length) rmCross.add(rm); else rmParallel.add(rm - allCross.length);
+      }
+    }
+  }
+  for (let i = allCross.length - 1; i >= 0; i--) { if (rmCross.has(i)) allCross.splice(i, 1); }
+  for (let i = allParallel.length - 1; i >= 0; i--) { if (rmParallel.has(i)) allParallel.splice(i, 1); }
+
+  // Clip at existing roads
   const existingRoads = [];
   if (roadGrid) {
     for (const road of (map.roads || [])) {
@@ -223,6 +250,47 @@ function runK3OnZone(zone, map) {
       }
     }
   }
+
+  // Clip k3 segments at road cells
+  const clipAtRoads = (segments) => {
+    if (!roadGrid) return segments;
+    const result = [];
+    for (const seg of segments) {
+      const dx = seg[1].x - seg[0].x, dz = seg[1].z - seg[0].z;
+      const len = Math.hypot(dx, dz);
+      if (len < 1) { result.push(seg); continue; }
+      const stepLen = cs * 0.5;
+      const nSteps = Math.ceil(len / stepLen);
+      let lastClean = seg[0], hitRoad = false;
+      for (let s = 1; s <= nSteps; s++) {
+        const t = Math.min(s / nSteps, 1);
+        const px = seg[0].x + dx * t, pz = seg[0].z + dz * t;
+        const gx2 = Math.round((px - ox) / cs), gz2 = Math.round((pz - oz) / cs);
+        if (gx2 >= 0 && gx2 < W && gz2 >= 0 && gz2 < H && roadGrid.get(gx2, gz2) > 0) {
+          const clipLen = Math.hypot(px - lastClean.x, pz - lastClean.z);
+          if (clipLen >= MIN_STREET_LEN) result.push([{ ...lastClean }, { x: px, z: pz }]);
+          hitRoad = true;
+          while (s < nSteps) {
+            s++;
+            const t2 = Math.min(s / nSteps, 1);
+            const px2 = seg[0].x + dx * t2, pz2 = seg[0].z + dz * t2;
+            const gx3 = Math.round((px2 - ox) / cs), gz3 = Math.round((pz2 - oz) / cs);
+            if (gx3 < 0 || gx3 >= W || gz3 < 0 || gz3 >= H || roadGrid.get(gx3, gz3) === 0) {
+              lastClean = { x: px2, z: pz2 }; break;
+            }
+          }
+        }
+      }
+      const fl = Math.hypot(seg[1].x - lastClean.x, seg[1].z - lastClean.z);
+      if (fl >= MIN_STREET_LEN) result.push([{ ...lastClean }, { ...seg[1] }]);
+      else if (!hitRoad) result.push(seg);
+    }
+    return result;
+  };
+  const clippedCross = clipAtRoads(allCross);
+  const clippedPar = clipAtRoads(allParallel);
+  allCross.length = 0; allCross.push(...clippedCross);
+  allParallel.length = 0; allParallel.push(...clippedPar);
 
   return { allCross, allParallel, allJunctions, existingRoads, faces };
 }

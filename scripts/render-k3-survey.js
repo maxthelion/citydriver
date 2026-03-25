@@ -433,6 +433,43 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
     console.log(`    Parallel separation filter: ${parallelsBefore}->${allParallel.length}`);
   }
 
+  // 3. Remove self-crossings between k3 streets from different faces.
+  // For each pair of crossing segments, remove the shorter one.
+  function segIntersect(a0, a1, b0, b1) {
+    const dax = a1.x - a0.x, daz = a1.z - a0.z;
+    const dbx = b1.x - b0.x, dbz = b1.z - b0.z;
+    const det = dax * dbz - daz * dbx;
+    if (Math.abs(det) < 1e-10) return false;
+    const dx = b0.x - a0.x, dz = b0.z - a0.z;
+    const t = (dx * dbz - dz * dbx) / det;
+    const u = (dx * daz - dz * dax) / det;
+    return t > 0.02 && t < 0.98 && u > 0.02 && u < 0.98;
+  }
+
+  const allK3 = [...allCross, ...allParallel];
+  const toRemoveCross = new Set();
+  const toRemoveParallel = new Set();
+
+  for (let i = 0; i < allK3.length; i++) {
+    for (let j = i + 1; j < allK3.length; j++) {
+      if (segIntersect(allK3[i][0], allK3[i][1], allK3[j][0], allK3[j][1])) {
+        // Remove the shorter segment
+        const lenI = Math.hypot(allK3[i][1].x - allK3[i][0].x, allK3[i][1].z - allK3[i][0].z);
+        const lenJ = Math.hypot(allK3[j][1].x - allK3[j][0].x, allK3[j][1].z - allK3[j][0].z);
+        const removeIdx = lenI < lenJ ? i : j;
+        if (removeIdx < allCross.length) toRemoveCross.add(removeIdx);
+        else toRemoveParallel.add(removeIdx - allCross.length);
+      }
+    }
+  }
+
+  if (toRemoveCross.size > 0 || toRemoveParallel.size > 0) {
+    const crossBefore2 = allCross.length, parBefore2 = allParallel.length;
+    for (let i = allCross.length - 1; i >= 0; i--) { if (toRemoveCross.has(i)) allCross.splice(i, 1); }
+    for (let i = allParallel.length - 1; i >= 0; i--) { if (toRemoveParallel.has(i)) allParallel.splice(i, 1); }
+    console.log(`    Self-crossing filter: cross ${crossBefore2}->${allCross.length}, parallel ${parBefore2}->${allParallel.length}`);
+  }
+
   console.log(`  k3: ${allCross.length} cross streets, ${allParallel.length} parallel streets, ${allJunctions.length} junctions`);
   for (const s of faceStats) {
     console.log(`    Face ${s.fi} band=${s.band} cells=${s.cells} cross=${s.cross} parallel=${s.parallel}`);
