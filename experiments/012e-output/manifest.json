@@ -1,0 +1,78 @@
+{
+  "experiment": "012e",
+  "generated": "2026-03-25T19:55:00.786Z",
+  "seeds": [
+    "884469",
+    "42",
+    "12345"
+  ],
+  "layers": null,
+  "archetype": null,
+  "ticks": null,
+  "script": "render-k3-survey.js",
+  "images": [
+    {
+      "file": "k3-zone0-seed42.png",
+      "path": "012e-output/k3-zone0-seed42.png",
+      "layer": "k3-zone0",
+      "seed": "42",
+      "tick": null
+    },
+    {
+      "file": "k3-zone2-seed12345.png",
+      "path": "012e-output/k3-zone2-seed12345.png",
+      "layer": "k3-zone2",
+      "seed": "12345",
+      "tick": null
+    },
+    {
+      "file": "k3-zone1-seed12345.png",
+      "path": "012e-output/k3-zone1-seed12345.png",
+      "layer": "k3-zone1",
+      "seed": "12345",
+      "tick": null
+    },
+    {
+      "file": "k3-zone2-seed42.png",
+      "path": "012e-output/k3-zone2-seed42.png",
+      "layer": "k3-zone2",
+      "seed": "42",
+      "tick": null
+    },
+    {
+      "file": "k3-zone1-seed42.png",
+      "path": "012e-output/k3-zone1-seed42.png",
+      "layer": "k3-zone1",
+      "seed": "42",
+      "tick": null
+    },
+    {
+      "file": "k3-zone0-seed12345.png",
+      "path": "012e-output/k3-zone0-seed12345.png",
+      "layer": "k3-zone0",
+      "seed": "12345",
+      "tick": null
+    },
+    {
+      "file": "k3-zone0-seed884469.png",
+      "path": "012e-output/k3-zone0-seed884469.png",
+      "layer": "k3-zone0",
+      "seed": "884469",
+      "tick": null
+    },
+    {
+      "file": "k3-zone1-seed884469.png",
+      "path": "012e-output/k3-zone1-seed884469.png",
+      "layer": "k3-zone1",
+      "seed": "884469",
+      "tick": null
+    },
+    {
+      "file": "k3-zone2-seed884469.png",
+      "path": "012e-output/k3-zone2-seed884469.png",
+      "layer": "k3-zone2",
+      "seed": "884469",
+      "tick": null
+    }
+  ]
+}
