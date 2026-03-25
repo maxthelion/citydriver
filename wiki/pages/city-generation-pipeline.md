@@ -26,6 +26,10 @@ Before growth ticks run, the settlement is scored against all five archetypes (i
 
 Builds the arterial road network connecting nuclei via minimum spanning tree and A* pathfinding. Writes `roadGrid` and `bridgeGrid` layers, road features, and a planar graph for routing.
 
+### boundaries
+
+Adds non-road boundary edges to the planar graph: map perimeter (4 edges) and river polylines. These create cycles in the graph so that `facesWithEdges()` can produce enclosed faces even from a tree-like MST skeleton. Part of the land-model migration (boundary types). See `specs/v5/land-model.md`.
+
 ### land-value
 
 Computes `landValue` (0–1) for every cell. Two passes:
@@ -34,12 +38,14 @@ Computes `landValue` (0–1) for every cell. Two passes:
 
 ### zones
 
-Extracts development zones as **graph faces** from the planar road graph (`PlanarGraph.facesWithEdges()`). Each face becomes a zone with:
+Extracts development zones as **graph faces** from the planar graph (`PlanarGraph.facesWithEdges()`). With boundary edges in the graph (map perimeter + rivers), faces cover the full map even from a tree skeleton. Each face becomes a zone with:
 - `cells` — rasterized grid cells within the polygon
 - `polygon` / `boundingEdgeIds` / `boundingNodeIds` — topological references
 - `centroid`, `avgSlope`, `slopeDir`, `avgLandValue` — spatial metadata
 
 Falls back to a bitmap flood-fill approach if the graph has fewer than 2 edges.
+
+**Future direction:** Use flood-fill to find zone cell blobs, then match their boundaries to graph edges (road, water, map edge) for topological references. This is more robust than pure graph-face extraction and still gives the bidirectional road↔zone references the land-model spec requires.
 
 ### zone-boundary
 
@@ -104,8 +110,11 @@ Connects zone spines to the skeleton road network via A* pathfinding. Also runs 
 
 ## Related Docs
 
+- [[pipeline-step-postconditions]] — what should be true after each step (source of truth for testing)
 - [[pipeline-abstraction]] — PipelineRunner design, generator composition, strategy registry
 - [[pipeline-invariant-tests]] — bitmap, polyline, and block invariants checked at every step
+- [[pipeline-property-testing]] — three levels of validation (world rules, structural properties, distribution health)
 - [[pipeline-observability]] — hook-based timing and bitmap logging
+- [[world-state-invariants]] — all world rules gathered in one place
 - [[land-reservation]] — detailed doc on tick-5 (legacy) and growth agent allocation
 - [[terrain-face-streets]] — per-face ribbon layout design
