@@ -29,6 +29,7 @@ import {
   runInfluencePhase, runValuePhase, runRibbonPhase, runAllocatePhase, runRoadsPhase,
 } from './growthTick.js';
 import { createZoneBoundaryRoads } from './zoneBoundaryRoads.js';
+import { addBoundaryEdges } from './addBoundaryEdges.js';
 import { RESERVATION } from './growthAgents.js';
 import { GPUDevice } from '../../core/gpu/GPUDevice.js';
 import { GPUValueSession } from './valueLayersGPU.js';
@@ -45,11 +46,10 @@ const DEV_PROXIMITY_THRESHOLD = 0.01;
  */
 export function* cityPipeline(map, archetype) {
   yield step('skeleton',      () => buildSkeletonRoads(map));
+  yield step('boundaries',    () => addBoundaryEdges(map));
   yield step('land-value',    () => computeLandValue(map));
-  // Step 3: Zone re-extraction feedback loop (specs/v5/next-steps.md § Step 3)
-  // First extraction: coarse zones from skeleton faces only.
-  // Then zone boundary roads split large faces into finer parcels.
-  // Second extraction: re-run so graph faces reflect the new secondary roads.
+  // Zone extraction from graph faces. Boundary edges (map perimeter + rivers)
+  // ensure full face coverage even from a tree-like skeleton.
   yield step('zones',         () => extractZones(map));
   let zoneBoundaryResult;
   yield step('zone-boundary', () => { zoneBoundaryResult = createZoneBoundaryRoads(map); });
