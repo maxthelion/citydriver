@@ -7,10 +7,10 @@
  * Step sequence:
  *   skeleton   → land-value → zones → spatial
  *   → growth-1 … growth-N  (organic loop, archetype-driven)
- *   → parcels → connect → smooth-roads
+ *   → parcels → plots → connect → smooth-roads
  *
  * For archetypes without growth config, falls back to:
- *   reserve → ribbons → parcels → connect → smooth-roads
+ *   reserve → ribbons → parcels → plots → connect → smooth-roads
  *
  * Spec: specs/v5/next-steps.md § Step 1
  */
@@ -35,6 +35,8 @@ import { GPUDevice } from '../../core/gpu/GPUDevice.js';
 import { GPUValueSession } from './valueLayersGPU.js';
 import { GPUInfluenceSession } from './influenceLayersGPU.js';
 import { collectParcels } from './collectParcels.js';
+import { subdividePlots } from './subdividePlots.js';
+import { buildEdgeLookups } from './buildEdgeLookups.js';
 
 const DEV_PROXIMITY_THRESHOLD = 0.01;
 
@@ -70,6 +72,8 @@ export function* cityPipeline(map, archetype) {
   }
 
   yield step('parcels', () => collectParcels(map));
+  yield step('plots',   () => subdividePlots(map));
+  yield step('edge-lookups', () => buildEdgeLookups(map));
   yield step('connect', () => connectToNetwork(map));
   yield step('smooth-roads', () => {
     for (const road of map.roads) {
