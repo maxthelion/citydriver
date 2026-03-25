@@ -65,7 +65,6 @@ if (selectedZones.length === 0) {
 console.log(`Found ${candidates.length} candidate zones, rendering ${selectedZones.length}`);
 
 // ===== k3 constants =====
-const NUM_ASPECT_BANDS = 6;
 const CROSS_SPACING = 90;
 const PARALLEL_SPACING = 35;
 const MIN_STREET_LEN = 20;
@@ -99,29 +98,26 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
   const cropH = maxGz - minGz + 1;
   console.log(`  Crop: ${cropW}x${cropH} at (${minGx},${minGz})`);
 
-  // ===== k3: Terrain face segmentation =====
+  // ===== k3: Terrain face segmentation (elevation quartiles, as per 007k3) =====
   const zoneSet = new Set();
   for (const c of zone.cells) zoneSet.add(c.gz * W + c.gx);
 
+  // Elevation quartile thresholds — cells at similar elevation form one face
+  const elevations = zone.cells.map(c => elev.get(c.gx, c.gz)).sort((a, b) => a - b);
+  const q25 = elevations[Math.floor(elevations.length * 0.25)];
+  const q50 = elevations[Math.floor(elevations.length * 0.50)];
+  const q75 = elevations[Math.floor(elevations.length * 0.75)];
+  const thresholds = [q25, q50, q75];
+
   const bandGrid = new Int8Array(W * H).fill(-1);
   for (const c of zone.cells) {
-    const eC = elev.get(c.gx, c.gz);
-    const eE = (c.gx + 1 < W && zoneSet.has(c.gz * W + (c.gx + 1))) ? elev.get(c.gx + 1, c.gz) : eC;
-    const eW2 = (c.gx - 1 >= 0 && zoneSet.has(c.gz * W + (c.gx - 1))) ? elev.get(c.gx - 1, c.gz) : eC;
-    const eS = (c.gz + 1 < H && zoneSet.has((c.gz + 1) * W + c.gx)) ? elev.get(c.gx, c.gz + 1) : eC;
-    const eN = (c.gz - 1 >= 0 && zoneSet.has((c.gz - 1) * W + c.gx)) ? elev.get(c.gx, c.gz - 1) : eC;
-    const gx_ = (eE - eW2) / (2 * cs);
-    const gz_ = (eS - eN) / (2 * cs);
-    const mag = Math.sqrt(gx_ * gx_ + gz_ * gz_);
-    if (mag < 1e-6) {
-      bandGrid[c.gz * W + c.gx] = 0;
-    } else {
-      const angle = Math.atan2(gz_, gx_);
-      bandGrid[c.gz * W + c.gx] = Math.floor(((angle + Math.PI) / (2 * Math.PI)) * NUM_ASPECT_BANDS) % NUM_ASPECT_BANDS;
-    }
+    const e = elev.get(c.gx, c.gz);
+    let band = 0;
+    for (const t of thresholds) { if (e >= t) band++; }
+    bandGrid[c.gz * W + c.gx] = band;
   }
 
-  // Flood-fill faces
+  // Flood-fill faces — contiguous cells at same elevation band
   const visited = new Uint8Array(W * H);
   const faces = [];
   for (const c of zone.cells) {
@@ -144,10 +140,10 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
         queue.push({ gx: nx, gz: nz });
       }
     }
-    if (cells.length >= 300) faces.push({ cells, band });
+    if (cells.length >= 500) faces.push({ cells, band });
   }
 
-  console.log(`  ${faces.length} terrain faces (min 300 cells)`);
+  console.log(`  ${faces.length} terrain faces (elevation quartiles, min 500 cells)`);
 
   // ===== k3: Distance-indexed junction layout =====
   const allCross = [];
