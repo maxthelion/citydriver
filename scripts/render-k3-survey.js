@@ -266,10 +266,10 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       ]);
 
       // Walk cross street measuring horizontal arc-length for junction points
-      const junctionMap = new Map();
+      // Store elevation at each junction for elevation-based matching
+      const junctions = [];
       const profile = bestRun;
       let distAccum = 0;
-      let pointIndex = 0;
 
       for (let si = 0; si < profile.length; si++) {
         if (si > 0) {
@@ -282,35 +282,48 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
 
         const pt = profile[si];
         if (pt.cgx < 0 || pt.cgx >= W || pt.cgz < 0 || pt.cgz >= H) continue;
-        junctionMap.set(pointIndex, { x: pt.wx, z: pt.wz });
-        pointIndex++;
+        const e = elev.get(pt.cgx, pt.cgz);
+        junctions.push({ x: pt.wx, z: pt.wz, elev: e });
       }
 
-      crossStreets.push({ ctOff, start: segStart, end: segEnd, junctionMap });
+      crossStreets.push({ ctOff, start: segStart, end: segEnd, junctions });
     }
 
-    // Connect matching distance indices between adjacent cross streets
+    // Connect junctions between adjacent cross streets by closest ELEVATION
+    // (not by sequential index — same index can be at very different elevations
+    // when contours curve)
     crossStreets.sort((a, b) => a.ctOff - b.ctOff);
 
     let faceCross = crossStreets.length;
     let faceParallel = 0;
 
     for (const cs_ of crossStreets) {
-      for (const [, pt] of cs_.junctionMap) {
+      for (const pt of cs_.junctions) {
         allJunctions.push({ x: pt.x, z: pt.z });
       }
     }
 
     for (let k = 0; k < crossStreets.length - 1; k++) {
-      const csA = crossStreets[k];
-      const csB = crossStreets[k + 1];
+      const jA = crossStreets[k].junctions;
+      const jB = crossStreets[k + 1].junctions;
+      const usedB = new Set();
 
-      for (const [key, pA] of csA.junctionMap) {
-        const pB = csB.junctionMap.get(key);
-        if (!pB) continue;
+      for (const pA of jA) {
+        // Find closest junction on next cross street by elevation
+        let bestIdx = -1, bestElevDiff = Infinity;
+        for (let bi = 0; bi < jB.length; bi++) {
+          if (usedB.has(bi)) continue;
+          const diff = Math.abs(pA.elev - jB[bi].elev);
+          if (diff < bestElevDiff) { bestElevDiff = diff; bestIdx = bi; }
+        }
+        if (bestIdx < 0) continue;
+        const pB = jB[bestIdx];
+        usedB.add(bestIdx);
 
         const segLen = Math.sqrt((pB.x - pA.x) ** 2 + (pB.z - pA.z) ** 2);
         if (segLen < MIN_STREET_LEN) continue;
+        // Skip if gradient is too steep (> 15%)
+        if (bestElevDiff / segLen > 0.15) continue;
 
         allParallel.push([{ x: pA.x, z: pA.z }, { x: pB.x, z: pB.z }]);
         faceParallel++;
@@ -318,6 +331,106 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
     }
 
     faceStats.push({ fi, band: face.band, cells: face.cells.length, cross: faceCross, parallel: faceParallel });
+  }
+
+  // ===== Post-processing: remove parallel violations and road crossings =====
+
+  // 1. Remove parallel streets that are too close to another parallel (< 5m)
+  const MIN_PARALLEL_SEP = 5;
+  const parallelsBefore = allParallel.length;
+  for (let i = allParallel.length - 1; i >= 0; i--) {
+    const midI = {
+      x: (allParallel[i][0].x + allParallel[i][1].x) / 2,
+      z: (allParallel[i][0].z + allParallel[i][1].z) / 2,
+    };
+    const angleI = Math.atan2(
+      allParallel[i][1].z - allParallel[i][0].z,
+      allParallel[i][1].x - allParallel[i][0].x
+    );
+    for (let j = 0; j < i; j++) {
+      const angleJ = Math.atan2(
+        allParallel[j][1].z - allParallel[j][0].z,
+        allParallel[j][1].x - allParallel[j][0].x
+      );
+      let angleDiff = Math.abs(angleI - angleJ);
+      if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+      if (angleDiff > Math.PI / 12) continue; // >15° — not parallel
+
+      // Distance from midpoint of i to segment j
+      const a = allParallel[j][0], b = allParallel[j][1];
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const lenSq = dx * dx + dz * dz;
+      if (lenSq === 0) continue;
+      let t = ((midI.x - a.x) * dx + (midI.z - a.z) * dz) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      const dist = Math.hypot(midI.x - (a.x + t * dx), midI.z - (a.z + t * dz));
+      if (dist < MIN_PARALLEL_SEP) {
+        allParallel.splice(i, 1);
+        break;
+      }
+    }
+  }
+
+  // 2. Clip streets at existing road cells — truncate at road grid intersections
+  if (roadGrid) {
+    const clipSegments = (segments) => {
+      const result = [];
+      for (const seg of segments) {
+        // Walk the segment checking for road cells
+        const dx = seg[1].x - seg[0].x, dz = seg[1].z - seg[0].z;
+        const len = Math.hypot(dx, dz);
+        if (len < 1) { result.push(seg); continue; }
+        const stepLen = cs * 0.5;
+        const nSteps = Math.ceil(len / stepLen);
+        let lastCleanPt = seg[0];
+        let hitRoad = false;
+        for (let s = 1; s <= nSteps; s++) {
+          const t = Math.min(s / nSteps, 1);
+          const px = seg[0].x + dx * t, pz = seg[0].z + dz * t;
+          const gx2 = Math.round((px - ox) / cs), gz2 = Math.round((pz - oz) / cs);
+          if (gx2 >= 0 && gx2 < W && gz2 >= 0 && gz2 < H && roadGrid.get(gx2, gz2) > 0) {
+            // Hit a road — emit segment up to here if long enough
+            const clipLen = Math.hypot(px - lastCleanPt.x, pz - lastCleanPt.z);
+            if (clipLen >= MIN_STREET_LEN) {
+              result.push([{ x: lastCleanPt.x, z: lastCleanPt.z }, { x: px, z: pz }]);
+            }
+            hitRoad = true;
+            // Skip past the road
+            while (s < nSteps) {
+              s++;
+              const t2 = Math.min(s / nSteps, 1);
+              const px2 = seg[0].x + dx * t2, pz2 = seg[0].z + dz * t2;
+              const gx3 = Math.round((px2 - ox) / cs), gz3 = Math.round((pz2 - oz) / cs);
+              if (gx3 < 0 || gx3 >= W || gz3 < 0 || gz3 >= H || roadGrid.get(gx3, gz3) === 0) {
+                lastCleanPt = { x: px2, z: pz2 };
+                break;
+              }
+            }
+          }
+        }
+        // Emit final segment after last road crossing
+        const finalLen = Math.hypot(seg[1].x - lastCleanPt.x, seg[1].z - lastCleanPt.z);
+        if (finalLen >= MIN_STREET_LEN) {
+          result.push([{ x: lastCleanPt.x, z: lastCleanPt.z }, { x: seg[1].x, z: seg[1].z }]);
+        } else if (!hitRoad) {
+          result.push(seg); // No road hit — keep original
+        }
+      }
+      return result;
+    };
+
+    const crossBefore = allCross.length, parBeforeClip = allParallel.length;
+    const clippedCross = clipSegments(allCross);
+    const clippedParallel = clipSegments(allParallel);
+    allCross.length = 0; allCross.push(...clippedCross);
+    allParallel.length = 0; allParallel.push(...clippedParallel);
+    if (crossBefore !== allCross.length || parBeforeClip !== allParallel.length) {
+      console.log(`    Clipped at roads: cross ${crossBefore}->${allCross.length}, parallel ${parBeforeClip}->${allParallel.length}`);
+    }
+  }
+
+  if (parallelsBefore !== allParallel.length) {
+    console.log(`    Parallel separation filter: ${parallelsBefore}->${allParallel.length}`);
   }
 
   console.log(`  k3: ${allCross.length} cross streets, ${allParallel.length} parallel streets, ${allJunctions.length} junctions`);

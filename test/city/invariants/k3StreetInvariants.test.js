@@ -152,31 +152,64 @@ function runK3OnZone(zone, map) {
       if (segLen < MIN_STREET_LEN) continue;
       allCross.push([{ x: segStart.wx, z: segStart.wz }, { x: segEnd.wx, z: segEnd.wz }]);
 
-      const junctionMap = new Map();
-      let distAccum = 0, pointIndex = 0;
+      const junctions = [];
+      let distAccum = 0;
       for (let si = 0; si < bestRun.length; si++) {
         if (si > 0) distAccum += Math.hypot(bestRun[si].wx - bestRun[si-1].wx, bestRun[si].wz - bestRun[si-1].wz);
         if (distAccum < PARALLEL_SPACING) continue;
         distAccum = 0;
-        junctionMap.set(pointIndex, { x: bestRun[si].wx, z: bestRun[si].wz, elev: elev.get(bestRun[si].cgx, bestRun[si].cgz) });
-        pointIndex++;
+        const e = elev.get(bestRun[si].cgx, bestRun[si].cgz);
+        junctions.push({ x: bestRun[si].wx, z: bestRun[si].wz, elev: e });
       }
-      crossStreets.push({ ctOff, junctionMap });
+      crossStreets.push({ ctOff, junctions });
     }
 
     crossStreets.sort((a, b) => a.ctOff - b.ctOff);
     for (const cs_ of crossStreets) {
-      for (const [, pt] of cs_.junctionMap) allJunctions.push(pt);
+      for (const pt of cs_.junctions) allJunctions.push(pt);
     }
+    // Connect junctions by closest elevation (not sequential index)
     for (let k = 0; k < crossStreets.length - 1; k++) {
-      const csA = crossStreets[k], csB = crossStreets[k + 1];
-      for (const [key, pA] of csA.junctionMap) {
-        const pB = csB.junctionMap.get(key);
-        if (!pB) continue;
+      const jA = crossStreets[k].junctions, jB = crossStreets[k + 1].junctions;
+      const usedB = new Set();
+      for (const pA of jA) {
+        let bestIdx = -1, bestElevDiff = Infinity;
+        for (let bi = 0; bi < jB.length; bi++) {
+          if (usedB.has(bi)) continue;
+          const diff = Math.abs(pA.elev - jB[bi].elev);
+          if (diff < bestElevDiff) { bestElevDiff = diff; bestIdx = bi; }
+        }
+        if (bestIdx < 0) continue;
+        const pB = jB[bestIdx];
+        usedB.add(bestIdx);
         const segLen = Math.hypot(pB.x - pA.x, pB.z - pA.z);
         if (segLen < MIN_STREET_LEN) continue;
+        if (bestElevDiff / segLen > 0.15) continue; // Skip steep connections
         allParallel.push([{ x: pA.x, z: pA.z }, { x: pB.x, z: pB.z }]);
       }
+    }
+  }
+
+  // Post-process: remove parallel streets within 5m of each other
+  for (let i = allParallel.length - 1; i >= 0; i--) {
+    const midI = {
+      x: (allParallel[i][0].x + allParallel[i][1].x) / 2,
+      z: (allParallel[i][0].z + allParallel[i][1].z) / 2,
+    };
+    const angleI = Math.atan2(allParallel[i][1].z - allParallel[i][0].z, allParallel[i][1].x - allParallel[i][0].x);
+    for (let j = 0; j < i; j++) {
+      const angleJ = Math.atan2(allParallel[j][1].z - allParallel[j][0].z, allParallel[j][1].x - allParallel[j][0].x);
+      let angleDiff = Math.abs(angleI - angleJ);
+      if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+      if (angleDiff > Math.PI / 12) continue;
+      const a = allParallel[j][0], b = allParallel[j][1];
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const lenSq = dx * dx + dz * dz;
+      if (lenSq === 0) continue;
+      let t = ((midI.x - a.x) * dx + (midI.z - a.z) * dz) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      const dist = Math.hypot(midI.x - (a.x + t * dx), midI.z - (a.z + t * dz));
+      if (dist < 5) { allParallel.splice(i, 1); break; }
     }
   }
 
