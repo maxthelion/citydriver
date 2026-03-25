@@ -216,3 +216,26 @@ Each level uses information from the level above. Zones depend on roads. Parcels
 ### Development is sequential, not parallel
 
 Parcels within a zone are claimed in order. Commercial takes the best road frontage first. Residential fills the remainder. Each allocation changes the shape and edges of what's left. The system needs to track this — it's not enough to stamp cells independently.
+
+### Linear features split land and consume area
+
+Running a road, river, or railway through a zone doesn't just divide it — it removes land.
+
+A road of width 10m running through a zone:
+- **Splits** the zone into two zones, one on each side
+- **Consumes** a 10m-wide strip of land (no longer buildable)
+- **Creates frontage** on both sides (plots can face the new road)
+
+A river running through a zone:
+- **Splits** it in two
+- **Consumes** the river's width
+- **Creates amenity edges** (views, parkland potential) but **no road frontage**
+
+A railway:
+- **Splits** it in two
+- **Consumes** the rail corridor width
+- **Creates barrier edges** — no frontage, no amenity, just noise and inaccessibility
+
+This is why **ribbon streets work**: each parallel street splits the parcel and creates new frontage. A residential parcel starts with frontage only on its bounding roads. After five ribbon streets are laid through it, there are now twelve edges with road frontage (original edges + both sides of five streets). Every plot can face a street.
+
+This is also why width accounting matters. A zone's gross area is its polygon area. Its net buildable area is the gross area minus all the linear features passing through it. The land-model spec's inset polygon concept captures this — shrink the zone polygon inward by half-road-width for each bounding road to get the actual buildable envelope.
