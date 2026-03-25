@@ -1,6 +1,7 @@
 ---
 title: "World State Invariants"
-category: "design"
+category: "testing"
+parent: "pipeline-invariant-tests"
 tags: [invariants, world-state, rules, design]
 summary: "Falsifiable rules about what must and must not exist in the generated world. Tested by bitmap invariants and network geometry checks."
 last-modified-by: user
@@ -19,7 +20,7 @@ Violations indicate that the generator has produced something physically impossi
 | No roads in water | A road cannot pass through a water cell (bridges are recorded separately, not as road-in-water) |
 | No railways in water | Same as roads — bridges are separate |
 | No buildings in water | No structure can occupy a water cell |
-| No development zones in water | Zones are buildable land only |
+| No development [[zones]] in water | Zones are buildable land only |
 
 ## Roads — Layer Conflicts
 
@@ -38,8 +39,10 @@ Violations indicate that the generator has produced something physically impossi
 | Collector separation from arterial | Collector centreline at least 10m from parallel arterial |
 | No unresolved crossings (residential) | Two residential streets cannot cross without forming a junction — there is no physical way for this to exist |
 | No unresolved crossings (collector) | Two collectors cannot cross without a junction |
+| No cross-face street crossings | Streets generated in different terrain faces must not cross each other. Each face produces streets in its own direction; where faces meet, streets should terminate or form junctions, not pass through each other. |
 | Arterials may bridge/tunnel | Arterial or skeleton roads may cross other roads via bridge or tunnel |
 | Dead-end minimum length | A dead-end road must be at least 15m long (one plot depth) — shorter serves no purpose |
+| Junction elevation consistency | Connected junctions (parallel street endpoints) should be at similar elevation. Max gradient 15% for a residential street. Junctions should be matched by elevation, not by sequential position along the cross street. |
 
 ## Roads — Topology
 
@@ -53,7 +56,7 @@ Violations indicate that the generator has produced something physically impossi
 
 | Invariant | Description |
 |-----------|-------------|
-| Every plot has road frontage | A plot must share at least one edge with a road — no landlocked plots |
+| Every plot has road frontage | A plot must share at least one edge with a road — no landlocked [[plots]] |
 | Frontage minimum width | Plot frontage is at least 5m (one cell width) |
 | Buildings within plots | Building footprints do not extend beyond their plot boundary |
 
@@ -71,7 +74,7 @@ Violations indicate that the generator has produced something physically impossi
 
 | Invariant | Description |
 |-----------|-------------|
-| Nuclei on buildable land | Settlement nuclei are on land with buildability > 0.2 |
+| [[nuclei|Nuclei]] on buildable land | Settlement nuclei are on land with buildability > 0.2 |
 | Zones on buildable land | Zone cells have buildability above threshold |
 | Reservations within zones | Every reservation cell is inside a zone |
 | Valid reservation types | Reservation grid values are valid enum (0-9) |
@@ -87,12 +90,15 @@ Violations indicate that the generator has produced something physically impossi
 
 These invariants are verified by different testing approaches depending on cost and complexity:
 
-| Mechanism | What it checks | Cost | See |
-|-----------|---------------|------|-----|
-| Bitmap invariant tests | Layer overlap rules (water/road, road/building, etc.) | Cheap — per-cell bitwise checks | [bitmap-invariants](bitmap-invariants) |
-| Network geometry checks | Road separation, crossing rules, dead-ends | Medium — segment intersection tests | [road-network-invariants](road-network-invariants) |
-| Graph connectivity checks | Reachability, hierarchy, orphaned streets | Medium — BFS/DFS traversal | [road-network-invariants](road-network-invariants) |
-| Plot adjacency checks | Frontage rules | Cheap — boundary cell adjacency | [road-network-invariants](road-network-invariants) |
+| Mechanism | What it checks | Cost | Implemented | See |
+|-----------|---------------|------|-------------|-----|
+| Bitmap invariant tests | Layer overlap rules (water/road, road/building, etc.) | Cheap — per-cell bitwise checks | ✅ | `src/city/invariants/bitmapInvariants.js` |
+| Graph integrity checks | Duplicate edges, dangling edges | Cheap — graph traversal | ✅ | `src/city/invariants/polylineInvariants.js` |
+| Street geometry checks | Parallel separation, crossings, dead-ends, elevation consistency | Medium — segment intersection | ✅ | `src/city/invariants/streetGeometryChecks.js` |
+| k3 invariant tests | All geometry checks applied to k3 output across seeds | Medium — runs k3 on real terrain | ✅ (4 failures) | `test/city/invariants/k3StreetInvariants.test.js` |
+| Pipeline postconditions | Zone count, coverage, road count, monotonicity | Medium — runs pipeline per seed | ✅ | `test/city/pipeline/pipelinePostconditions.test.js` |
+| Graph connectivity checks | Reachability, hierarchy, orphaned streets | Medium — BFS/DFS traversal | ❌ | [road-network-invariants](road-network-invariants) |
+| Plot adjacency checks | Frontage rules | Cheap — boundary cell adjacency | ❌ | [road-network-invariants](road-network-invariants) |
 
 ## Land Model Invariants (from specs/v5/land-model.md)
 
@@ -108,14 +114,14 @@ These invariants are defined in the land-model spec but NOT YET IMPLEMENTED in c
 
 ### Boundary Types (NOT YET IMPLEMENTED)
 
-The land-model spec defines boundaries as anything that separates land — not just roads. Graph faces should be bounded by:
+The land-model spec defines [[boundaries]] as anything that separates land — not just roads. Graph faces should be bounded by:
 - Roads
 - Water edges (rivers, coastline)
 - Map boundary edges
 - Railway edges
 - Planning lines (no physical form)
 
-Currently only roads are in the planar graph. Water and map boundaries are not represented as graph edges, which is why graph-face extraction fails on tree-like skeletons — there aren't enough edges to form closed faces.
+Currently only roads are in the [[planar-graph|planar graph]]. Water and map boundaries are not represented as graph edges, which is why graph-face extraction fails on tree-like skeletons — there aren't enough edges to form closed faces.
 
 ### Width Accounting (NOT YET IMPLEMENTED)
 
@@ -158,7 +164,7 @@ From `specs/v5/land-model.md` migration path:
 
 The petri loop uses invariants as part of its three-tier evaluation:
 
-- **Tier 1** — Bitmap invariants (must pass or instant reject)
+- **Tier 1** — [[bitmap-invariants|Bitmap invariants]] (must pass or instant reject)
 - **Tier 2** — Network geometry heuristics derived from these invariants (must not regress)
 - **Tier 3** — Visual evaluation by judge agent (subjective quality)
 
