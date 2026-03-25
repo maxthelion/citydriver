@@ -158,9 +158,51 @@ A binary or graded assessment of whether land can be built on. Filters zone cell
 
 Proximity gradients from existing development (industrial proximity, civic proximity, etc.). These shift future development — industrial repels residential, civic attracts commercial. Recomputed each growth tick.
 
-## The Key Insight
+## Development Consumes Capacity
 
-The spatial hierarchy is about **progressive refinement**:
+A zone is not assigned a single use and filled. Development happens in stages, and **each stage changes what's left for the next.**
+
+Example: a zone bounded by an anchor road (south), a river (east), a residential street (north), and a collector (west).
+
+1. **Commercial claims the anchor road frontage.** A thin parcel runs along the south edge — shops facing the main road. The zone's available land shrinks.
+
+2. **Residential fills the remainder.** But the remainder has different edges now:
+   - South edge: backs of commercial plots (no road frontage — houses can't face this way)
+   - East edge: river (no frontage, but amenity value)
+   - North edge: residential street (frontage available)
+   - West edge: collector road (frontage available)
+
+3. **Ribbon streets must respect edge character.** Streets run parallel to the north/west road edges (where frontage is available), not parallel to the south edge (commercial backs — no access). The back of the commercial parcel becomes garden/fence territory, not house fronts.
+
+This means every parcel edge has a character:
+
+| Edge type | Frontage? | What faces it |
+|-----------|-----------|---------------|
+| Road | Yes | House fronts, shop fronts |
+| Back of another parcel | No | Gardens, fences, blank walls |
+| Water | No (usually) | Gardens with views, amenity |
+| Map edge | No | Edge condition, not real frontage |
+
+**Frontage is a finite resource.** A zone starts with road frontage on all its bounding edges. As parcels are claimed — especially commercial taking the best road frontage — the remaining land has less frontage available. Ribbon layout needs to know which edges still offer frontage so it can orient streets correctly.
+
+This is also why mixed-use zones are realistic: in a real city, the shops face the main road and the houses sit behind them, reached by side streets. The commercial and residential parcels have a spatial relationship — the commercial acts as a buffer between the busy road and the quieter residential area behind.
+
+### Implications for the code
+
+Currently, the reservation system stamps use types per-cell (`reservationGrid`) without tracking parcel geometry or edge character. To support the behaviour described above, the system would need:
+
+- **Parcel objects** (not just per-cell labels) — contiguous areas with a use type and explicit edges
+- **Edge classification** — each parcel edge knows whether it borders a road, water, another parcel (and what type), or the map edge
+- **Remaining capacity** — after a parcel is claimed, the zone knows what land is left and what edges the remainder has
+- **Frontage awareness** — ribbon layout knows which edges have road frontage and orients streets accordingly
+
+This is not yet implemented but is consistent with the land-model spec's vision of blocks with explicit boundary references.
+
+## Key Insights
+
+### Progressive refinement
+
+The spatial hierarchy is about progressive refinement:
 
 1. Start with raw terrain
 2. Roads and water carve it into **zones** (what's available)
@@ -170,3 +212,7 @@ The spatial hierarchy is about **progressive refinement**:
 6. **Buildings** fill plots
 
 Each level uses information from the level above. Zones depend on roads. Parcels depend on zones. Plots depend on streets. This is why getting zones right is fundamental — everything downstream depends on them.
+
+### Development is sequential, not parallel
+
+Parcels within a zone are claimed in order. Commercial takes the best road frontage first. Residential fills the remainder. Each allocation changes the shape and edges of what's left. The system needs to track this — it's not enough to stamp cells independently.
