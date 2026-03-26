@@ -170,6 +170,39 @@ This produces the experiment 007p smooth curve effect: grid near roads, organic 
 | Min parcel depth | 15m | Reject slivers |
 | Min frontage | 5m | Every plot needs meaningful road access |
 
+## Working Around Existing Reservations
+
+Street layout doesn't operate on a raw zone — it operates on what's **left** after earlier allocations. Commercial may have claimed anchor road frontage. A church or park site may have been reserved. The residential street layout must work around these.
+
+### Order of operations
+
+```
+1. Zone extracted (full buildable area)
+2. Commercial allocator claims anchor road frontage → reservationGrid updated
+3. Civic allocator reserves church/park/school sites → reservationGrid updated
+4. Street layout runs on remaining available area
+5. Residential parcels created in the street-defined blocks
+6. Plots cut from residential parcels
+```
+
+### How it works
+
+Build a `blockedGrid` from cells that are water, road, or already reserved (any non-NONE value in `reservationGrid`). The street layout algorithm treats blocked cells the same way it treats water:
+
+- **Construction lines** skip blocked cells (stop or route around reservations)
+- **Parallel streets** are clipped at reservation boundaries
+- **Parcels** are created in the gaps between streets and blocked areas
+- **Waste** is computed against available area (zone minus water minus roads minus reservations), not raw zone area
+
+This doesn't require polygon boolean operations — the bitmap approach works. Reserved parcels appear as obstacles in the cell grid, and the incremental street algorithm already validates each street against the grid cell by cell.
+
+### Implications
+
+- A zone with a park reserved in the middle gets streets that wrap around the park
+- Commercial frontage along an anchor road pushes the first parallel street further in
+- A church plot causes construction lines to split around it, creating smaller blocks either side
+- The waste metric measures coverage of the *available* area, not the raw zone — a zone with 30% reserved for commercial and a park should still achieve low waste on the remaining 70%
+
 ## How This Differs from the Current Algorithm
 
 | Aspect | [[contour-street-algorithm|Current]] | Incremental |
