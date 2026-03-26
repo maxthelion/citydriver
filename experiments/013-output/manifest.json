@@ -1,0 +1,78 @@
+{
+  "experiment": "013",
+  "generated": "2026-03-26T08:43:13.740Z",
+  "seeds": [
+    "884469",
+    "42",
+    "12345"
+  ],
+  "layers": null,
+  "archetype": null,
+  "ticks": null,
+  "script": "render-incremental-streets.js",
+  "images": [
+    {
+      "file": "incremental-zone2-seed12345.png",
+      "path": "013-output/incremental-zone2-seed12345.png",
+      "layer": "incremental-zone2",
+      "seed": "12345",
+      "tick": null
+    },
+    {
+      "file": "incremental-zone0-seed884469.png",
+      "path": "013-output/incremental-zone0-seed884469.png",
+      "layer": "incremental-zone0",
+      "seed": "884469",
+      "tick": null
+    },
+    {
+      "file": "incremental-zone1-seed12345.png",
+      "path": "013-output/incremental-zone1-seed12345.png",
+      "layer": "incremental-zone1",
+      "seed": "12345",
+      "tick": null
+    },
+    {
+      "file": "incremental-zone1-seed884469.png",
+      "path": "013-output/incremental-zone1-seed884469.png",
+      "layer": "incremental-zone1",
+      "seed": "884469",
+      "tick": null
+    },
+    {
+      "file": "incremental-zone1-seed42.png",
+      "path": "013-output/incremental-zone1-seed42.png",
+      "layer": "incremental-zone1",
+      "seed": "42",
+      "tick": null
+    },
+    {
+      "file": "incremental-zone2-seed884469.png",
+      "path": "013-output/incremental-zone2-seed884469.png",
+      "layer": "incremental-zone2",
+      "seed": "884469",
+      "tick": null
+    },
+    {
+      "file": "incremental-zone2-seed42.png",
+      "path": "013-output/incremental-zone2-seed42.png",
+      "layer": "incremental-zone2",
+      "seed": "42",
+      "tick": null
+    },
+    {
+      "file": "incremental-zone0-seed42.png",
+      "path": "013-output/incremental-zone0-seed42.png",
+      "layer": "incremental-zone0",
+      "seed": "42",
+      "tick": null
+    },
+    {
+      "file": "incremental-zone0-seed12345.png",
+      "path": "013-output/incremental-zone0-seed12345.png",
+      "layer": "incremental-zone0",
+      "seed": "12345",
+      "tick": null
+    }
+  ]
+}
