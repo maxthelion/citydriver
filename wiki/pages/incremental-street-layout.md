@@ -130,6 +130,32 @@ At the end of the process, every zone has:
 
 Every street was validated when it was laid. Every parcel was validated when it was created. No post-processing needed. No gaps.
 
+## Perpendicular Junctions with Anchor Roads
+
+Streets should meet skeleton/anchor roads at close to 90°. A street joining a main road at 30° is ugly and creates unusable acute-angled parcels in the corners.
+
+This was the focus of experiments 007l through 007s. The key finding from 007p (smooth curve): streets approach anchor roads perpendicularly, then bend to follow contours deeper in. This is how real hillside cities work — a clean junction with the high street, curving away into terraced housing.
+
+### How this works in incremental layout
+
+**Construction lines** originate from anchor road junctions at close to perpendicular. They start straight (perpendicular to the anchor road) then gradually curve to follow the terrain gradient as they move into the zone interior. The blend distance depends on the zone size — a small zone might stay grid-like throughout, a large zone bends within the first 100-200m.
+
+**Parallel streets** near anchor roads are also approximately perpendicular to the construction lines — which means they run approximately parallel to the anchor road. This creates a grid-like block structure near the main road, transitioning to contour-following deeper in.
+
+**The last street** meeting the far anchor road poses a special problem. If the natural contour-following direction would create a bad junction angle, the street's far endpoint can be adjusted to improve it. This makes the final parcel slightly non-rectangular, which is acceptable — real city blocks aren't perfect rectangles.
+
+### Blend function
+
+The perpendicularity constraint should relax with distance from anchor roads:
+
+```
+At anchor road (distance = 0):     street angle = perpendicular to anchor ±5°
+At blend distance (~100-200m):     street angle = follow terrain contour
+Between:                           linear blend of the two directions
+```
+
+This produces the experiment 007p smooth curve effect: grid near roads, organic in the interior, smooth transition between.
+
 ## Parameters
 
 | Parameter | Value | Meaning |
@@ -138,6 +164,8 @@ Every street was validated when it was laid. Every parcel was validated when it 
 | Target parcel depth | ~35m | Two plot rows back-to-back + road |
 | Construction line spacing | ~90m | Distance between cross streets |
 | Angle tolerance | ±30° | How far parallel streets can deviate from perpendicular |
+| Anchor perpendicularity | ±5° | How close streets must be to 90° at anchor roads |
+| Blend distance | 100-200m | Distance over which perpendicular → contour transition happens |
 | Min street length | 20m | Don't create tiny stub streets |
 | Min parcel depth | 15m | Reject slivers |
 | Min frontage | 5m | Every plot needs meaningful road access |
