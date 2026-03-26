@@ -1,6 +1,7 @@
 ---
 title: "Terrain Face Streets"
 category: "algorithms"
+parent: "land-reservation"
 tags: [terrain, streets, ribbons, zones, slope, contour]
 summary: "Street layout by segmenting zones into terrain faces with consistent slope, then laying contour-following streets and uphill cross streets within each face."
 last-modified-by: user
@@ -8,7 +9,7 @@ last-modified-by: user
 
 ## Core Idea
 
-Real cities on hills are composed of distinct terrain faces — each with consistent slope direction and steepness. Each face gets a street pattern suited to its character. The boundaries between faces (ridges, valleys, grade breaks) are where major roads naturally run.
+Real cities on hills are composed of distinct terrain faces — each with consistent slope direction and steepness. Each face gets a street pattern suited to its character. The [[boundaries]] between faces (ridges, valleys, grade breaks) are where major roads naturally run.
 
 ## How It Works
 
@@ -39,7 +40,7 @@ For sloped faces:
 1. Identify the **bottom edge** (downhill boundary) and **top edge** (uphill boundary)
 2. Subdivide both edges at regular intervals (e.g. every 90m)
 3. Connect corresponding points between top and bottom — these connections go straight uphill and become cross streets
-4. The parallel/contour streets are then drawn between adjacent cross streets at the desired plot depth
+4. The parallel/contour streets are then drawn between adjacent cross streets at the desired [[plots|plot]] depth
 
 This is similar to experiment 007e's gradient walk, but with the key improvement: by splitting into faces first, each face's top and bottom edges are well-defined, so the cross streets are straight and parallel rather than fanning irregularly.
 
@@ -63,7 +64,7 @@ These face-boundary roads connect to the zone boundary roads (from experiment 00
 | 007g | Contour tracing | Parallel streets follow terrain perfectly, but cross streets were a mess |
 
 The terrain face approach combines the best findings:
-- From 007a: split zones where terrain varies
+- From 007a: split [[zones]] where terrain varies
 - From 007e: cross streets go uphill from bottom to top edge
 - From 007g: parallel streets follow contour lines within each face
 - From 007d: measured grid points ensure consistent spacing
@@ -87,3 +88,10 @@ For each face, classify boundary segments:
 2. Subdivide top edge at same intervals → ending points
 3. Connect corresponding start/end points → cross streets (uphill)
 4. Between adjacent cross streets, draw parallel lines at plot-depth spacing → contour streets
+
+## Current State
+
+Two implementations exist:
+
+- **[[contour-street-algorithm]]** — the current batch approach (experiments 007a-007k3). Generates all streets at once, post-processes. Has quality issues with junction matching and face boundary gaps.
+- **[[incremental-street-layout]]** — the planned replacement. Lays streets one at a time, validates each, creates parcels as it goes. Perpendicular junctions with anchor roads, smooth contour transition in interior. Being implemented as a render script for [[experiment-loop|petri loop]] iteration.

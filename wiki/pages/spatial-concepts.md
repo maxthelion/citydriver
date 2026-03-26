@@ -23,7 +23,7 @@ City map
 
 ### Zone
 
-**What it is:** A piece of land enclosed by boundaries — roads, rivers, coastline, or the edge of the map. The remainder after roads and water have been accounted for.
+**What it is:** A piece of land enclosed by [[boundaries]] — roads, rivers, coastline, or the edge of the map. The remainder after roads and water have been accounted for.
 
 **Real-world analogy:** A city block. The area between streets.
 
@@ -33,12 +33,12 @@ City map
 - Bounded by roads, water, and map edges
 - Contains only buildable land (steep slopes, water excluded)
 - Has terrain metadata (slope, direction) that influences what can be built
-- Has land value that influences development priority
+- Has [[land-value|land value]] that influences development priority
 - Does NOT have a single use type — a zone can contain multiple uses
 
 **Relationship to other concepts:** A zone is subdivided into parcels. A zone's boundaries are roads and natural features. A zone may contain commercial along the anchor road and residential in the interior.
 
-See [zones](zones) for full details.
+See [[zones]] for full details.
 
 ### Parcel (Reservation)
 
@@ -60,7 +60,7 @@ See [zones](zones) for full details.
 - Industrial claims whole zones or large sub-zones
 - Civic claims specific plots for typed buildings
 
-**Relationship to other concepts:** A parcel is inside a zone. A parcel is filled by a layout strategy (ribbons for residential, frontage for commercial). A parcel contains plots.
+**Relationship to other concepts:** A parcel is inside a zone. A parcel is filled by a layout strategy (ribbons for residential, frontage for commercial). A parcel contains [[plots]].
 
 ### Ribbon
 
@@ -77,6 +77,8 @@ See [zones](zones) for full details.
 - Not all parcels use ribbons — only residential types
 
 **Relationship to other concepts:** Ribbons are a layout strategy applied to residential parcels within zones. The spaces between ribbon streets are where plots are cut.
+
+**Implementation:** See [[contour-street-algorithm]] for the current batch approach, and [[incremental-street-layout]] for the planned replacement that lays streets one at a time with per-street validation.
 
 ### Plot
 
@@ -114,7 +116,7 @@ See [zones](zones) for full details.
 
 ### Nucleus
 
-**What it is:** A growth centre — the seed point from which a settlement develops. Cities can have multiple nuclei (a main town centre, a secondary market, a waterfront district).
+**What it is:** A growth centre — the seed point from which a settlement develops. Cities can have multiple [[nuclei]] (a main town centre, a secondary market, a waterfront district).
 
 **Real-world analogy:** A village green, a market square, a church — the historical centre around which a settlement grew.
 
@@ -140,7 +142,7 @@ See [zones](zones) for full details.
 - **Railway boundary** — a railway line (not yet implemented as graph edge)
 - **Planning line** — an administrative boundary with no physical form (not yet implemented)
 
-**Relationship to other concepts:** Boundaries enclose zones. The planar graph contains all boundary edges. Graph face extraction uses boundaries to find zones.
+**Relationship to other concepts:** Boundaries enclose zones. The [[planar-graph|planar graph]] contains all boundary edges. Graph face extraction uses boundaries to find zones.
 
 ## Scoring Layers (Not Spatial Units)
 
@@ -156,7 +158,7 @@ A binary or graded assessment of whether land can be built on. Filters zone cell
 
 ### Influence Layers
 
-Proximity gradients from existing development (industrial proximity, civic proximity, etc.). These shift future development — industrial repels residential, civic attracts commercial. Recomputed each growth tick.
+Proximity gradients from existing development (industrial proximity, civic proximity, etc.). These shift future development — industrial repels residential, civic attracts commercial. Recomputed each [[growth-ticks|growth tick]].
 
 ## Development Consumes Capacity
 
