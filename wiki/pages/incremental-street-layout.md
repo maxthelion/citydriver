@@ -6,9 +6,11 @@ summary: "Next-generation street layout that builds streets one at a time with p
 last-modified-by: user
 ---
 
-## Core Principle
+## Core Principles
 
 **Lay one street, check it, create the parcel, then lay the next.** Problems are caught and corrected before they become the foundation for future streets.
+
+**Adapt, don't reject.** When a street hits an obstacle, truncate it there. When it crosses a road, form a T-junction. Only skip a street entirely if the truncated version is too short (< 20m). The old algorithm rejected violating streets and left gaps. This algorithm shortens them and keeps the coverage.
 
 This replaces the [[contour-street-algorithm|current approach]] which generates all streets in a batch, then post-processes to remove violations. Batch-then-filter creates gaps and leaves quality issues that are hard to fix after the fact. Incremental construction produces streets that are correct by design.
 
@@ -36,12 +38,15 @@ Before laying any parallel streets, establish the **construction lines** — the
 
 1. **Determine the contour direction** from the zone's terrain (average gradient → contour is perpendicular)
 2. **Find anchor roads** — the existing roads at the zone's edges that construction lines will connect to
-3. **Lay construction lines** from anchor road to anchor road (or anchor road to zone boundary), running approximately uphill/downhill
+3. **Lay construction lines** from anchor road across the zone to the opposite boundary (or opposite road), running approximately uphill/downhill. Space them at ~90m intervals along each anchor edge.
 4. **Validate each construction line:**
-   - Must connect to the existing road network at both ends
-   - Must not cross water or unbuildable terrain
+   - Must not cross water or unbuildable terrain (in the zone interior — road cells at the origin don't count, since the line starts at a road)
    - Must not run within 5m of another construction line
    - If validation fails, adjust or skip
+
+Construction lines must **span the zone**. A line that starts at an anchor road and stops after a few cells is useless — it needs to reach the opposite boundary to form a corridor that parallel streets can fill. After routing lines from anchor edges, supplement with gradient-direction lines in any areas not yet covered.
+
+**Pairing construction lines:** two construction lines form a corridor if they travel in roughly the same direction and are spatially adjacent. Sort all lines with similar travel direction by their position along the perpendicular axis — neighbours in this sorted order are pairs. Lines from different anchor edges along the same road should pair naturally.
 
 Construction lines define the **cross street grid** — the scaffold that parallel streets will fill.
 
@@ -128,7 +133,7 @@ At the end of the process, every zone has:
 - **Parcels** between each pair of parallel streets, with validated dimensions
 - **Plots** cut from parcels with guaranteed frontage
 
-Every street was validated when it was laid. Every parcel was validated when it was created. No post-processing needed. No gaps.
+Every street was validated when it was laid. Every parcel was validated when it was created. No post-processing needed. A well-shaped zone should achieve < 40% waste on buildable area; if waste is much higher, construction lines aren't spanning the zone or streets are being rejected instead of truncated.
 
 ## Perpendicular Junctions with Anchor Roads
 
@@ -189,8 +194,8 @@ Street layout doesn't operate on a raw zone — it operates on what's **left** a
 
 Build a `blockedGrid` from cells that are water, road, or already reserved (any non-NONE value in `reservationGrid`). The street layout algorithm treats blocked cells the same way it treats water:
 
-- **Construction lines** skip blocked cells (stop or route around reservations)
-- **Parallel streets** are clipped at reservation boundaries
+- **Construction lines** stop at blocked cells in the zone interior (water, reservations). Road cells at the line's origin are traversed — the line starts at a road and must clear it.
+- **Parallel streets** are truncated at blocked cells (same adapt-don't-reject principle)
 - **Parcels** are created in the gaps between streets and blocked areas
 - **Waste** is computed against available area (zone minus water minus roads minus reservations), not raw zone area
 
