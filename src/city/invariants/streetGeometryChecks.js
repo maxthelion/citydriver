@@ -164,6 +164,149 @@ export function countShortDeadEnds(segments, minLength = 15, snapRadius = 3) {
 }
 
 /**
+ * Count segments that cross water cells.
+ * Walk each segment at half-cell steps and check if any point falls on water.
+ *
+ * @param {Array} segments - Array of [{x,z}, {x,z}] line segments
+ * @param {Object} waterMask - Grid layer with .get(gx, gz) returning water value
+ * @param {number} ox - Origin X (world coords)
+ * @param {number} oz - Origin Z (world coords)
+ * @param {number} cs - Cell size
+ * @param {number} W - Grid width
+ * @param {number} H - Grid height
+ * @returns {number} Count of segments that cross water
+ */
+export function countWaterCrossings(segments, waterMask, ox, oz, cs, W, H) {
+  let violations = 0;
+  for (const seg of segments) {
+    const dx = seg[1].x - seg[0].x, dz = seg[1].z - seg[0].z;
+    const len = Math.hypot(dx, dz);
+    if (len < 1) continue;
+    const steps = Math.ceil(len / (cs * 0.5));
+    let crossesWater = false;
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      const gx = Math.round((seg[0].x + dx * t - ox) / cs);
+      const gz = Math.round((seg[0].z + dz * t - oz) / cs);
+      if (gx >= 0 && gx < W && gz >= 0 && gz < H && waterMask.get(gx, gz) > 0) {
+        crossesWater = true;
+        break;
+      }
+    }
+    if (crossesWater) violations++;
+  }
+  return violations;
+}
+
+/**
+ * Like countParallelViolations but checks 3 points along each segment
+ * (start, middle, end) against the other segment, not just midpoint.
+ * Two parallel segments violate if ANY of the 3 points is within
+ * minSeparation of the other segment.
+ *
+ * @param {Array} segments - Array of [{x,z}, {x,z}] line segments
+ * @param {number} minSeparation - Minimum distance in world units (default 5m)
+ * @param {number} angleTolerance - Max angle difference to count as parallel (default 15 degrees)
+ * @returns {number} Count of violations
+ */
+export function countFullLengthParallelViolations(segments, minSeparation = 5, angleTolerance = 15) {
+  let violations = 0;
+  for (let i = 0; i < segments.length; i++) {
+    const ai = segmentAngle(segments[i]);
+    // 3 sample points: start, middle, end
+    const points = [
+      segments[i][0],
+      {
+        x: (segments[i][0].x + segments[i][1].x) / 2,
+        z: (segments[i][0].z + segments[i][1].z) / 2,
+      },
+      segments[i][1],
+    ];
+    for (let j = i + 1; j < segments.length; j++) {
+      const aj = segmentAngle(segments[j]);
+      let angleDiff = Math.abs(ai - aj);
+      if (angleDiff > 90) angleDiff = 180 - angleDiff;
+      if (angleDiff > angleTolerance) continue;
+
+      // Check distance from each of the 3 points of i to segment j
+      let tooClose = false;
+      for (const pt of points) {
+        const dist = pointToSegmentDist(
+          pt.x, pt.z,
+          segments[j][0].x, segments[j][0].z,
+          segments[j][1].x, segments[j][1].z
+        );
+        if (dist < minSeparation) {
+          tooClose = true;
+          break;
+        }
+      }
+      if (tooClose) violations++;
+    }
+  }
+  return violations;
+}
+
+/**
+ * Check how many zone cells are covered by terrain faces.
+ * Given zone cells and face cell lists, count zone cells that aren't in any face.
+ *
+ * @param {Array} zoneCells - Array of {gx, gz} cells
+ * @param {Array} faces - Array of { cells: [{gx, gz}, ...] }
+ * @param {number} W - Grid width
+ * @returns {{ uncoveredCells: number, totalZoneCells: number, coverageRatio: number }}
+ */
+export function checkFaceCoverage(zoneCells, faces, W) {
+  const faceCellSet = new Set();
+  for (const face of faces) {
+    for (const c of face.cells) faceCellSet.add(c.gz * W + c.gx);
+  }
+  let uncovered = 0;
+  for (const c of zoneCells) {
+    if (!faceCellSet.has(c.gz * W + c.gx)) uncovered++;
+  }
+  return {
+    uncoveredCells: uncovered,
+    totalZoneCells: zoneCells.length,
+    coverageRatio: 1 - uncovered / zoneCells.length,
+  };
+}
+
+/**
+ * Check parcel viability based on bounding-box dimensions.
+ * Given a parcel polygon (4+ corners), compute width and depth,
+ * and check minimum dimensions and aspect ratio.
+ *
+ * @param {Array} polygon - Array of {x, z} points
+ * @param {number} cs - Cell size (unused but available for future thresholds)
+ * @returns {{ width: number, depth: number, shortSide: number, longSide: number, ratio: number, tooShallow: boolean, tooNarrow: boolean, isSliver: boolean }}
+ */
+export function checkParcelViability(polygon, cs) {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const p of polygon) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.z < minZ) minZ = p.z;
+    if (p.z > maxZ) maxZ = p.z;
+  }
+  const w = maxX - minX, d = maxZ - minZ;
+  const shortSide = Math.min(w, d);
+  const longSide = Math.max(w, d);
+  const ratio = longSide > 0 ? shortSide / longSide : 0;
+
+  return {
+    width: w,
+    depth: d,
+    shortSide,
+    longSide,
+    ratio,
+    tooShallow: shortSide < 15,  // can't fit plots
+    tooNarrow: longSide < 20,    // not enough frontage
+    isSliver: ratio < 0.1,       // extremely elongated
+  };
+}
+
+/**
  * Run all heuristic checks on a set of line segments.
  *
  * @param {Array} allSegments - All line segments (k3 + s2 combined)

@@ -26,6 +26,9 @@ import {
   countParallelViolations,
   countUnresolvedCrossings,
   countShortDeadEnds,
+  countWaterCrossings,
+  countFullLengthParallelViolations,
+  checkFaceCoverage,
 } from '../../../src/city/invariants/streetGeometryChecks.js';
 
 // ── k3 algorithm (extracted from render-k3-survey.js) ─────────────────────
@@ -415,5 +418,41 @@ for (const { seed, gx, gz } of TEST_CASES) {
     // NOTE: zone boundary check removed from multi-zone test — each zone's
     // streets are generated within that zone, but this test aggregates streets
     // from multiple zones. Per-zone boundary checking needs per-zone street tracking.
+
+    // ── Invariant 6: No streets cross water ──
+
+    it('no streets cross water', () => {
+      if (!result) return;
+      const waterMask = result.map.getLayer('water') || result.map.getLayer('waterMask');
+      if (!waterMask) return; // skip if no water layer available
+      const k3Segments = [...result.allCross, ...result.allParallel];
+      const violations = countWaterCrossings(
+        k3Segments, waterMask,
+        result.map.originX, result.map.originZ,
+        result.map.cellSize, result.map.width, result.map.height
+      );
+      expect(violations, `${violations} k3 streets cross water`).toBe(0);
+    });
+
+    // ── Invariant 7: Full-length parallel separation ──
+
+    it('full-length parallel separation (5m, 3-point check)', () => {
+      if (!result) return;
+      const violations = countFullLengthParallelViolations(result.allParallel, 5, 15);
+      expect(violations, `${violations} parallel street pairs too close (full-length check)`).toBe(0);
+    });
+
+    // ── Invariant 8: Terrain faces cover most zone cells ──
+
+    it('terrain faces cover most zone cells (>80%)', () => {
+      if (!result) return;
+      const { coverageRatio, uncoveredCells, totalZoneCells } = checkFaceCoverage(
+        result.zone.cells, result.faces, result.map.width
+      );
+      expect(
+        coverageRatio,
+        `face coverage ${(coverageRatio * 100).toFixed(1)}% (${uncoveredCells}/${totalZoneCells} uncovered)`
+      ).toBeGreaterThan(0.8);
+    });
   });
 }
