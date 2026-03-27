@@ -55,6 +55,24 @@ Each line ends when it:
 - Reaches the top edge of the zone
 - Meets an anchor road at a right angle
 
+## Step Size
+
+The step size controls how far the point advances per iteration — a resolution/fidelity tradeoff.
+
+**Too large**: the path can overshoot skeleton road influence zones entirely (missing the perpendicular pull), produce jagged segments at turns, or exit the zone boundary between checks.
+
+**Too small**: computationally wasteful for minimal smoothness gain.
+
+### Heuristics
+
+- Step size should be small relative to the features it needs to respond to. The tightest constraint is the skeleton road anchor threshold — a step size larger than the threshold would blow right past it.
+- **Fraction of anchor threshold**: e.g. 1/4 to 1/3 of the anchor threshold distance
+- **Fraction of zone width**: e.g. 1/20th to 1/40th of the zone's narrowest dimension
+
+### Adaptive Stepping
+
+An optional refinement: take larger steps in the middle of the zone where only the contour gradient matters (smooth, predictable), and smaller steps near skeleton roads where precise perpendicular meeting matters. This adds complexity and may not be needed initially.
+
 ## Properties
 
 - Approximate parallelism at a macro level, driven by a single contour gradient for the zone
