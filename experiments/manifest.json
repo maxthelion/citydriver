@@ -623,5 +623,608 @@
         "tick": null
       }
     ]
+  },
+  {
+    "num": "016",
+    "slug": "incremental-streets-library",
+    "md": "016-incremental-streets-library.md",
+    "images": [
+      {
+        "path": "016-output/incremental-zone0-seed884469.png",
+        "layer": "incremental-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "016-output/incremental-zone1-seed884469.png",
+        "layer": "incremental-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "016-output/incremental-zone2-seed884469.png",
+        "layer": "incremental-zone2",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "017",
+    "slug": "cross-streets-only",
+    "md": "017-cross-streets-only.md",
+    "images": [
+      {
+        "path": "017-output/cross-streets-zone2-seed884469.png",
+        "layer": "cross-streets-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017-output/cross-streets-zone0-seed884469.png",
+        "layer": "cross-streets-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017-output/cross-streets-zone1-seed884469.png",
+        "layer": "cross-streets-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "017a",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "017a-output/cross-streets-zone2-seed884469.png",
+        "layer": "cross-streets-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017a-output/cross-streets-zone0-seed884469.png",
+        "layer": "cross-streets-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017a-output/cross-streets-zone1-seed884469.png",
+        "layer": "cross-streets-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "017b",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "017b-output/cross-streets-zone2-seed884469.png",
+        "layer": "cross-streets-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017b-output/cross-streets-zone0-seed884469.png",
+        "layer": "cross-streets-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017b-output/cross-streets-zone1-seed884469.png",
+        "layer": "cross-streets-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "017c",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "017c-output/cross-streets-zone2-seed884469.png",
+        "layer": "cross-streets-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017c-output/cross-streets-zone0-seed884469.png",
+        "layer": "cross-streets-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017c-output/cross-streets-zone1-seed884469.png",
+        "layer": "cross-streets-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "017d",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "017d-output/cross-streets-zone2-seed884469.png",
+        "layer": "cross-streets-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017d-output/cross-streets-zone0-seed884469.png",
+        "layer": "cross-streets-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017d-output/cross-streets-zone1-seed884469.png",
+        "layer": "cross-streets-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "017e",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "017e-output/cross-streets-zone2-seed884469.png",
+        "layer": "cross-streets-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017e-output/cross-streets-zone0-seed884469.png",
+        "layer": "cross-streets-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017e-output/cross-streets-zone1-seed884469.png",
+        "layer": "cross-streets-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "017f",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "017f-output/cross-streets-zone2-seed884469.png",
+        "layer": "cross-streets-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017f-output/cross-streets-zone0-seed884469.png",
+        "layer": "cross-streets-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017f-output/cross-streets-zone1-seed884469.png",
+        "layer": "cross-streets-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "017g",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "017g-output/cross-streets-zone2-seed884469.png",
+        "layer": "cross-streets-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017g-output/cross-streets-zone0-seed884469.png",
+        "layer": "cross-streets-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017g-output/cross-streets-zone1-seed884469.png",
+        "layer": "cross-streets-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "017h",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "017h-output/cross-streets-zone2-seed884469.png",
+        "layer": "cross-streets-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017h-output/cross-streets-zone0-seed884469.png",
+        "layer": "cross-streets-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017h-output/cross-streets-zone1-seed884469.png",
+        "layer": "cross-streets-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "017i",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "017i-output/cross-streets-zone2-seed884469.png",
+        "layer": "cross-streets-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017i-output/cross-streets-zone0-seed884469.png",
+        "layer": "cross-streets-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017i-output/cross-streets-zone1-seed884469.png",
+        "layer": "cross-streets-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "017j",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "017j-output/cross-streets-zone2-seed884469.png",
+        "layer": "cross-streets-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017j-output/cross-streets-zone0-seed884469.png",
+        "layer": "cross-streets-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017j-output/cross-streets-zone1-seed884469.png",
+        "layer": "cross-streets-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "017k",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "017k-output/cross-streets-zone2-seed884469.png",
+        "layer": "cross-streets-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017k-output/cross-streets-zone0-seed884469.png",
+        "layer": "cross-streets-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017k-output/cross-streets-zone1-seed884469.png",
+        "layer": "cross-streets-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "017l",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "017l-output/cross-streets-zone2-seed884469.png",
+        "layer": "cross-streets-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017l-output/cross-streets-zone0-seed884469.png",
+        "layer": "cross-streets-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "017l-output/cross-streets-zone1-seed884469.png",
+        "layer": "cross-streets-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "018",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "018-output/faces-zone2-seed884469.png",
+        "layer": "faces-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "018-output/faces-zone1-seed884469.png",
+        "layer": "faces-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "018-output/faces-zone0-seed884469.png",
+        "layer": "faces-zone0",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "019",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "019-output/ridge-faces-zone2-seed884469.png",
+        "layer": "ridge-faces-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "019-output/ridge-faces-zone1-seed884469.png",
+        "layer": "ridge-faces-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "019-output/ridge-faces-zone0-seed884469.png",
+        "layer": "ridge-faces-zone0",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "019b",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "019b-output/ridge-fullmap-seed884469.png",
+        "layer": "ridge-fullmap",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "019c",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "019c-output/ridge-terrain-seed884469.png",
+        "layer": "ridge-terrain",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "019d",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "019d-output/ridge-terrain-30deg-seed884469.png",
+        "layer": "ridge-terrain-30deg",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "019e",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "019e-output/ridge-elev-bands-seed884469.png",
+        "layer": "ridge-elev-bands",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "019f",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "019f-output/ridge-slope-bands-seed884469.png",
+        "layer": "ridge-slope-bands",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "019g",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "019g-output/ridge-combined-seed884469.png",
+        "layer": "ridge-combined",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "019h",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "019h-output/ridge-combined-seed42.png",
+        "layer": "ridge-combined",
+        "seed": "42",
+        "tick": null
+      },
+      {
+        "path": "019h-output/ridge-combined-seed884469.png",
+        "layer": "ridge-combined",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "019h-output/ridge-combined-seed12345.png",
+        "layer": "ridge-combined",
+        "seed": "12345",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "019i",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "019i-output/ridge-combined-seed42.png",
+        "layer": "ridge-combined",
+        "seed": "42",
+        "tick": null
+      },
+      {
+        "path": "019i-output/ridge-combined-seed884469.png",
+        "layer": "ridge-combined",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "019i-output/ridge-combined-seed12345.png",
+        "layer": "ridge-combined",
+        "seed": "12345",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "020",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "020-output/parcels-seed12345.png",
+        "layer": "parcels",
+        "seed": "12345",
+        "tick": null
+      },
+      {
+        "path": "020-output/parcels-seed42.png",
+        "layer": "parcels",
+        "seed": "42",
+        "tick": null
+      },
+      {
+        "path": "020-output/parcels-seed884469.png",
+        "layer": "parcels",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "020a",
+    "slug": "unknown",
+    "md": null,
+    "images": [
+      {
+        "path": "020a-output/parcels-seed12345.png",
+        "layer": "parcels",
+        "seed": "12345",
+        "tick": null
+      },
+      {
+        "path": "020a-output/parcels-seed42.png",
+        "layer": "parcels",
+        "seed": "42",
+        "tick": null
+      },
+      {
+        "path": "020a-output/parcels-seed884469.png",
+        "layer": "parcels",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "021",
+    "slug": "sector-cross-streets",
+    "md": "021-sector-cross-streets.md",
+    "images": [
+      {
+        "path": "021-output/cross-streets-zone2-seed884469.png",
+        "layer": "cross-streets-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "021-output/cross-streets-zone0-seed884469.png",
+        "layer": "cross-streets-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "021-output/cross-streets-zone1-seed884469.png",
+        "layer": "cross-streets-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
   }
 ]
