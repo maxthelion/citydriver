@@ -142,9 +142,20 @@ What's described in the spec but not yet implemented:
 
 These are refinements that can be added incrementally. The current implementation produces correct, evenly-spaced cross streets that span zones and terminate properly.
 
+## Per-Sector Cross Streets (Experiment 021)
+
+Running `layCrossStreets` per **sector** (zone × face intersection) instead of per zone gives each sector its own gradient direction from the terrain face. This produces significantly better terrain alignment in large zones where the slope changes direction.
+
+Results (seed 884469):
+- Large zones split into 6-7 sectors with visibly different street angles — streets follow local contour lines instead of one averaged direction
+- Overall cross street count increases (e.g. 63 per-sector vs ~20 per-zone in Zone 2)
+- Small sectors (< 500 cells) produce few streets but still contribute
+
+**Open issue — sector boundary gaps:** Streets don't connect across sector boundaries. Adjacent sectors have different gradient directions, so their cross streets don't align at the boundary. Possible fixes: blending gradient direction near sector edges, or stitching streets that end near a boundary to the nearest street in the adjacent sector.
+
 ## Properties
 
-- Even parallelism at 90m spacing, driven by a single contour gradient for the zone
+- Even parallelism at 90m spacing, driven by a single contour gradient for the zone (or sector, if per-sector mode)
 - Lines span from one zone edge to the other in the gradient direction
 - Road-split zones get separate cross streets in each lobe
 - Dead ends occur where the skeleton network has gaps (upstream issue, not a cross street bug)
@@ -152,6 +163,7 @@ These are refinements that can be added incrementally. The current implementatio
 ## Related
 
 - [[incremental-street-layout]] — the overall layout process (cross streets + ribbons)
+- [[terrain-face-segmentation]] — face segmentation that creates sectors for per-sector cross streets
 - [[terrain-face-streets]] — broader terrain-face street layout strategy that uses cross streets within faces
 - [[zone-based-allocation]] — how zones are defined and allocated
 - [[world-state-invariants]] — rules cross streets must satisfy
