@@ -11,7 +11,7 @@ last-modified-by: user
 Street layout within a zone happens in two phases, each described on its own page:
 
 1. **[[laying-zone-cross-streets]]** — lay cross streets that traverse the zone uphill, forming the scaffold
-2. **Laying ribbons** (parallel streets between cross streets) — *needs its own page; design in progress*
+2. **[[laying-zone-ribbons]]** — lay ribbon streets between adjacent cross streets, forming parcels
 
 The key principle across both phases: **lay one street, check it, then lay the next.** Problems are caught and corrected before they become the foundation for future streets. This replaces the [[contour-street-algorithm|batch approach]] which generates all streets at once and post-processes to remove violations.
 
@@ -33,16 +33,9 @@ The output is a set of curved polylines spanning the zone — the scaffold that 
 
 ## Phase 2: Ribbons (Parallel Streets)
 
-*This phase needs further design and its own wiki page.*
+See **[[laying-zone-ribbons]]** for the full algorithm.
 
-The broad approach: given cross streets as the scaffold, lay parallel streets between adjacent pairs. Each ribbon connects a point on one cross street to the corresponding point on the adjacent cross street, running roughly along the contour.
-
-Key design questions still open:
-
-- **Junction positions on cross streets belong to the line, not the corridor.** Two corridors sharing a cross street must use the same junction points. Junction positions should be at fixed arc-length intervals along the cross street, computed once.
-- **Junction sharing.** When a ribbon from corridor (A,B) terminates at point P on cross street B, the ribbon from corridor (B,C) must start from the same point P — not a nearby-but-different point.
-- **Parcel creation.** The space between consecutive accepted ribbons in a corridor is immediately a parcel. Parcels are validated for depth, aspect ratio, and water content.
-- **Plot subdivision.** After all ribbons and parcels, cut plots from each parcel by walking along frontage edges at regular intervals.
+Ribbons connect adjacent cross streets along the contour direction. The key insight: after the first ribbon in a corridor, each subsequent ribbon has **one endpoint determined** (continuing the road from the previous ribbon) and **one endpoint placed** (at the target parcel depth along the adjacent cross street). The sides alternate, forming a self-correcting zigzag up the corridor.
 
 ## What This Produces
 
@@ -101,6 +94,7 @@ Street layout operates on what's **left** after earlier allocations. Build a blo
 ## Related
 
 - [[laying-zone-cross-streets]] — Phase 1 algorithm (cross streets)
+- [[laying-zone-ribbons]] — Phase 2 algorithm (ribbons between cross streets)
 - [[contour-street-algorithm]] — the batch approach this replaces
 - [[spatial-concepts]] — the zone → parcel → plot hierarchy
 - [[plots]] — cut from parcels after streets are laid
