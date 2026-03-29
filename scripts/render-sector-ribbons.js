@@ -158,12 +158,15 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
   // Run cross streets and ribbons per sector, committing via tryAddRoad
   const allCrossStreets = [];
   const allRibbons = [];
+  const allFailedRibbons = [];
+  const allSeedAnchors = [];
   let totalParcels = 0;
   let totalCsRejects = 0;
   let totalRibbonRejects = 0;
 
   for (let si = 0; si < sectors.length; si++) {
     const sector = sectors[si];
+    const sectorFailureCounts = {};
     const { crossStreets } = layCrossStreets(sector, map);
 
     // Commit cross streets via tryAddRoad
@@ -182,7 +185,17 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
 
     // Lay ribbons between committed cross streets
     if (committedCrossStreets.length >= 2) {
-      const { ribbons, parcels, angleRejects } = layRibbons(committedCrossStreets, sector, map);
+      const {
+        ribbons,
+        parcels,
+        angleRejects,
+        failedRibbons = [],
+        seedAnchors = [],
+        failureSummary = { reasons: {} },
+      } = layRibbons(committedCrossStreets, sector, map);
+      allFailedRibbons.push(...failedRibbons);
+      allSeedAnchors.push(...seedAnchors);
+      mergeCounts(sectorFailureCounts, failureSummary.reasons || {});
 
       // Commit ribbons via tryAddRoad
       let ribbonRejects = 0;
@@ -193,6 +206,14 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
           committedRibbons.push(ribbon);
         } else {
           ribbonRejects++;
+          const reason = classifyTransactionFailure(result.violations);
+          addCount(sectorFailureCounts, reason);
+          allFailedRibbons.push({
+            points: ribbon.points,
+            reason,
+            source: 'transaction',
+            corridorIdx: ribbon.corridorIdx,
+          });
         }
       }
       allRibbons.push(...committedRibbons);
@@ -202,7 +223,8 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       const csStr = csRejects > 0 ? `, ${csRejects} cs rejected` : '';
       const ribStr = ribbonRejects > 0 ? `, ${ribbonRejects} ribbons rejected` : '';
       const angStr = angleRejects > 0 ? `, ${angleRejects} angle rejects` : '';
-      console.log(`    Sector ${si}: ${committedCrossStreets.length}/${crossStreets.length} cross streets, ${committedRibbons.length}/${ribbons.length} ribbons, ${parcels.length} parcels${csStr}${ribStr}${angStr}`);
+      const failStr = formatFailureCounts(sectorFailureCounts);
+      console.log(`    Sector ${si}: ${committedCrossStreets.length}/${crossStreets.length} cross streets, ${committedRibbons.length}/${ribbons.length} ribbons, ${parcels.length} parcels${csStr}${ribStr}${angStr}${failStr ? `, failures ${failStr}` : ''}`);
     } else {
       const csStr = csRejects > 0 ? ` (${csRejects} rejected)` : '';
       console.log(`    Sector ${si}: ${committedCrossStreets.length} cross streets${csStr} (too few for ribbons)`);
@@ -225,7 +247,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
   });
 
   // ===== Render =====
-  const pixels = new Uint8Array(cropW * cropH * 3);
+  const basePixels = new Uint8Array(cropW * cropH * 3);
 
   // Layer 1: Elevation grayscale base
   for (let z = 0; z < cropH; z++) {
@@ -234,10 +256,10 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       const v = (elev.get(gx2, gz2) - eBounds.min) / eRange;
       const idx = (z * cropW + x) * 3;
       if (waterMask && waterMask.get(gx2, gz2) > 0) {
-        pixels[idx] = 15; pixels[idx + 1] = 30; pixels[idx + 2] = 80;
+        basePixels[idx] = 15; basePixels[idx + 1] = 30; basePixels[idx + 2] = 80;
       } else {
         const grey = Math.round(40 + v * 80);
-        pixels[idx] = grey; pixels[idx + 1] = grey; pixels[idx + 2] = grey;
+        basePixels[idx] = grey; basePixels[idx + 1] = grey; basePixels[idx + 2] = grey;
       }
     }
   }
@@ -251,9 +273,9 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       const pz = c.gz - minGz;
       if (px < 0 || px >= cropW || pz < 0 || pz >= cropH) continue;
       const idx = (pz * cropW + px) * 3;
-      pixels[idx]     = Math.round(pixels[idx]     * (1 - ALPHA) + color[0] * ALPHA);
-      pixels[idx + 1] = Math.round(pixels[idx + 1] * (1 - ALPHA) + color[1] * ALPHA);
-      pixels[idx + 2] = Math.round(pixels[idx + 2] * (1 - ALPHA) + color[2] * ALPHA);
+      basePixels[idx]     = Math.round(basePixels[idx]     * (1 - ALPHA) + color[0] * ALPHA);
+      basePixels[idx + 1] = Math.round(basePixels[idx + 1] * (1 - ALPHA) + color[1] * ALPHA);
+      basePixels[idx + 2] = Math.round(basePixels[idx + 2] * (1 - ALPHA) + color[2] * ALPHA);
     }
   }
 
@@ -269,9 +291,9 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       if (gz2 + 1 < H && Math.floor(elev.get(gx2, gz2 + 1) / contourInterval) !== eBin) isContour = true;
       if (isContour) {
         const idx = (z * cropW + x) * 3;
-        pixels[idx] = Math.min(255, pixels[idx] + 30);
-        pixels[idx + 1] = Math.min(255, pixels[idx + 1] + 50);
-        pixels[idx + 2] = Math.min(255, pixels[idx + 2] + 20);
+        basePixels[idx] = Math.min(255, basePixels[idx] + 30);
+        basePixels[idx + 1] = Math.min(255, basePixels[idx + 1] + 50);
+        basePixels[idx + 2] = Math.min(255, basePixels[idx + 2] + 20);
       }
     }
   }
@@ -282,7 +304,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       for (let x = 0; x < cropW; x++)
         if (roadGrid.get(x + minGx, z + minGz) > 0) {
           const idx = (z * cropW + x) * 3;
-          pixels[idx] = 150; pixels[idx + 1] = 150; pixels[idx + 2] = 150;
+          basePixels[idx] = 150; basePixels[idx + 1] = 150; basePixels[idx + 2] = 150;
         }
   }
 
@@ -290,36 +312,14 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
   for (const street of allCrossStreets) {
     const pts = street.points;
     for (let i = 1; i < pts.length; i++) {
-      bres(pixels, cropW, cropH,
+      bres(basePixels, cropW, cropH,
         Math.round((pts[i - 1].x - ox) / cs) - minGx, Math.round((pts[i - 1].z - oz) / cs) - minGz,
         Math.round((pts[i].x - ox) / cs) - minGx, Math.round((pts[i].z - oz) / cs) - minGz,
         255, 0, 255);
     }
   }
 
-  // Layer 6: Ribbons (cyan polylines with orange endpoint dots)
-  for (const ribbon of allRibbons) {
-    const pts = ribbon.points;
-    for (let i = 1; i < pts.length; i++) {
-      bres(pixels, cropW, cropH,
-        Math.round((pts[i - 1].x - ox) / cs) - minGx, Math.round((pts[i - 1].z - oz) / cs) - minGz,
-        Math.round((pts[i].x - ox) / cs) - minGx, Math.round((pts[i].z - oz) / cs) - minGz,
-        0, 255, 255);
-    }
-    // Endpoint dots (orange, 2px)
-    for (const pt of [pts[0], pts[pts.length - 1]]) {
-      const px = Math.round((pt.x - ox) / cs) - minGx;
-      const pz = Math.round((pt.z - oz) / cs) - minGz;
-      for (let dz = -1; dz <= 1; dz++)
-        for (let dx = -1; dx <= 1; dx++)
-          if (px + dx >= 0 && px + dx < cropW && pz + dz >= 0 && pz + dz < cropH) {
-            const idx = ((pz + dz) * cropW + (px + dx)) * 3;
-            pixels[idx] = 255; pixels[idx + 1] = 165; pixels[idx + 2] = 0;
-          }
-    }
-  }
-
-  // Layer 7: Sector boundaries (thin white)
+  // Layer 6: Sector boundaries (thin white)
   for (let si = 0; si < sectors.length; si++) {
     for (const c of sectors[si].cells) {
       for (const [dx, dz] of [[-1,0],[1,0],[0,-1],[0,1]]) {
@@ -330,7 +330,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
           const pz = c.gz - minGz;
           if (px >= 0 && px < cropW && pz >= 0 && pz < cropH) {
             const idx = (pz * cropW + px) * 3;
-            pixels[idx] = 200; pixels[idx + 1] = 200; pixels[idx + 2] = 200;
+            basePixels[idx] = 200; basePixels[idx + 1] = 200; basePixels[idx + 2] = 200;
           }
           break;
         }
@@ -338,7 +338,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
     }
   }
 
-  // Layer 8: Zone boundary (yellow, 2px thick)
+  // Layer 7: Zone boundary (yellow, 2px thick)
   if (zone.boundary) {
     for (let i = 0; i < zone.boundary.length; i++) {
       const p1 = zone.boundary[i], p2 = zone.boundary[(i + 1) % zone.boundary.length];
@@ -346,18 +346,66 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       const y0 = Math.round((p1.z - oz) / cs) - minGz;
       const x1 = Math.round((p2.x - ox) / cs) - minGx;
       const y1 = Math.round((p2.z - oz) / cs) - minGz;
-      bres(pixels, cropW, cropH, x0, y0, x1, y1, 255, 255, 0);
-      bres(pixels, cropW, cropH, x0 + 1, y0, x1 + 1, y1, 255, 255, 0);
-      bres(pixels, cropW, cropH, x0, y0 + 1, x1, y1 + 1, 255, 255, 0);
+      bres(basePixels, cropW, cropH, x0, y0, x1, y1, 255, 255, 0);
+      bres(basePixels, cropW, cropH, x0 + 1, y0, x1 + 1, y1, 255, 255, 0);
+      bres(basePixels, cropW, cropH, x0, y0 + 1, x1, y1 + 1, 255, 255, 0);
     }
   }
 
-  // === Write output ===
-  const header = `P6\n${cropW} ${cropH}\n255\n`;
-  const basePath = `${outDir}/ribbons-zone${zi}-seed${seed}`;
-  writeFileSync(`${basePath}.ppm`, Buffer.concat([Buffer.from(header), Buffer.from(pixels)]));
-  try { execSync(`convert "${basePath}.ppm" "${basePath}.png" 2>/dev/null`); } catch {}
-  console.log(`  Written to ${basePath}.png (${cropW}x${cropH})`);
+  const pixels = basePixels.slice();
+  for (const ribbon of allRibbons) {
+    drawRoad(pixels, ribbon.points, cropW, cropH, cs, ox, oz, minGx, minGz, [0, 255, 255]);
+    drawEndpointDots(pixels, ribbon.points, cropW, cropH, cs, ox, oz, minGx, minGz, [255, 165, 0]);
+  }
+  for (const anchor of allSeedAnchors) {
+    drawAnchorCircle(pixels, anchor.point, cropW, cropH, cs, ox, oz, minGx, minGz, anchor.accepted);
+  }
+
+  const failurePixels = basePixels.slice();
+  for (const ribbon of allRibbons) {
+    drawRoad(failurePixels, ribbon.points, cropW, cropH, cs, ox, oz, minGx, minGz, [80, 200, 200]);
+  }
+  for (const failure of allFailedRibbons) {
+    drawRoad(
+      failurePixels,
+      failure.points,
+      cropW,
+      cropH,
+      cs,
+      ox,
+      oz,
+      minGx,
+      minGz,
+      failureColor(failure.reason),
+    );
+  }
+  for (const failure of allFailedRibbons) {
+    if (failure.guideLine) {
+      drawRoad(
+        failurePixels,
+        failure.guideLine,
+        cropW,
+        cropH,
+        cs,
+        ox,
+        oz,
+        minGx,
+        minGz,
+        [255, 255, 255],
+      );
+    }
+  }
+  for (const anchor of allSeedAnchors) {
+    drawAnchorCircle(failurePixels, anchor.point, cropW, cropH, cs, ox, oz, minGx, minGz, anchor.accepted);
+  }
+
+  writeRaster(`${outDir}/ribbons-zone${zi}-seed${seed}`, cropW, cropH, pixels);
+  console.log(`  Written to ${outDir}/ribbons-zone${zi}-seed${seed}.png (${cropW}x${cropH})`);
+
+  if (allFailedRibbons.length > 0) {
+    writeRaster(`${outDir}/ribbon-failures-zone${zi}-seed${seed}`, cropW, cropH, failurePixels);
+    console.log(`  Written to ${outDir}/ribbon-failures-zone${zi}-seed${seed}.png (${cropW}x${cropH})`);
+  }
 }
 
 console.log(`\nTotal time: ${((performance.now() - t0) / 1000).toFixed(1)}s`);
@@ -377,4 +425,114 @@ function bres(pixels, w, h, x0, y0, x1, y1, r, g, b) {
     if (e2 > -dy) { err -= dy; x += sx; }
     if (e2 < dx) { err += dx; y += sy; }
   }
+}
+
+function drawRoad(pixels, points, cropW, cropH, cs, ox, oz, minGx, minGz, color) {
+  for (let i = 1; i < points.length; i++) {
+    bres(
+      pixels,
+      cropW,
+      cropH,
+      Math.round((points[i - 1].x - ox) / cs) - minGx,
+      Math.round((points[i - 1].z - oz) / cs) - minGz,
+      Math.round((points[i].x - ox) / cs) - minGx,
+      Math.round((points[i].z - oz) / cs) - minGz,
+      color[0],
+      color[1],
+      color[2],
+    );
+  }
+}
+
+function drawEndpointDots(pixels, points, cropW, cropH, cs, ox, oz, minGx, minGz, color) {
+  for (const pt of [points[0], points[points.length - 1]]) {
+    const px = Math.round((pt.x - ox) / cs) - minGx;
+    const pz = Math.round((pt.z - oz) / cs) - minGz;
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (px + dx >= 0 && px + dx < cropW && pz + dz >= 0 && pz + dz < cropH) {
+          const idx = ((pz + dz) * cropW + (px + dx)) * 3;
+          pixels[idx] = color[0];
+          pixels[idx + 1] = color[1];
+          pixels[idx + 2] = color[2];
+        }
+      }
+    }
+  }
+}
+
+function drawAnchorCircle(pixels, point, cropW, cropH, cs, ox, oz, minGx, minGz, accepted) {
+  const px = Math.round((point.x - ox) / cs) - minGx;
+  const pz = Math.round((point.z - oz) / cs) - minGz;
+  const ringColor = accepted ? [255, 215, 0] : [255, 120, 0];
+
+  stampCircle(pixels, cropW, cropH, px, pz, 4, [0, 0, 0]);
+  stampCircle(pixels, cropW, cropH, px, pz, 3, ringColor);
+}
+
+function stampCircle(pixels, cropW, cropH, cx, cz, radius, color) {
+  const rOuterSq = radius * radius;
+  const rInnerSq = (radius - 1) * (radius - 1);
+  for (let dz = -radius; dz <= radius; dz++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const dSq = dx * dx + dz * dz;
+      if (dSq > rOuterSq || dSq < rInnerSq) continue;
+      const px = cx + dx;
+      const pz = cz + dz;
+      if (px < 0 || px >= cropW || pz < 0 || pz >= cropH) continue;
+      const idx = (pz * cropW + px) * 3;
+      pixels[idx] = color[0];
+      pixels[idx + 1] = color[1];
+      pixels[idx + 2] = color[2];
+    }
+  }
+}
+
+function writeRaster(basePath, width, height, pixels) {
+  const header = `P6\n${width} ${height}\n255\n`;
+  writeFileSync(`${basePath}.ppm`, Buffer.concat([Buffer.from(header), Buffer.from(pixels)]));
+  try { execSync(`convert "${basePath}.ppm" "${basePath}.png" 2>/dev/null`); } catch {}
+}
+
+function classifyTransactionFailure(violations) {
+  const first = violations && violations[0] ? violations[0] : '';
+  if (first.includes('crosses existing road')) return 'txn-crossing';
+  if (first.includes('crosses water')) return 'txn-water';
+  if (first.includes('parallel to existing road')) return 'txn-parallel';
+  return 'txn-other';
+}
+
+function failureColor(reason) {
+  if (reason === 'wrong-street') return [255, 60, 0];
+  if (reason === 'ray-miss') return [255, 210, 120];
+  if (reason === 'guide-direction') return [255, 40, 40];
+  if (reason === 'guide-offset') return [255, 120, 120];
+  if (reason === 'angle') return [255, 80, 80];
+  if (reason === 'too-short') return [255, 170, 0];
+  if (reason === 'too-long') return [255, 120, 0];
+  if (reason === 'water' || reason === 'txn-water') return [80, 160, 255];
+  if (reason === 'out-of-zone') return [255, 255, 90];
+  if (reason === 'off-map') return [255, 255, 255];
+  if (reason === 'too-close' || reason === 'txn-parallel') return [200, 110, 255];
+  if (reason === 'txn-crossing') return [255, 0, 0];
+  return [255, 180, 180];
+}
+
+function formatFailureCounts(counts) {
+  const entries = Object.entries(counts)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4);
+  if (entries.length === 0) return '';
+  return entries.map(([reason, count]) => `${reason}=${count}`).join(', ');
+}
+
+function mergeCounts(target, counts) {
+  for (const [reason, count] of Object.entries(counts)) {
+    target[reason] = (target[reason] || 0) + count;
+  }
+}
+
+function addCount(target, key) {
+  target[key] = (target[key] || 0) + 1;
 }
