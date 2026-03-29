@@ -1,0 +1,22 @@
+[;; === category-taxonomy.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Category Taxonomy"]
+ [:db/add -1 :concept/summary "Canonical category definitions for classifying wiki pages by system shape rather than code shape."]
+ [:db/add -1 :concept/source-page "category-taxonomy.md"]
+
+ ;; Pass 2 — Relationships (no wiki-link dependencies)
+
+ ;; Pass 3 — Decisions
+ [:db/add -2 :decision/summary "Categories reflect the shape of the system, not the shape of the code."]
+ [:db/add -2 :decision/rationale "Each piece of information should be examined through the lens of system-oriented categories (architecture, pipeline, data-model, etc.) rather than by source file."]
+ [:db/add -2 :decision/affects -1]
+
+ [:db/add -3 :decision/summary "Every wiki page belongs to exactly one category."]
+ [:db/add -3 :decision/rationale "Prevents ambiguity in classification and provides clear taxonomy for agents and skills that create pages."]
+ [:db/add -3 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -4 :invariant/statement "Every wiki page must belong to exactly one category from the canonical taxonomy."]
+ [:db/add -4 :invariant/confidence :high]
+ [:db/add -4 :invariant/source-page "category-taxonomy.md"]]

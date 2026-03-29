@@ -1,0 +1,37 @@
+[;; === pipeline-invariant-tests.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Pipeline Invariant Tests"]
+ [:db/add -1 :concept/summary "Integration test strategy that steps through both regional and city pipelines checking bitmap invariants after each step."]
+ [:db/add -1 :concept/source-page "pipeline-invariant-tests.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Bitmap Invariants"]
+ [:db/add -2 :rel/type :rel/implements]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Generation Pipeline"]
+ [:db/add -3 :rel/type :rel/constrains]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Regional Pipeline"]
+ [:db/add -4 :rel/type :rel/constrains]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Tests run across multiple seeds (42, 99, 751119, 456) to catch geometry-dependent bugs."]
+ [:db/add -5 :decision/rationale "Each seed exercises different terrain configurations — river cities, coastal regions, etc."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Reusable assertNoOverlap and assertImplies helpers for Grid2D invariant checking."]
+ [:db/add -6 :decision/rationale "Same pattern applies to all bitmap pair checks — iterate cells, count violations."]
+ [:db/add -6 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -7 :invariant/statement "Pipeline invariant tests must run in CI on every commit."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "pipeline-invariant-tests.md"]
+
+ [:db/add -8 :invariant/statement "Full test suite must complete in under 30 seconds."]
+ [:db/add -8 :invariant/confidence :medium]
+ [:db/add -8 :invariant/source-page "pipeline-invariant-tests.md"]]

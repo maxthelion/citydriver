@@ -1,0 +1,41 @@
+[;; === pipeline-benchmarking.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Pipeline Benchmarking"]
+ [:db/add -1 :concept/summary "Measured per-step timing for the city pipeline, identifying bottlenecks and a prioritised list of improvements targeting sub-1-second cold-start."]
+ [:db/add -1 :concept/source-page "pipeline-benchmarking.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Pipeline Performance"]
+ [:db/add -2 :rel/type :rel/implements]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Pipeline Observability"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "City Generation Pipeline"]
+ [:db/add -4 :rel/type :rel/constrains]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Primary GPU acceleration target is growth:value (22% of total time), which is embarrassingly parallel per-cell multiply-add."]
+ [:db/add -5 :decision/rationale "composeAllValueLayers iterates 1.44M cells per layer per agent per tick. GPU dispatch eliminates this step (<1ms)."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Skip zones-refine when zone-boundary added no roads."]
+ [:db/add -6 :decision/rationale "The second facesWithEdges() call is expensive and unnecessary when no new edges were added."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Use separated 1D blur passes instead of 2D kernels for spatial computations."]
+ [:db/add -7 :decision/rationale "Reduces road frontage blur from O(n*r^2) to O(n*2r), and flatness kernel from O(n*49) to O(n*14)."]
+ [:db/add -7 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -8 :invariant/statement "Target: less than 1 second cold-start for a typical city."]
+ [:db/add -8 :invariant/confidence :medium]
+ [:db/add -8 :invariant/source-page "pipeline-benchmarking.md"]
+
+ [:db/add -9 :invariant/statement "First browser load is 2-3x slower than JIT-warmed due to V8 compilation."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "pipeline-benchmarking.md"]]

@@ -1,0 +1,41 @@
+[;; === archetype-data-model.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Archetype Data Model"]
+ [:db/add -1 :concept/summary "Schema and field definitions for city archetype objects that parameterise the city generation pipeline."]
+ [:db/add -1 :concept/source-page "archetype-data-model.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Generation Pipeline"]
+ [:db/add -2 :rel/type :rel/constrains]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Land Reservation"]
+ [:db/add -3 :rel/type :rel/constrains]
+
+ ;; Pass 3 — Decisions
+ [:db/add -4 :decision/summary "Residential is the implicit remainder after all other shares are allocated."]
+ [:db/add -4 :decision/rationale "Keeps the share system simple — only non-residential types need explicit budgets."]
+ [:db/add -4 :decision/affects -1]
+
+ [:db/add -5 :decision/summary "Archetype currently only parameterises tick 5 (land reservation), not the full pipeline."]
+ [:db/add -5 :decision/rationale "Open question about whether archetypes should control more steps, including nuclei placement, skeleton strategy, and street pattern."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Growth mode per use type is either radial or directional BFS."]
+ [:db/add -6 :decision/rationale "Radial produces compact zones; directional produces elongated strips via axis bias (2x along, 0.5x perpendicular)."]
+ [:db/add -6 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -7 :invariant/statement "Land share values must be 0-1 and their sum must be well under 1.0 to leave room for residential."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "archetype-data-model.md"]
+
+ [:db/add -8 :invariant/statement "reservationOrder must contain exactly four UseType strings."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "archetype-data-model.md"]
+
+ [:db/add -9 :invariant/statement "PlacementWeights values are 0-1 floats controlling spatial layer weights per use type."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "archetype-data-model.md"]]

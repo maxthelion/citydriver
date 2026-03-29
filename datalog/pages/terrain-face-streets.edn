@@ -1,0 +1,37 @@
+[;; === terrain-face-streets.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Terrain Face Streets"]
+ [:db/add -1 :concept/summary "Street layout by segmenting zones into terrain faces with consistent slope, then laying contour-following streets and uphill cross streets within each face."]
+ [:db/add -1 :concept/source-page "terrain-face-streets.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Generation Pipeline"]
+ [:db/add -2 :rel/type :rel/implements]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Zone-Based Allocation"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Street Direction Compromise"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Zones are segmented into terrain faces with consistent slope direction (within ~30 degrees) and steepness."]
+ [:db/add -5 :decision/rationale "Real hillside cities are composed of distinct terrain faces; each gets a street pattern suited to its character."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Face boundaries (ridges, valleys, grade breaks) are where major roads naturally run."]
+ [:db/add -6 :decision/rationale "Combines findings from multiple experiments: 007a (zone splitting), 007e (gradient walk), 007g (contour tracing)."]
+ [:db/add -6 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -7 :invariant/statement "Very steep terrain (slope > 0.35) is not developable."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "terrain-face-streets.md"]
+
+ [:db/add -8 :invariant/statement "Cross streets connect corresponding subdivision points between top (uphill) and bottom (downhill) edges."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "terrain-face-streets.md"]]

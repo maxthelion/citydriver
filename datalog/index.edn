@@ -1,0 +1,1166 @@
+;; Merged index — auto-generated from per-page EDN files
+;; 2026-03-29T16:07:46+00:00
+
+[
+ ;; ---- archetype-data-model.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Archetype Data Model"]
+ [:db/add -1 :concept/summary "Schema and field definitions for city archetype objects that parameterise the city generation pipeline."]
+ [:db/add -1 :concept/source-page "archetype-data-model.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Generation Pipeline"]
+ [:db/add -2 :rel/type :rel/constrains]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Land Reservation"]
+ [:db/add -3 :rel/type :rel/constrains]
+
+ ;; Pass 3 — Decisions
+ [:db/add -4 :decision/summary "Residential is the implicit remainder after all other shares are allocated."]
+ [:db/add -4 :decision/rationale "Keeps the share system simple — only non-residential types need explicit budgets."]
+ [:db/add -4 :decision/affects -1]
+
+ [:db/add -5 :decision/summary "Archetype currently only parameterises tick 5 (land reservation), not the full pipeline."]
+ [:db/add -5 :decision/rationale "Open question about whether archetypes should control more steps, including nuclei placement, skeleton strategy, and street pattern."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Growth mode per use type is either radial or directional BFS."]
+ [:db/add -6 :decision/rationale "Radial produces compact zones; directional produces elongated strips via axis bias (2x along, 0.5x perpendicular)."]
+ [:db/add -6 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -7 :invariant/statement "Land share values must be 0-1 and their sum must be well under 1.0 to leave room for residential."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "archetype-data-model.md"]
+
+ [:db/add -8 :invariant/statement "reservationOrder must contain exactly four UseType strings."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "archetype-data-model.md"]
+
+ [:db/add -9 :invariant/statement "PlacementWeights values are 0-1 floats controlling spatial layer weights per use type."]
+ [:db/add -9 :invariant/confidence :high]
+
+ ;; ---- bitmap-invariants.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Bitmap Invariants"]
+ [:db/add -1 :concept/summary "Grid-level invariants that must hold at every pipeline step, defining exclusion, derivation, and consistency rules between bitmap layers."]
+ [:db/add -1 :concept/source-page "bitmap-invariants.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Bitmap Pipeline Model"]
+ [:db/add -2 :rel/type :rel/constrains]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Pipeline Invariant Tests"]
+ [:db/add -3 :rel/type :rel/implements]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "City Generation Pipeline"]
+ [:db/add -4 :rel/type :rel/constrains]
+
+ [:db/add -5 :rel/source -1]
+ [:db/add -5 :rel/target "Regional Pipeline"]
+ [:db/add -5 :rel/type :rel/constrains]
+
+ ;; Pass 3 — Decisions
+ [:db/add -6 :decision/summary "Invariants should be checked at every pipeline step, not just at the end."]
+ [:db/add -6 :decision/rationale "A violation introduced at step 3 is much easier to diagnose when caught at step 3 than when it causes a rendering glitch at step 7."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "The grid must be derived from the polyline, never computed independently (polyline-grid agreement)."]
+ [:db/add -7 :decision/rationale "One source of truth (the polyline), grid derived from it. Violations happen when grid is stamped from raw A* path vs simplified polyline, or two code paths stamp the same grid."]
+ [:db/add -7 :decision/affects -1]
+
+ [:db/add -8 :decision/summary "Sampled checks or GPU acceleration for performance on large grids."]
+ [:db/add -8 :decision/rationale "Full 1200x1200 grid checks (1.4M cells) across multiple seeds could be slow; sampling catches most violations at O(1/N) cost."]
+ [:db/add -8 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -10 :invariant/statement "waterMask and roadGrid must not overlap (no roads in water, bridges are separate)."]
+ [:db/add -10 :invariant/confidence :high]
+ [:db/add -10 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -11 :invariant/statement "waterMask and railwayGrid must not overlap."]
+ [:db/add -11 :invariant/confidence :high]
+ [:db/add -11 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -12 :invariant/statement "waterMask and buildingGrid must not overlap."]
+ [:db/add -12 :invariant/confidence :high]
+ [:db/add -12 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -13 :invariant/statement "railwayGrid and buildingGrid must not overlap."]
+ [:db/add -13 :invariant/confidence :high]
+ [:db/add -13 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -14 :invariant/statement "roadGrid and buildingGrid must not overlap."]
+ [:db/add -14 :invariant/confidence :high]
+ [:db/add -14 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -15 :invariant/statement "Station must be on dry land (waterMask = 0)."]
+ [:db/add -15 :invariant/confidence :high]
+ [:db/add -15 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -16 :invariant/statement "Station must be near railway (railwayGrid > 0 within 3 cells)."]
+ [:db/add -16 :invariant/confidence :high]
+ [:db/add -16 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -17 :invariant/statement "Nuclei must be on buildable land (buildability > 0.2)."]
+ [:db/add -17 :invariant/confidence :high]
+ [:db/add -17 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -18 :invariant/statement "Reserved cells must be within zones (reservationGrid cells imply zoneGrid > 0)."]
+ [:db/add -18 :invariant/confidence :high]
+ [:db/add -18 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -19 :invariant/statement "Road polylines must match roadGrid exactly (polyline-grid agreement)."]
+ [:db/add -19 :invariant/confidence :high]
+
+ ;; ---- bitmap-pipeline-model.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Bitmap Pipeline Model"]
+ [:db/add -1 :concept/summary "Core data model using composable Grid2D bitmap layers for spatial data flow through the city generation pipeline."]
+ [:db/add -1 :concept/source-page "bitmap-pipeline-model.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Generation Pipeline"]
+ [:db/add -2 :rel/type :rel/implements]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Archetype Data Model"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Land Reservation"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Everything that can be a bitmap should be — spatial data flows as Grid2D layers."]
+ [:db/add -5 :decision/rationale "Makes pipeline debuggable (every intermediate state is a viewable image) and composable (new behaviour from combining layers, not special-case code)."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "There is no single universal land value; each use type values different things via affinity weights."]
+ [:db/add -6 :decision/rationale "The affinity weights ARE the per-use land value function, computed on the fly from composing spatial layers. The generic landValue layer could be retired."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Agent behaviour comes from affinity weights, not code branches."]
+ [:db/add -7 :decision/rationale "Commercial sticks to roads because roadFrontage affinity is 2.0, not because there's a road-search loop. Industrial avoids residential via industrialDistance affinity."]
+ [:db/add -7 :decision/affects -1]
+
+ [:db/add -8 :decision/summary "Dynamic layers (developmentProximity, industrialDistance) follow the same blur-mask-normalise pattern as static layers."]
+ [:db/add -8 :decision/rationale "Consistency: only difference is when they're computed (per-tick vs once)."]
+ [:db/add -8 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -9 :invariant/statement "If it's spatial data, it must be a layer — no inline distance/proximity/gradient computation in algorithm code."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "bitmap-pipeline-model.md"]
+
+ [:db/add -10 :invariant/statement "Every layer must be inspectable via the debug screen or bitmap logger."]
+ [:db/add -10 :invariant/confidence :high]
+ [:db/add -10 :invariant/source-page "bitmap-pipeline-model.md"]
+
+ [:db/add -11 :invariant/statement "Blur radii, thresholds, and weights should be in archetype config, not hardcoded in pipeline code."]
+ [:db/add -11 :invariant/confidence :medium]
+
+ ;; ---- category-taxonomy.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Category Taxonomy"]
+ [:db/add -1 :concept/summary "Canonical category definitions for classifying wiki pages by system shape rather than code shape."]
+ [:db/add -1 :concept/source-page "category-taxonomy.md"]
+
+ ;; Pass 2 — Relationships (no wiki-link dependencies)
+
+ ;; Pass 3 — Decisions
+ [:db/add -2 :decision/summary "Categories reflect the shape of the system, not the shape of the code."]
+ [:db/add -2 :decision/rationale "Each piece of information should be examined through the lens of system-oriented categories (architecture, pipeline, data-model, etc.) rather than by source file."]
+ [:db/add -2 :decision/affects -1]
+
+ [:db/add -3 :decision/summary "Every wiki page belongs to exactly one category."]
+ [:db/add -3 :decision/rationale "Prevents ambiguity in classification and provides clear taxonomy for agents and skills that create pages."]
+ [:db/add -3 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -4 :invariant/statement "Every wiki page must belong to exactly one category from the canonical taxonomy."]
+ [:db/add -4 :invariant/confidence :high]
+
+ ;; ---- city-archetypes.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "City Archetypes"]
+ [:db/add -1 :concept/summary "How city archetypes control land reservation, placement requirements, organic growth, and street layout for each settlement."]
+ [:db/add -1 :concept/source-page "city-archetypes.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Generator Overview"]
+ [:db/add -2 :rel/type :rel/implements]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Archetype Data Model"]
+ [:db/add -3 :rel/type :rel/instantiates]
+
+ ;; Pass 3 — Decisions
+ [:db/add -4 :decision/summary "Archetypes fall on a spectrum from highly organic (medieval market towns) to highly planned (grid cities)."]
+ [:db/add -4 :decision/rationale "This affects street regularity, block shape, plot size consistency, and how growth ticks add new development."]
+ [:db/add -4 :decision/affects -1]
+
+ [:db/add -5 :decision/summary "Different archetypes have geographic siting constraints (harbours need coast, planned cities need flat terrain)."]
+ [:db/add -5 :decision/rationale "Ensures archetype selection matches the settlement's geography for realism."]
+ [:db/add -5 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -6 :invariant/statement "Harbour archetypes require coastal locations with bays or large rivers."]
+ [:db/add -6 :invariant/confidence :high]
+ [:db/add -6 :invariant/source-page "city-archetypes.md"]
+
+ [:db/add -7 :invariant/statement "Planned city archetypes require flatter terrain to accommodate regular layouts."]
+ [:db/add -7 :invariant/confidence :high]
+
+ ;; ---- city-generation-pipeline.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "City Generation Pipeline"]
+ [:db/add -1 :concept/summary "The ordered sequence of named steps that generates a city from inherited regional map features, implemented as a JavaScript generator executed by PipelineRunner."]
+ [:db/add -1 :concept/source-page "city-generation-pipeline.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Region Inheritance"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Archetypes"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Pipeline Abstraction"]
+ [:db/add -4 :rel/type :rel/implements]
+
+ [:db/add -5 :rel/source -1]
+ [:db/add -5 :rel/target "Pipeline Invariant Tests"]
+ [:db/add -5 :rel/type :rel/constrains]
+
+ [:db/add -6 :rel/source -1]
+ [:db/add -6 :rel/target "Pipeline Observability"]
+ [:db/add -6 :rel/type :rel/depends-on]
+
+ [:db/add -7 :rel/source -1]
+ [:db/add -7 :rel/target "Land Reservation"]
+ [:db/add -7 :rel/type :rel/depends-on]
+
+ [:db/add -8 :rel/source -1]
+ [:db/add -8 :rel/target "Terrain Face Streets"]
+ [:db/add -8 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -9 :decision/summary "Cities inherit terrain, rivers, water, and settlement positions from the regional map rather than generating from scratch."]
+ [:db/add -9 :decision/rationale "Ensures causal consistency between regional and city scales."]
+ [:db/add -9 :decision/affects -1]
+
+ [:db/add -10 :decision/summary "Pipeline implemented as a JavaScript generator yielding step descriptors, not a state machine."]
+ [:db/add -10 :decision/rationale "Enables named steps, hook-based observability, and composeable growth strategies via yield*."]
+ [:db/add -10 :decision/affects -1]
+
+ [:db/add -11 :decision/summary "Zone extraction runs twice: once before and once after zone boundary roads."]
+ [:db/add -11 :decision/rationale "The second extraction picks up finer faces created by the new boundary roads."]
+ [:db/add -11 :decision/affects -1]
+
+ [:db/add -12 :decision/summary "For archetypes without growth config, three simple steps (reserve, ribbons, connect) replace the organic growth loop."]
+ [:db/add -12 :decision/rationale "Only marketTown currently uses organic growth; others use BFS-based reservation."]
+ [:db/add -12 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -13 :invariant/statement "Each pipeline step yields a descriptor { id, fn } and the runner executes fn(), fires hooks, and advances."]
+ [:db/add -13 :invariant/confidence :high]
+ [:db/add -13 :invariant/source-page "city-generation-pipeline.md"]
+
+ [:db/add -14 :invariant/statement "The growth loop terminates when all agent budgets are exhausted or maxGrowthTicks is reached."]
+ [:db/add -14 :invariant/confidence :high]
+
+ ;; ---- city-generator-overview.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "City Generator Overview"]
+ [:db/add -1 :concept/summary "High-level overview: a system that builds lifelike cities from interrelated causal processes spanning geology to 3D-renderable features."]
+ [:db/add -1 :concept/source-page "city-generator-overview.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Archetypes"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Bitmap Pipeline Model"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "City Generation Pipeline"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Generation pipeline is causal: each stage feeds into the next, so the final city emerges from geography."]
+ [:db/add -5 :decision/rationale "Cities should look like they emerged from their landscape, not be placed arbitrarily."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Debugging via 2D layer views, 3D overlay, and side-by-side comparison."]
+ [:db/add -6 :decision/rationale "Multiple inspection modes needed to understand how computed properties relate to the rendered city."]
+ [:db/add -6 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -7 :invariant/statement "The city generator output must be a set of 3D-renderable features (roads, rivers, coastline, forests, buildings on plots)."]
+ [:db/add -7 :invariant/confidence :high]
+
+ ;; ---- city-growth-model.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "City Growth Model"]
+ [:db/add -1 :concept/summary "Architecture of how city development works: the relationship between grid-based bitmaps, polygon-based zones, road networks, and incremental land allocation."]
+ [:db/add -1 :concept/source-page "city-growth-model.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Bitmap Pipeline Model"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Zone-Based Allocation"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "City Generation Pipeline"]
+ [:db/add -4 :rel/type :rel/constrains]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Two geometric systems: grid level (5m cells, bitmaps) and polygon level (zones with metadata)."]
+ [:db/add -5 :decision/rationale "Bitmaps for spatial analysis (fast, parallelisable, debuggable), zones for allocation (terrain-aware parcels)."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Bitmaps for spatial analysis, zones for allocation — don't allocate cell-by-cell from bitmaps."]
+ [:db/add -6 :decision/rationale "Use bitmaps to score zones, then allocate at zone level. Cell-by-cell produces blobs that ignore terrain."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Roads create zones, zones create roads — a feedback loop."]
+ [:db/add -7 :decision/rationale "Arterials create zones, zones get assigned, ribbon streets create more zones. Each tick adds roads that split zones further."]
+ [:db/add -7 :decision/affects -1]
+
+ [:db/add -8 :decision/summary "Commercial strongly favours arterial roads, creating a realistic gradient from dense commercial to purely residential."]
+ [:db/add -8 :decision/rationale "Matches real-world pattern: arterials have shops, secondary roads are mixed, ribbon streets are residential."]
+ [:db/add -8 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -9 :invariant/statement "Development happens incrementally — each tick, new land is allocated; the city grows outward from existing development."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "city-growth-model.md"]
+
+ [:db/add -10 :invariant/statement "Preserve terrain-following: the ribbon/zone system produces organic terrain-aware streets."]
+ [:db/add -10 :invariant/confidence :high]
+ [:db/add -10 :invariant/source-page "city-growth-model.md"]
+
+ [:db/add -11 :invariant/statement "One tick model, not competing systems: each tick has a clear sequence (score, assign, fill, roads, feedback)."]
+ [:db/add -11 :invariant/confidence :high]
+
+ ;; ---- city-region-inheritance.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "City Region Inheritance"]
+ [:db/add -1 :concept/summary "How city generation extracts and refines terrain, rivers, railways, and settlements from the regional map during tick 0 setup."]
+ [:db/add -1 :concept/source-page "city-region-inheritance.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Regional Pipeline"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Generation Pipeline"]
+ [:db/add -3 :rel/type :rel/implements]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Pipelines Overview"]
+ [:db/add -4 :rel/type :rel/implements]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Elevation refined with 3-octave Perlin noise (2m amplitude) for local detail not present at regional scale."]
+ [:db/add -5 :decision/rationale "Regional 200m cells lack fine surface detail; noise adds realistic local variation without changing large-scale shape."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Water mask seeded from sea level threshold on refined elevation, not inherited from regional waterMask."]
+ [:db/add -6 :decision/rationale "Regional waterMask has coarse 200m river stamps that don't match city resolution."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Station placed at nearest dry-land point along track near city centre."]
+ [:db/add -7 :decision/rationale "Station needs to be on land, close to centre, and aligned with track direction for building placement."]
+ [:db/add -7 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -8 :invariant/statement "City grid centred on settlement position, extending CITY_RADIUS (15) regional cells in each direction."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "city-region-inheritance.md"]
+
+ [:db/add -9 :invariant/statement "Railway grid cells are marked occupied, preventing buildings on tracks (8m total width corridor)."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "city-region-inheritance.md"]
+
+ [:db/add -10 :invariant/statement "River polylines are Chaikin-smoothed (1 pass) and width computed from sqrt(accumulation)."]
+ [:db/add -10 :invariant/confidence :high]
+
+ ;; ---- debugging-cities.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Debugging Cities"]
+ [:db/add -1 :concept/summary "How to inspect city generation by controlling archetype, tick, and bitmap lens via URL, including side-by-side comparison."]
+ [:db/add -1 :concept/source-page "debugging-cities.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Archetypes"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Pipeline Observability"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -4 :decision/summary "All view state encoded in URL for linking and sharing specific debug views."]
+ [:db/add -4 :decision/rationale "Enables reproducible debugging: link directly to tick 5 of market town viewed through land reservation lens."]
+ [:db/add -4 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -5 :invariant/statement "The current debug view is fully described by the URL (archetype, tick, bitmap lens)."]
+ [:db/add -5 :invariant/confidence :high]
+
+ ;; ---- experiment-loop.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Experiment Loop"]
+ [:db/add -1 :concept/summary "Structured approach to iterating on pipeline output: each experiment documents problems, hypothesises changes, generates output, and keeps or reverts."]
+ [:db/add -1 :concept/source-page "experiment-loop.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Pipeline Observability"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -3 :decision/summary "One commit per experiment (if kept); revert otherwise."]
+ [:db/add -3 :decision/rationale "Clean git history where each commit is a verified improvement. Failed experiments still documented for posterity."]
+ [:db/add -3 :decision/affects -1]
+
+ [:db/add -4 :decision/summary "Never run render scripts directly — only run-experiment.js updates the manifests needed by the viewer."]
+ [:db/add -4 :decision/rationale "run-experiment.js handles PPM-to-PNG conversion, per-experiment manifests, and root manifest updates."]
+ [:db/add -4 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -5 :invariant/statement "Always render the same standard seeds (884469:27:95, 42:15:50, 12345:20:60) for comparability."]
+ [:db/add -5 :invariant/confidence :high]
+ [:db/add -5 :invariant/source-page "experiment-loop.md"]
+
+ [:db/add -6 :invariant/statement "Each experiment file must link to the previous experiment's output for comparison."]
+ [:db/add -6 :invariant/confidence :high]
+
+ ;; ---- land-allocation-model.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Land Allocation Model"]
+ [:db/add -1 :concept/summary "How different zone types allocate land using type-specific spatial strategies, from ribbon streets to typed civic plots."]
+ [:db/add -1 :concept/source-page "land-allocation-model.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Bitmap Pipeline Model"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Generator Overview"]
+ [:db/add -3 :rel/type :rel/implements]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Zone-Based Allocation"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Each zone type has a fundamentally different spatial allocation strategy (ribbons, frontage, polygon, typed plots)."]
+ [:db/add -5 :decision/rationale "Residential uses ribbon streets, commercial uses road frontage, industrial uses large contiguous polygons, civic uses typed building plots."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Civic allocations work from a typology list with per-type size, shape, and placement rules."]
+ [:db/add -6 :decision/rationale "Parks, hospitals, churches, schools, town halls, cemeteries, and market squares each have distinct spatial requirements."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Current BFS-spread system is a first pass; ribbon layout should be integrated into the residential allocator."]
+ [:db/add -7 :decision/rationale "BFS produces blob-shaped zones that don't match the desired ribbon streets, typed civic plots, or polygon-based estates."]
+ [:db/add -7 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -8 :invariant/statement "Allocations should tessellate where possible — no useless narrow gaps between zones."]
+ [:db/add -8 :invariant/confidence :medium]
+ [:db/add -8 :invariant/source-page "land-allocation-model.md"]
+
+ [:db/add -9 :invariant/statement "Every allocation needs at least one edge touching a road or street."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "land-allocation-model.md"]
+
+ [:db/add -10 :invariant/statement "Same-type allocations should form coherent districts, not scattered cells."]
+ [:db/add -10 :invariant/confidence :medium]
+
+ ;; ---- land-reservation.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Land Reservation"]
+ [:db/add -1 :concept/summary "How the land reservation system allocates non-residential land using a seed-and-grow BFS algorithm, shaped by archetype configuration."]
+ [:db/add -1 :concept/source-page "land-reservation.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Archetypes"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Archetype Data Model"]
+ [:db/add -3 :rel/type :rel/instantiates]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Bitmap Pipeline Model"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Algorithm always picks one seed and grows one contiguous zone per use type."]
+ [:db/add -5 :decision/rationale "BFS guarantees contiguity, producing realistic zone coherence (real cities have a commercial core, not scattered shops). But entire budget concentrates in one area."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Reservation order determines which use type gets first pick of land."]
+ [:db/add -6 :decision/rationale "First-reserved type gets the best location; later types work with whatever's left. This is the primary mechanism for expressing the archetype's organising principle."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Directional growth uses 2x score bonus along axis, 0.5x perpendicular, to produce elongated strips."]
+ [:db/add -7 :decision/rationale "Commercial strips along roads, industrial strips along waterfronts need elongated rather than circular zones."]
+ [:db/add -7 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -8 :invariant/statement "Budget for each use type = round(totalZoneCells * share) cells."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "land-reservation.md"]
+
+ [:db/add -9 :invariant/statement "Reservation types are uint8: 1=commercial, 2=industrial, 3=civic, 4=open space."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "land-reservation.md"]
+
+ [:db/add -10 :invariant/statement "All five spatial layers (centrality, waterfrontness, edgeness, roadFrontage, downwindness) are 0-1 floats masked by terrain suitability."]
+ [:db/add -10 :invariant/confidence :high]
+
+ ;; ---- pipeline-abstraction.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Pipeline Abstraction"]
+ [:db/add -1 :concept/summary "Design for an explicit composeable pipeline using JavaScript generators, where the outer structure is fixed, growth strategies are archetype-selected, and sub-phase ordering is algorithmic."]
+ [:db/add -1 :concept/source-page "pipeline-abstraction.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Generation Pipeline"]
+ [:db/add -2 :rel/type :rel/constrains]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Pipeline Observability"]
+ [:db/add -3 :rel/type :rel/implements]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Pipeline Performance"]
+ [:db/add -4 :rel/type :rel/implements]
+
+ [:db/add -5 :rel/source -1]
+ [:db/add -5 :rel/target "City Archetypes"]
+ [:db/add -5 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -6 :decision/summary "JavaScript generators are the right primitive for pauseable, resumeable execution with named steps."]
+ [:db/add -6 :decision/rationale "A generator function IS the pipeline definition; generator.next() is a tick. yield* composes sub-generators transparently."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Organic and planned cities have genuinely different growth algorithms — different generators, not just different parameters."]
+ [:db/add -7 :decision/rationale "Organic: allocation first, roads follow demand. Planned: roads imposed first, allocation fills blocks. The ordering of road vs allocation is inverted."]
+ [:db/add -7 :decision/affects -1]
+
+ [:db/add -8 :decision/summary "Phase ordering within a strategy is fixed in code (not configurable), while strategy selection and phase parameters are in archetype config (data)."]
+ [:db/add -8 :decision/rationale "Phase ordering encodes algorithmic constraints that can't be safely relaxed. Exposing orderings as configurable arrays would let config violate them."]
+ [:db/add -8 :decision/affects -1]
+
+ [:db/add -9 :decision/summary "All observability tools become PipelineRunner hooks — no bespoke code per strategy."]
+ [:db/add -9 :decision/rationale "Both the benchmark profiler and bitmap tracer work identically across organic, planned, and desire-lines pipelines because they all emit step(id, fn) descriptors."]
+ [:db/add -9 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -10 :invariant/statement "The outer pipeline sequence (terrain, skeleton, land value, zones, spatial, growth, finish) is the same for every city."]
+ [:db/add -10 :invariant/confidence :high]
+ [:db/add -10 :invariant/source-page "pipeline-abstraction.md"]
+
+ [:db/add -11 :invariant/statement "Phase ordering within a growth strategy must NOT be configurable — it must be fixed in the generator code."]
+ [:db/add -11 :invariant/confidence :high]
+ [:db/add -11 :invariant/source-page "pipeline-abstraction.md"]
+
+ [:db/add -12 :invariant/statement "Strategy selection maps archetype config to generator functions via a registry."]
+ [:db/add -12 :invariant/confidence :high]
+
+ ;; ---- pipeline-benchmarking.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Pipeline Benchmarking"]
+ [:db/add -1 :concept/summary "Measured per-step timing for the city pipeline, identifying bottlenecks and a prioritised list of improvements targeting sub-1-second cold-start."]
+ [:db/add -1 :concept/source-page "pipeline-benchmarking.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Pipeline Performance"]
+ [:db/add -2 :rel/type :rel/implements]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Pipeline Observability"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "City Generation Pipeline"]
+ [:db/add -4 :rel/type :rel/constrains]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Primary GPU acceleration target is growth:value (22% of total time), which is embarrassingly parallel per-cell multiply-add."]
+ [:db/add -5 :decision/rationale "composeAllValueLayers iterates 1.44M cells per layer per agent per tick. GPU dispatch eliminates this step (<1ms)."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Skip zones-refine when zone-boundary added no roads."]
+ [:db/add -6 :decision/rationale "The second facesWithEdges() call is expensive and unnecessary when no new edges were added."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Use separated 1D blur passes instead of 2D kernels for spatial computations."]
+ [:db/add -7 :decision/rationale "Reduces road frontage blur from O(n*r^2) to O(n*2r), and flatness kernel from O(n*49) to O(n*14)."]
+ [:db/add -7 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -8 :invariant/statement "Target: less than 1 second cold-start for a typical city."]
+ [:db/add -8 :invariant/confidence :medium]
+ [:db/add -8 :invariant/source-page "pipeline-benchmarking.md"]
+
+ [:db/add -9 :invariant/statement "First browser load is 2-3x slower than JIT-warmed due to V8 compilation."]
+ [:db/add -9 :invariant/confidence :high]
+
+ ;; ---- pipeline-invariant-tests.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Pipeline Invariant Tests"]
+ [:db/add -1 :concept/summary "Integration test strategy that steps through both regional and city pipelines checking bitmap invariants after each step."]
+ [:db/add -1 :concept/source-page "pipeline-invariant-tests.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Bitmap Invariants"]
+ [:db/add -2 :rel/type :rel/implements]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Generation Pipeline"]
+ [:db/add -3 :rel/type :rel/constrains]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Regional Pipeline"]
+ [:db/add -4 :rel/type :rel/constrains]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Tests run across multiple seeds (42, 99, 751119, 456) to catch geometry-dependent bugs."]
+ [:db/add -5 :decision/rationale "Each seed exercises different terrain configurations — river cities, coastal regions, etc."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Reusable assertNoOverlap and assertImplies helpers for Grid2D invariant checking."]
+ [:db/add -6 :decision/rationale "Same pattern applies to all bitmap pair checks — iterate cells, count violations."]
+ [:db/add -6 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -7 :invariant/statement "Pipeline invariant tests must run in CI on every commit."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "pipeline-invariant-tests.md"]
+
+ [:db/add -8 :invariant/statement "Full test suite must complete in under 30 seconds."]
+ [:db/add -8 :invariant/confidence :medium]
+
+ ;; ---- pipeline-observability.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Pipeline Observability"]
+ [:db/add -1 :concept/summary "How to observe the city pipeline using PipelineRunner hooks: timing, bitmap snapshots at every step, and invariant checking."]
+ [:db/add -1 :concept/source-page "pipeline-observability.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Pipeline Abstraction"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Pipeline Performance"]
+ [:db/add -3 :rel/type :rel/implements]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Pipeline Invariant Tests"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "All observability delivered via PipelineRunner hooks — no changes to pipeline code."]
+ [:db/add -5 :decision/rationale "Hooks attach externally; timing, bitmap snapshots, and invariant checks all use the same onBefore/onAfter interface."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "BitmapLogger writes PPM images to a trace directory for offline analysis."]
+ [:db/add -6 :decision/rationale "Every intermediate pipeline state becomes a viewable image, enabling visual debugging."]
+ [:db/add -6 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -7 :invariant/statement "Every named step fires onBefore and onAfter on every attached hook."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "pipeline-observability.md"]
+
+ [:db/add -8 :invariant/statement "Multiple hooks can be attached and fire in attachment order."]
+ [:db/add -8 :invariant/confidence :high]
+
+ ;; ---- pipeline-performance.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Pipeline Performance"]
+ [:db/add -1 :concept/summary "How to measure per-step timing across the city pipeline using PipelineRunner hooks, run the benchmark script, and interpret results."]
+ [:db/add -1 :concept/source-page "pipeline-performance.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Pipeline Abstraction"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Pipeline Observability"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Pipeline Benchmarking"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Timing is a PipelineRunner hook — attach onAfter and get per-step durations for free."]
+ [:db/add -5 :decision/rationale "No bespoke wrapping needed; one hook attachment gives timing for every step and strategy."]
+ [:db/add -5 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -6 :invariant/statement "Every step has a stable string ID that is consistent across runs."]
+ [:db/add -6 :invariant/confidence :high]
+ [:db/add -6 :invariant/source-page "pipeline-performance.md"]
+
+ [:db/add -7 :invariant/statement "benchmark-pipeline.js output goes to output/pipeline-perf.json with aggregate and per-city data."]
+ [:db/add -7 :invariant/confidence :high]
+
+ ;; ---- pipelines-overview.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Pipelines Overview"]
+ [:db/add -1 :concept/summary "How the regional and city generation pipelines work: generator-based, hook-driven, with named steps at every level."]
+ [:db/add -1 :concept/source-page "pipelines-overview.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Regional Pipeline"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Generation Pipeline"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Pipeline Abstraction"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ [:db/add -5 :rel/source -1]
+ [:db/add -5 :rel/target "City Archetypes"]
+ [:db/add -5 :rel/type :rel/depends-on]
+
+ [:db/add -6 :rel/source -1]
+ [:db/add -6 :rel/target "Pipeline Invariant Tests"]
+ [:db/add -6 :rel/type :rel/depends-on]
+
+ [:db/add -7 :rel/source -1]
+ [:db/add -7 :rel/target "Pipeline Observability"]
+ [:db/add -7 :rel/type :rel/depends-on]
+
+ [:db/add -8 :rel/source -1]
+ [:db/add -8 :rel/target "Terrain Face Streets"]
+ [:db/add -8 :rel/type :rel/depends-on]
+
+ [:db/add -9 :rel/source -1]
+ [:db/add -9 :rel/target "Land Reservation"]
+ [:db/add -9 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -10 :decision/summary "Three layers of invariant checking run as PipelineRunner hooks: bitmap, polyline, and block invariants."]
+ [:db/add -10 :decision/rationale "Catches constraint violations at the introducing step, covering grid overlaps, road structure, and zone structure."]
+ [:db/add -10 :decision/affects -1]
+
+ [:db/add -11 :decision/summary "Only marketTown currently uses the organic growth pipeline; others use simple reservation."]
+ [:db/add -11 :decision/rationale "Planned and Haussmann growth strategies are designed but not yet implemented."]
+ [:db/add -11 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -12 :invariant/statement "Both regional and city pipelines produce grids and graph structures from a seed."]
+ [:db/add -12 :invariant/confidence :high]
+ [:db/add -12 :invariant/source-page "pipelines-overview.md"]
+
+ [:db/add -13 :invariant/statement "Zone extraction uses planar graph faces (facesWithEdges), not bitmap flood-fills."]
+ [:db/add -13 :invariant/confidence :high]
+
+ ;; ---- progress-indicators.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Progress Indicators"]
+ [:db/add -1 :concept/summary "The need for progress modals during slow operations like city generation, tick advancing, and archetype comparison."]
+ [:db/add -1 :concept/source-page "progress-indicators.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Debugging Cities"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Generation Pipeline"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -4 :decision/summary "Show a modal overlay during any operation blocking the UI for more than ~200ms."]
+ [:db/add -4 :decision/rationale "Without feedback, it's ambiguous whether a tick change is a bug or just slow."]
+ [:db/add -4 :decision/affects -1]
+
+ [:db/add -5 :decision/summary "Progress requires breaking synchronous work into async chunks (requestAnimationFrame or setTimeout between steps)."]
+ [:db/add -5 :decision/rationale "Pipeline currently runs synchronously on the main thread, blocking UI entirely."]
+ [:db/add -5 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -6 :invariant/statement "Each pipeline tick is a distinct named step mapping naturally to progress messages."]
+ [:db/add -6 :invariant/confidence :high]
+
+ ;; ---- railway-network.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Railway Network"]
+ [:db/add -1 :concept/summary "Design spec for a regional railway network connecting settlements to off-map cities, with historical layering, tunnel routing, and terminus stations."]
+ [:db/add -1 :concept/source-page "railway-network.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Generation Pipeline"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Region Inheritance"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Regional Railways Pipeline"]
+ [:db/add -4 :rel/type :rel/constrains]
+
+ [:db/add -5 :rel/source -1]
+ [:db/add -5 :rel/target "City Archetypes"]
+ [:db/add -5 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -6 :decision/summary "Railways are planned infrastructure built in historical phases, unlike organically growing roads."]
+ [:db/add -6 :decision/rationale "Reflects real history: main trunk lines first, secondary trunks, branch lines, then cross-country routes."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Terminus stations are fan-shaped, not radial — lines converge from one direction then spread into parallel platforms."]
+ [:db/add -7 :decision/rationale "Unlike roads which radiate from a centre, railway lines approach from a concentrated direction."]
+ [:db/add -7 :decision/affects -1]
+
+ [:db/add -8 :decision/summary "Railway cost function heavily penalises slope (10x more than roads) with max 2-3% gradient."]
+ [:db/add -8 :decision/rationale "Real railways need very gradual elevation change, preferring valleys and gentle curves over direct routes."]
+ [:db/add -8 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -9 :invariant/statement "Off-map cities are placed only on inland edges (not coastal edges)."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "railway-network.md"]
+
+ [:db/add -10 :invariant/statement "Main city to capital is always double-track (the primary trunk line)."]
+ [:db/add -10 :invariant/confidence :high]
+ [:db/add -10 :invariant/source-page "railway-network.md"]
+
+ [:db/add -11 :invariant/statement "Not every settlement gets a station — tier 4-5 (hamlets/farms) are unlikely to have rail service."]
+ [:db/add -11 :invariant/confidence :medium]
+
+ ;; ---- regional-pipeline.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Regional Pipeline"]
+ [:db/add -1 :concept/summary "Full phase-by-phase breakdown of the regional generation pipeline producing landscapes with terrain, rivers, settlements, roads, and railways."]
+ [:db/add -1 :concept/source-page "regional-pipeline.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Region Inheritance"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Regional Rivers"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Regional Railways Pipeline"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Settlement/road phases use a feedback loop: settlements placed, roads built, market towns attracted to junctions, more roads built, settlements promoted."]
+ [:db/add -5 :decision/rationale "Real settlements and roads co-evolve — roads attract settlements, settlements justify roads."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Phases run out of numeric order for dependency reasons (A4 coastline runs before A3 hydrology)."]
+ [:db/add -6 :decision/rationale "Coastal erosion must shape terrain before rivers are routed through it."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Geology modulates terrain generation: each rock type has distinct erosion resistance, permeability, soil fertility, and cliff tendency."]
+ [:db/add -7 :decision/rationale "Creates realistic geological diversity: hard rock = higher elevation, soft rock = broader valleys."]
+ [:db/add -7 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -8 :invariant/statement "Default regional grid is 256x256 cells at 50m resolution = 12.8km x 12.8km region."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "regional-pipeline.md"]
+
+ [:db/add -9 :invariant/statement "generateRegion returns a LayerStack containing all grids and data structures."]
+ [:db/add -9 :invariant/confidence :high]
+
+ ;; ---- regional-railways-pipeline.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Regional Railways Pipeline"]
+ [:db/add -1 :concept/summary "How railways are generated in the regional pipeline: off-map cities, A* routing with settlement bonus, corridor sharing, and bridge detection."]
+ [:db/add -1 :concept/source-page "regional-railways-pipeline.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Railway Network"]
+ [:db/add -2 :rel/type :rel/implements]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Regional Pipeline"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Pipelines Overview"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Track reuse discount (5% of normal cost) creates natural branching without explicit merge logic."]
+ [:db/add -5 :decision/rationale "Later lines lock onto shared corridors where they head in a similar direction, then diverge — producing a natural tree."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Settlement bonus gives up to 70% cost discount near settlements so A* naturally routes through towns."]
+ [:db/add -6 :decision/rationale "Railways should serve settlements without requiring explicit waypoints."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Railway slope penalty is 150 (vs 15 for roads) with max 3% gradient."]
+ [:db/add -7 :decision/rationale "Railways need very gentle gradients; cost skyrockets above the threshold."]
+ [:db/add -7 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -8 :invariant/statement "Railway generation runs as phase A8 of the regional pipeline, after settlements and roads are fully placed."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "regional-railways-pipeline.md"]
+
+ [:db/add -9 :invariant/statement "All lines radiate from the main city; capital (importance 1) is routed first."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "regional-railways-pipeline.md"]
+
+ [:db/add -10 :invariant/statement "If main city grid position is on water, the railway origin is BFS-nudged to nearest dry land within 20 cells."]
+ [:db/add -10 :invariant/confidence :high]
+
+ ;; ---- regional-rivers.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Regional Rivers"]
+ [:db/add -1 :concept/summary "How the regional pipeline generates rivers: corridor planning, flow routing, stream extraction, valley carving, and known issues."]
+ [:db/add -1 :concept/source-page "regional-rivers.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Regional Pipeline"]
+ [:db/add -2 :rel/type :rel/implements]
+
+ ;; Pass 3 — Decisions
+ [:db/add -3 :decision/summary "Major rivers are planned as antecedent drainage before terrain exists (corridor planning)."]
+ [:db/add -3 :decision/rationale "Rivers that predate current mountain ranges need to cut through terrain, not be deflected by it."]
+ [:db/add -3 :decision/affects -1]
+
+ [:db/add -4 :decision/summary "Geology modulates meanders: soft rock amplifies ×1.5, hard rock dampens ×0.3."]
+ [:db/add -4 :decision/rationale "Creates realistic variation: meandering rivers in soft lowlands, straighter channels in hard rock gorges."]
+ [:db/add -4 :decision/affects -1]
+
+ [:db/add -5 :decision/summary "Valley depth field uses geology: hard rock creates narrow gorges (0.5x width, 1.3x depth), soft rock creates broad valleys (1.5x width, 0.7x depth)."]
+ [:db/add -5 :decision/rationale "Realistic valley profiles vary by rock type."]
+ [:db/add -5 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -6 :invariant/statement "Stream ranks: stream (>=80 acc), river (>=400 acc), majorRiver (>=800 acc)."]
+ [:db/add -6 :invariant/confidence :high]
+ [:db/add -6 :invariant/source-page "regional-rivers.md"]
+
+ [:db/add -7 :invariant/statement "River half-width = sqrt(accumulation) / 5, ranging 2-40m."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "regional-rivers.md"]
+
+ [:db/add -8 :invariant/statement "Known issue: corridor depression combined with power curve pushes terrain below sea level, fragmenting rivers."]
+ [:db/add -8 :invariant/confidence :high]
+
+ ;; ---- street-direction-compromise.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Street Direction Compromise"]
+ [:db/add -1 :concept/summary "How streets resolve competing pressures from terrain contours and anchor road perpendicularity, controlled by a gridBias parameter (0-1)."]
+ [:db/add -1 :concept/source-page "street-direction-compromise.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Terrain Face Streets"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Archetypes"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -4 :decision/summary "A single gridBias parameter (0-1) controls the compromise between terrain contour following and road perpendicularity."]
+ [:db/add -4 :decision/rationale "Rejected alternative: separate per-influence parameters. Single parameter gives clear archetype-driven control."]
+ [:db/add -4 :decision/affects -1]
+
+ [:db/add -5 :decision/summary "Three transition approaches considered: straight compromise, smooth curve, local kink."]
+ [:db/add -5 :decision/rationale "Straight is simplest; smooth curve varies direction along street length; local kink keeps interior optimal but bends at junctions."]
+ [:db/add -5 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -6 :invariant/statement "gridBias=0 means pure terrain-following; gridBias=1 means pure grid (perpendicular to nearest road)."]
+ [:db/add -6 :invariant/confidence :high]
+ [:db/add -6 :invariant/source-page "street-direction-compromise.md"]
+
+ [:db/add -7 :invariant/statement "Road influence is strongest within ~100m, zero beyond ~200m; terrain influence is constant everywhere."]
+ [:db/add -7 :invariant/confidence :medium]
+
+ ;; ---- terrain-face-streets.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Terrain Face Streets"]
+ [:db/add -1 :concept/summary "Street layout by segmenting zones into terrain faces with consistent slope, then laying contour-following streets and uphill cross streets within each face."]
+ [:db/add -1 :concept/source-page "terrain-face-streets.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Generation Pipeline"]
+ [:db/add -2 :rel/type :rel/implements]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Zone-Based Allocation"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Street Direction Compromise"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Zones are segmented into terrain faces with consistent slope direction (within ~30 degrees) and steepness."]
+ [:db/add -5 :decision/rationale "Real hillside cities are composed of distinct terrain faces; each gets a street pattern suited to its character."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Face boundaries (ridges, valleys, grade breaks) are where major roads naturally run."]
+ [:db/add -6 :decision/rationale "Combines findings from multiple experiments: 007a (zone splitting), 007e (gradient walk), 007g (contour tracing)."]
+ [:db/add -6 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -7 :invariant/statement "Very steep terrain (slope > 0.35) is not developable."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "terrain-face-streets.md"]
+
+ [:db/add -8 :invariant/statement "Cross streets connect corresponding subdivision points between top (uphill) and bottom (downhill) edges."]
+ [:db/add -8 :invariant/confidence :high]
+
+ ;; ---- ui-navigation.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "UI Navigation"]
+ [:db/add -1 :concept/summary "How the user navigates from region view into city views, with controls for archetype, tick, debug layer, and view mode — all encoded in the URL."]
+ [:db/add -1 :concept/source-page "ui-navigation.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Debugging Cities"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Generator Overview"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Progress Indicators"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Move archetype, tick, and debug layer controls to the region screen (configure before launching)."]
+ [:db/add -5 :decision/rationale "Reduces clicks, makes URL predictable, and allows preview of archetype scores before entering a view."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "All view state encoded in URL via history.replaceState."]
+ [:db/add -6 :decision/rationale "Pasting a URL reconstructs the full view state for sharing and reproducibility."]
+ [:db/add -6 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -7 :invariant/statement "URL params include seed, gx, gz, mode, archetype, tick, lens, and optionally col/row for debug mode."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "ui-navigation.md"]
+
+ [:db/add -8 :invariant/statement "Four view modes: 3D City (mode=city), Debug (mode=debug), Compare Archetypes (mode=compare-archetypes), Compare Growth (mode=compare)."]
+ [:db/add -8 :invariant/confidence :high]
+
+ ;; ---- zone-based-allocation.edn ----
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Zone-Based Allocation"]
+ [:db/add -1 :concept/summary "Using development zones as the primary unit for land reservation, with zone boundaries as road locations and sub-zones for finer control."]
+ [:db/add -1 :concept/source-page "zone-based-allocation.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Bitmap Pipeline Model"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Land Allocation Model"]
+ [:db/add -3 :rel/type :rel/implements]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "City Growth Model"]
+ [:db/add -4 :rel/type :rel/implements]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Zones are the primary allocation unit — assign use types to zones, not cells."]
+ [:db/add -5 :decision/rationale "Zones already encode terrain-awareness, buildability, road-splitting, and slope orientation. Cell-by-cell produces blobs or road chicken-and-egg problems."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Zone boundaries ARE the primary street network."]
+ [:db/add -6 :decision/rationale "Solves the road-before-development problem: gaps between zones follow terrain and are natural street corridors."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Commercial doesn't work at zone level — it's fundamentally about road frontage."]
+ [:db/add -7 :decision/rationale "Commercial claims frontage along roads one plot deep. The zone system creates the road network; commercial fills along it."]
+ [:db/add -7 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -8 :invariant/statement "Zone-based allocation preserves terrain-following properties because zone geometry encodes the terrain relationship."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "zone-based-allocation.md"]
+
+ [:db/add -9 :invariant/statement "Each tick: score unassigned zones, assign top-scoring to use types, run ribbon layout for residential, commercial claims road frontage, recompute influence."]
+ [:db/add -9 :invariant/confidence :high]
+
+]

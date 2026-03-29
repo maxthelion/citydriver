@@ -1,0 +1,61 @@
+[;; === city-generation-pipeline.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "City Generation Pipeline"]
+ [:db/add -1 :concept/summary "The ordered sequence of named steps that generates a city from inherited regional map features, implemented as a JavaScript generator executed by PipelineRunner."]
+ [:db/add -1 :concept/source-page "city-generation-pipeline.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Region Inheritance"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Archetypes"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Pipeline Abstraction"]
+ [:db/add -4 :rel/type :rel/implements]
+
+ [:db/add -5 :rel/source -1]
+ [:db/add -5 :rel/target "Pipeline Invariant Tests"]
+ [:db/add -5 :rel/type :rel/constrains]
+
+ [:db/add -6 :rel/source -1]
+ [:db/add -6 :rel/target "Pipeline Observability"]
+ [:db/add -6 :rel/type :rel/depends-on]
+
+ [:db/add -7 :rel/source -1]
+ [:db/add -7 :rel/target "Land Reservation"]
+ [:db/add -7 :rel/type :rel/depends-on]
+
+ [:db/add -8 :rel/source -1]
+ [:db/add -8 :rel/target "Terrain Face Streets"]
+ [:db/add -8 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -9 :decision/summary "Cities inherit terrain, rivers, water, and settlement positions from the regional map rather than generating from scratch."]
+ [:db/add -9 :decision/rationale "Ensures causal consistency between regional and city scales."]
+ [:db/add -9 :decision/affects -1]
+
+ [:db/add -10 :decision/summary "Pipeline implemented as a JavaScript generator yielding step descriptors, not a state machine."]
+ [:db/add -10 :decision/rationale "Enables named steps, hook-based observability, and composeable growth strategies via yield*."]
+ [:db/add -10 :decision/affects -1]
+
+ [:db/add -11 :decision/summary "Zone extraction runs twice: once before and once after zone boundary roads."]
+ [:db/add -11 :decision/rationale "The second extraction picks up finer faces created by the new boundary roads."]
+ [:db/add -11 :decision/affects -1]
+
+ [:db/add -12 :decision/summary "For archetypes without growth config, three simple steps (reserve, ribbons, connect) replace the organic growth loop."]
+ [:db/add -12 :decision/rationale "Only marketTown currently uses organic growth; others use BFS-based reservation."]
+ [:db/add -12 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -13 :invariant/statement "Each pipeline step yields a descriptor { id, fn } and the runner executes fn(), fires hooks, and advances."]
+ [:db/add -13 :invariant/confidence :high]
+ [:db/add -13 :invariant/source-page "city-generation-pipeline.md"]
+
+ [:db/add -14 :invariant/statement "The growth loop terminates when all agent budgets are exhausted or maxGrowthTicks is reached."]
+ [:db/add -14 :invariant/confidence :high]
+ [:db/add -14 :invariant/source-page "city-generation-pipeline.md"]]

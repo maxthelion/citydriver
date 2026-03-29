@@ -1,0 +1,37 @@
+[;; === ui-navigation.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "UI Navigation"]
+ [:db/add -1 :concept/summary "How the user navigates from region view into city views, with controls for archetype, tick, debug layer, and view mode — all encoded in the URL."]
+ [:db/add -1 :concept/source-page "ui-navigation.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Debugging Cities"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Generator Overview"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Progress Indicators"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Move archetype, tick, and debug layer controls to the region screen (configure before launching)."]
+ [:db/add -5 :decision/rationale "Reduces clicks, makes URL predictable, and allows preview of archetype scores before entering a view."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "All view state encoded in URL via history.replaceState."]
+ [:db/add -6 :decision/rationale "Pasting a URL reconstructs the full view state for sharing and reproducibility."]
+ [:db/add -6 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -7 :invariant/statement "URL params include seed, gx, gz, mode, archetype, tick, lens, and optionally col/row for debug mode."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "ui-navigation.md"]
+
+ [:db/add -8 :invariant/statement "Four view modes: 3D City (mode=city), Debug (mode=debug), Compare Archetypes (mode=compare-archetypes), Compare Growth (mode=compare)."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "ui-navigation.md"]]

@@ -1,0 +1,49 @@
+[;; === railway-network.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Railway Network"]
+ [:db/add -1 :concept/summary "Design spec for a regional railway network connecting settlements to off-map cities, with historical layering, tunnel routing, and terminus stations."]
+ [:db/add -1 :concept/source-page "railway-network.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Generation Pipeline"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Region Inheritance"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Regional Railways Pipeline"]
+ [:db/add -4 :rel/type :rel/constrains]
+
+ [:db/add -5 :rel/source -1]
+ [:db/add -5 :rel/target "City Archetypes"]
+ [:db/add -5 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -6 :decision/summary "Railways are planned infrastructure built in historical phases, unlike organically growing roads."]
+ [:db/add -6 :decision/rationale "Reflects real history: main trunk lines first, secondary trunks, branch lines, then cross-country routes."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Terminus stations are fan-shaped, not radial — lines converge from one direction then spread into parallel platforms."]
+ [:db/add -7 :decision/rationale "Unlike roads which radiate from a centre, railway lines approach from a concentrated direction."]
+ [:db/add -7 :decision/affects -1]
+
+ [:db/add -8 :decision/summary "Railway cost function heavily penalises slope (10x more than roads) with max 2-3% gradient."]
+ [:db/add -8 :decision/rationale "Real railways need very gradual elevation change, preferring valleys and gentle curves over direct routes."]
+ [:db/add -8 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -9 :invariant/statement "Off-map cities are placed only on inland edges (not coastal edges)."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "railway-network.md"]
+
+ [:db/add -10 :invariant/statement "Main city to capital is always double-track (the primary trunk line)."]
+ [:db/add -10 :invariant/confidence :high]
+ [:db/add -10 :invariant/source-page "railway-network.md"]
+
+ [:db/add -11 :invariant/statement "Not every settlement gets a station — tier 4-5 (hamlets/farms) are unlikely to have rail service."]
+ [:db/add -11 :invariant/confidence :medium]
+ [:db/add -11 :invariant/source-page "railway-network.md"]]

@@ -1,0 +1,57 @@
+[;; === pipelines-overview.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Pipelines Overview"]
+ [:db/add -1 :concept/summary "How the regional and city generation pipelines work: generator-based, hook-driven, with named steps at every level."]
+ [:db/add -1 :concept/source-page "pipelines-overview.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Regional Pipeline"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Generation Pipeline"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Pipeline Abstraction"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ [:db/add -5 :rel/source -1]
+ [:db/add -5 :rel/target "City Archetypes"]
+ [:db/add -5 :rel/type :rel/depends-on]
+
+ [:db/add -6 :rel/source -1]
+ [:db/add -6 :rel/target "Pipeline Invariant Tests"]
+ [:db/add -6 :rel/type :rel/depends-on]
+
+ [:db/add -7 :rel/source -1]
+ [:db/add -7 :rel/target "Pipeline Observability"]
+ [:db/add -7 :rel/type :rel/depends-on]
+
+ [:db/add -8 :rel/source -1]
+ [:db/add -8 :rel/target "Terrain Face Streets"]
+ [:db/add -8 :rel/type :rel/depends-on]
+
+ [:db/add -9 :rel/source -1]
+ [:db/add -9 :rel/target "Land Reservation"]
+ [:db/add -9 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -10 :decision/summary "Three layers of invariant checking run as PipelineRunner hooks: bitmap, polyline, and block invariants."]
+ [:db/add -10 :decision/rationale "Catches constraint violations at the introducing step, covering grid overlaps, road structure, and zone structure."]
+ [:db/add -10 :decision/affects -1]
+
+ [:db/add -11 :decision/summary "Only marketTown currently uses the organic growth pipeline; others use simple reservation."]
+ [:db/add -11 :decision/rationale "Planned and Haussmann growth strategies are designed but not yet implemented."]
+ [:db/add -11 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -12 :invariant/statement "Both regional and city pipelines produce grids and graph structures from a seed."]
+ [:db/add -12 :invariant/confidence :high]
+ [:db/add -12 :invariant/source-page "pipelines-overview.md"]
+
+ [:db/add -13 :invariant/statement "Zone extraction uses planar graph faces (facesWithEdges), not bitmap flood-fills."]
+ [:db/add -13 :invariant/confidence :high]
+ [:db/add -13 :invariant/source-page "pipelines-overview.md"]]

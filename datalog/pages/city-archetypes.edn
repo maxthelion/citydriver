@@ -1,0 +1,33 @@
+[;; === city-archetypes.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "City Archetypes"]
+ [:db/add -1 :concept/summary "How city archetypes control land reservation, placement requirements, organic growth, and street layout for each settlement."]
+ [:db/add -1 :concept/source-page "city-archetypes.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Generator Overview"]
+ [:db/add -2 :rel/type :rel/implements]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Archetype Data Model"]
+ [:db/add -3 :rel/type :rel/instantiates]
+
+ ;; Pass 3 — Decisions
+ [:db/add -4 :decision/summary "Archetypes fall on a spectrum from highly organic (medieval market towns) to highly planned (grid cities)."]
+ [:db/add -4 :decision/rationale "This affects street regularity, block shape, plot size consistency, and how growth ticks add new development."]
+ [:db/add -4 :decision/affects -1]
+
+ [:db/add -5 :decision/summary "Different archetypes have geographic siting constraints (harbours need coast, planned cities need flat terrain)."]
+ [:db/add -5 :decision/rationale "Ensures archetype selection matches the settlement's geography for realism."]
+ [:db/add -5 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -6 :invariant/statement "Harbour archetypes require coastal locations with bays or large rivers."]
+ [:db/add -6 :invariant/confidence :high]
+ [:db/add -6 :invariant/source-page "city-archetypes.md"]
+
+ [:db/add -7 :invariant/statement "Planned city archetypes require flatter terrain to accommodate regular layouts."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "city-archetypes.md"]]

@@ -1,0 +1,33 @@
+[;; === pipeline-performance.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Pipeline Performance"]
+ [:db/add -1 :concept/summary "How to measure per-step timing across the city pipeline using PipelineRunner hooks, run the benchmark script, and interpret results."]
+ [:db/add -1 :concept/source-page "pipeline-performance.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Pipeline Abstraction"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Pipeline Observability"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Pipeline Benchmarking"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Timing is a PipelineRunner hook — attach onAfter and get per-step durations for free."]
+ [:db/add -5 :decision/rationale "No bespoke wrapping needed; one hook attachment gives timing for every step and strategy."]
+ [:db/add -5 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -6 :invariant/statement "Every step has a stable string ID that is consistent across runs."]
+ [:db/add -6 :invariant/confidence :high]
+ [:db/add -6 :invariant/source-page "pipeline-performance.md"]
+
+ [:db/add -7 :invariant/statement "benchmark-pipeline.js output goes to output/pipeline-perf.json with aggregate and per-city data."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "pipeline-performance.md"]]

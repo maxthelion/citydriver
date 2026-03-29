@@ -1,0 +1,37 @@
+[;; === pipeline-observability.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Pipeline Observability"]
+ [:db/add -1 :concept/summary "How to observe the city pipeline using PipelineRunner hooks: timing, bitmap snapshots at every step, and invariant checking."]
+ [:db/add -1 :concept/source-page "pipeline-observability.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Pipeline Abstraction"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Pipeline Performance"]
+ [:db/add -3 :rel/type :rel/implements]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Pipeline Invariant Tests"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "All observability delivered via PipelineRunner hooks — no changes to pipeline code."]
+ [:db/add -5 :decision/rationale "Hooks attach externally; timing, bitmap snapshots, and invariant checks all use the same onBefore/onAfter interface."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "BitmapLogger writes PPM images to a trace directory for offline analysis."]
+ [:db/add -6 :decision/rationale "Every intermediate pipeline state becomes a viewable image, enabling visual debugging."]
+ [:db/add -6 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -7 :invariant/statement "Every named step fires onBefore and onAfter on every attached hook."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "pipeline-observability.md"]
+
+ [:db/add -8 :invariant/statement "Multiple hooks can be attached and fire in attachment order."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "pipeline-observability.md"]]

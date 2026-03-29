@@ -1,0 +1,45 @@
+[;; === regional-railways-pipeline.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Regional Railways Pipeline"]
+ [:db/add -1 :concept/summary "How railways are generated in the regional pipeline: off-map cities, A* routing with settlement bonus, corridor sharing, and bridge detection."]
+ [:db/add -1 :concept/source-page "regional-railways-pipeline.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Railway Network"]
+ [:db/add -2 :rel/type :rel/implements]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Regional Pipeline"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Pipelines Overview"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Track reuse discount (5% of normal cost) creates natural branching without explicit merge logic."]
+ [:db/add -5 :decision/rationale "Later lines lock onto shared corridors where they head in a similar direction, then diverge — producing a natural tree."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Settlement bonus gives up to 70% cost discount near settlements so A* naturally routes through towns."]
+ [:db/add -6 :decision/rationale "Railways should serve settlements without requiring explicit waypoints."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Railway slope penalty is 150 (vs 15 for roads) with max 3% gradient."]
+ [:db/add -7 :decision/rationale "Railways need very gentle gradients; cost skyrockets above the threshold."]
+ [:db/add -7 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -8 :invariant/statement "Railway generation runs as phase A8 of the regional pipeline, after settlements and roads are fully placed."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "regional-railways-pipeline.md"]
+
+ [:db/add -9 :invariant/statement "All lines radiate from the main city; capital (importance 1) is routed first."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "regional-railways-pipeline.md"]
+
+ [:db/add -10 :invariant/statement "If main city grid position is on water, the railway origin is BFS-nudged to nearest dry land within 20 cells."]
+ [:db/add -10 :invariant/confidence :high]
+ [:db/add -10 :invariant/source-page "regional-railways-pipeline.md"]]

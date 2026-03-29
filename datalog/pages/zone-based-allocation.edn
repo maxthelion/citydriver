@@ -1,0 +1,41 @@
+[;; === zone-based-allocation.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Zone-Based Allocation"]
+ [:db/add -1 :concept/summary "Using development zones as the primary unit for land reservation, with zone boundaries as road locations and sub-zones for finer control."]
+ [:db/add -1 :concept/source-page "zone-based-allocation.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Bitmap Pipeline Model"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Land Allocation Model"]
+ [:db/add -3 :rel/type :rel/implements]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "City Growth Model"]
+ [:db/add -4 :rel/type :rel/implements]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Zones are the primary allocation unit — assign use types to zones, not cells."]
+ [:db/add -5 :decision/rationale "Zones already encode terrain-awareness, buildability, road-splitting, and slope orientation. Cell-by-cell produces blobs or road chicken-and-egg problems."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Zone boundaries ARE the primary street network."]
+ [:db/add -6 :decision/rationale "Solves the road-before-development problem: gaps between zones follow terrain and are natural street corridors."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Commercial doesn't work at zone level — it's fundamentally about road frontage."]
+ [:db/add -7 :decision/rationale "Commercial claims frontage along roads one plot deep. The zone system creates the road network; commercial fills along it."]
+ [:db/add -7 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -8 :invariant/statement "Zone-based allocation preserves terrain-following properties because zone geometry encodes the terrain relationship."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "zone-based-allocation.md"]
+
+ [:db/add -9 :invariant/statement "Each tick: score unassigned zones, assign top-scoring to use types, run ribbon layout for residential, commercial claims road frontage, recompute influence."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "zone-based-allocation.md"]]

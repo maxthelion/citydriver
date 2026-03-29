@@ -1,0 +1,37 @@
+[;; === regional-rivers.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Regional Rivers"]
+ [:db/add -1 :concept/summary "How the regional pipeline generates rivers: corridor planning, flow routing, stream extraction, valley carving, and known issues."]
+ [:db/add -1 :concept/source-page "regional-rivers.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Regional Pipeline"]
+ [:db/add -2 :rel/type :rel/implements]
+
+ ;; Pass 3 — Decisions
+ [:db/add -3 :decision/summary "Major rivers are planned as antecedent drainage before terrain exists (corridor planning)."]
+ [:db/add -3 :decision/rationale "Rivers that predate current mountain ranges need to cut through terrain, not be deflected by it."]
+ [:db/add -3 :decision/affects -1]
+
+ [:db/add -4 :decision/summary "Geology modulates meanders: soft rock amplifies ×1.5, hard rock dampens ×0.3."]
+ [:db/add -4 :decision/rationale "Creates realistic variation: meandering rivers in soft lowlands, straighter channels in hard rock gorges."]
+ [:db/add -4 :decision/affects -1]
+
+ [:db/add -5 :decision/summary "Valley depth field uses geology: hard rock creates narrow gorges (0.5x width, 1.3x depth), soft rock creates broad valleys (1.5x width, 0.7x depth)."]
+ [:db/add -5 :decision/rationale "Realistic valley profiles vary by rock type."]
+ [:db/add -5 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -6 :invariant/statement "Stream ranks: stream (>=80 acc), river (>=400 acc), majorRiver (>=800 acc)."]
+ [:db/add -6 :invariant/confidence :high]
+ [:db/add -6 :invariant/source-page "regional-rivers.md"]
+
+ [:db/add -7 :invariant/statement "River half-width = sqrt(accumulation) / 5, ranging 2-40m."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "regional-rivers.md"]
+
+ [:db/add -8 :invariant/statement "Known issue: corridor depression combined with power curve pushes terrain below sea level, fragmenting rivers."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "regional-rivers.md"]]

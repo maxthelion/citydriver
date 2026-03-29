@@ -1,0 +1,29 @@
+[;; === experiment-loop.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Experiment Loop"]
+ [:db/add -1 :concept/summary "Structured approach to iterating on pipeline output: each experiment documents problems, hypothesises changes, generates output, and keeps or reverts."]
+ [:db/add -1 :concept/source-page "experiment-loop.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Pipeline Observability"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -3 :decision/summary "One commit per experiment (if kept); revert otherwise."]
+ [:db/add -3 :decision/rationale "Clean git history where each commit is a verified improvement. Failed experiments still documented for posterity."]
+ [:db/add -3 :decision/affects -1]
+
+ [:db/add -4 :decision/summary "Never run render scripts directly — only run-experiment.js updates the manifests needed by the viewer."]
+ [:db/add -4 :decision/rationale "run-experiment.js handles PPM-to-PNG conversion, per-experiment manifests, and root manifest updates."]
+ [:db/add -4 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -5 :invariant/statement "Always render the same standard seeds (884469:27:95, 42:15:50, 12345:20:60) for comparability."]
+ [:db/add -5 :invariant/confidence :high]
+ [:db/add -5 :invariant/source-page "experiment-loop.md"]
+
+ [:db/add -6 :invariant/statement "Each experiment file must link to the previous experiment's output for comparison."]
+ [:db/add -6 :invariant/confidence :high]
+ [:db/add -6 :invariant/source-page "experiment-loop.md"]]

@@ -1,0 +1,29 @@
+[;; === progress-indicators.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Progress Indicators"]
+ [:db/add -1 :concept/summary "The need for progress modals during slow operations like city generation, tick advancing, and archetype comparison."]
+ [:db/add -1 :concept/source-page "progress-indicators.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Debugging Cities"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Generation Pipeline"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -4 :decision/summary "Show a modal overlay during any operation blocking the UI for more than ~200ms."]
+ [:db/add -4 :decision/rationale "Without feedback, it's ambiguous whether a tick change is a bug or just slow."]
+ [:db/add -4 :decision/affects -1]
+
+ [:db/add -5 :decision/summary "Progress requires breaking synchronous work into async chunks (requestAnimationFrame or setTimeout between steps)."]
+ [:db/add -5 :decision/rationale "Pipeline currently runs synchronously on the main thread, blocking UI entirely."]
+ [:db/add -5 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -6 :invariant/statement "Each pipeline tick is a distinct named step mapping naturally to progress messages."]
+ [:db/add -6 :invariant/confidence :high]
+ [:db/add -6 :invariant/source-page "progress-indicators.md"]]

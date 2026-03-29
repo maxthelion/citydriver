@@ -1,0 +1,49 @@
+[;; === bitmap-pipeline-model.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Bitmap Pipeline Model"]
+ [:db/add -1 :concept/summary "Core data model using composable Grid2D bitmap layers for spatial data flow through the city generation pipeline."]
+ [:db/add -1 :concept/source-page "bitmap-pipeline-model.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Generation Pipeline"]
+ [:db/add -2 :rel/type :rel/implements]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Archetype Data Model"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Land Reservation"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Everything that can be a bitmap should be — spatial data flows as Grid2D layers."]
+ [:db/add -5 :decision/rationale "Makes pipeline debuggable (every intermediate state is a viewable image) and composable (new behaviour from combining layers, not special-case code)."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "There is no single universal land value; each use type values different things via affinity weights."]
+ [:db/add -6 :decision/rationale "The affinity weights ARE the per-use land value function, computed on the fly from composing spatial layers. The generic landValue layer could be retired."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Agent behaviour comes from affinity weights, not code branches."]
+ [:db/add -7 :decision/rationale "Commercial sticks to roads because roadFrontage affinity is 2.0, not because there's a road-search loop. Industrial avoids residential via industrialDistance affinity."]
+ [:db/add -7 :decision/affects -1]
+
+ [:db/add -8 :decision/summary "Dynamic layers (developmentProximity, industrialDistance) follow the same blur-mask-normalise pattern as static layers."]
+ [:db/add -8 :decision/rationale "Consistency: only difference is when they're computed (per-tick vs once)."]
+ [:db/add -8 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -9 :invariant/statement "If it's spatial data, it must be a layer — no inline distance/proximity/gradient computation in algorithm code."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "bitmap-pipeline-model.md"]
+
+ [:db/add -10 :invariant/statement "Every layer must be inspectable via the debug screen or bitmap logger."]
+ [:db/add -10 :invariant/confidence :high]
+ [:db/add -10 :invariant/source-page "bitmap-pipeline-model.md"]
+
+ [:db/add -11 :invariant/statement "Blur radii, thresholds, and weights should be in archetype config, not hardcoded in pipeline code."]
+ [:db/add -11 :invariant/confidence :medium]
+ [:db/add -11 :invariant/source-page "bitmap-pipeline-model.md"]]

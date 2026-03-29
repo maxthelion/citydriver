@@ -1,0 +1,45 @@
+[;; === land-allocation-model.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Land Allocation Model"]
+ [:db/add -1 :concept/summary "How different zone types allocate land using type-specific spatial strategies, from ribbon streets to typed civic plots."]
+ [:db/add -1 :concept/source-page "land-allocation-model.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Bitmap Pipeline Model"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Generator Overview"]
+ [:db/add -3 :rel/type :rel/implements]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Zone-Based Allocation"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Each zone type has a fundamentally different spatial allocation strategy (ribbons, frontage, polygon, typed plots)."]
+ [:db/add -5 :decision/rationale "Residential uses ribbon streets, commercial uses road frontage, industrial uses large contiguous polygons, civic uses typed building plots."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Civic allocations work from a typology list with per-type size, shape, and placement rules."]
+ [:db/add -6 :decision/rationale "Parks, hospitals, churches, schools, town halls, cemeteries, and market squares each have distinct spatial requirements."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Current BFS-spread system is a first pass; ribbon layout should be integrated into the residential allocator."]
+ [:db/add -7 :decision/rationale "BFS produces blob-shaped zones that don't match the desired ribbon streets, typed civic plots, or polygon-based estates."]
+ [:db/add -7 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -8 :invariant/statement "Allocations should tessellate where possible — no useless narrow gaps between zones."]
+ [:db/add -8 :invariant/confidence :medium]
+ [:db/add -8 :invariant/source-page "land-allocation-model.md"]
+
+ [:db/add -9 :invariant/statement "Every allocation needs at least one edge touching a road or street."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "land-allocation-model.md"]
+
+ [:db/add -10 :invariant/statement "Same-type allocations should form coherent districts, not scattered cells."]
+ [:db/add -10 :invariant/confidence :medium]
+ [:db/add -10 :invariant/source-page "land-allocation-model.md"]]

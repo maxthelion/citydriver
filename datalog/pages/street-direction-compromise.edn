@@ -1,0 +1,33 @@
+[;; === street-direction-compromise.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Street Direction Compromise"]
+ [:db/add -1 :concept/summary "How streets resolve competing pressures from terrain contours and anchor road perpendicularity, controlled by a gridBias parameter (0-1)."]
+ [:db/add -1 :concept/source-page "street-direction-compromise.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Terrain Face Streets"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Archetypes"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -4 :decision/summary "A single gridBias parameter (0-1) controls the compromise between terrain contour following and road perpendicularity."]
+ [:db/add -4 :decision/rationale "Rejected alternative: separate per-influence parameters. Single parameter gives clear archetype-driven control."]
+ [:db/add -4 :decision/affects -1]
+
+ [:db/add -5 :decision/summary "Three transition approaches considered: straight compromise, smooth curve, local kink."]
+ [:db/add -5 :decision/rationale "Straight is simplest; smooth curve varies direction along street length; local kink keeps interior optimal but bends at junctions."]
+ [:db/add -5 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -6 :invariant/statement "gridBias=0 means pure terrain-following; gridBias=1 means pure grid (perpendicular to nearest road)."]
+ [:db/add -6 :invariant/confidence :high]
+ [:db/add -6 :invariant/source-page "street-direction-compromise.md"]
+
+ [:db/add -7 :invariant/statement "Road influence is strongest within ~100m, zero beyond ~200m; terrain influence is constant everywhere."]
+ [:db/add -7 :invariant/confidence :medium]
+ [:db/add -7 :invariant/source-page "street-direction-compromise.md"]]

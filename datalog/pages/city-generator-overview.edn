@@ -1,0 +1,33 @@
+[;; === city-generator-overview.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "City Generator Overview"]
+ [:db/add -1 :concept/summary "High-level overview: a system that builds lifelike cities from interrelated causal processes spanning geology to 3D-renderable features."]
+ [:db/add -1 :concept/source-page "city-generator-overview.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Archetypes"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Bitmap Pipeline Model"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "City Generation Pipeline"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Generation pipeline is causal: each stage feeds into the next, so the final city emerges from geography."]
+ [:db/add -5 :decision/rationale "Cities should look like they emerged from their landscape, not be placed arbitrarily."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Debugging via 2D layer views, 3D overlay, and side-by-side comparison."]
+ [:db/add -6 :decision/rationale "Multiple inspection modes needed to understand how computed properties relate to the rendered city."]
+ [:db/add -6 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -7 :invariant/statement "The city generator output must be a set of 3D-renderable features (roads, rivers, coastline, forests, buildings on plots)."]
+ [:db/add -7 :invariant/confidence :high]
+ [:db/add -7 :invariant/source-page "city-generator-overview.md"]]

@@ -1,0 +1,45 @@
+[;; === land-reservation.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Land Reservation"]
+ [:db/add -1 :concept/summary "How the land reservation system allocates non-residential land using a seed-and-grow BFS algorithm, shaped by archetype configuration."]
+ [:db/add -1 :concept/source-page "land-reservation.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Archetypes"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Archetype Data Model"]
+ [:db/add -3 :rel/type :rel/instantiates]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Bitmap Pipeline Model"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Algorithm always picks one seed and grows one contiguous zone per use type."]
+ [:db/add -5 :decision/rationale "BFS guarantees contiguity, producing realistic zone coherence (real cities have a commercial core, not scattered shops). But entire budget concentrates in one area."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Reservation order determines which use type gets first pick of land."]
+ [:db/add -6 :decision/rationale "First-reserved type gets the best location; later types work with whatever's left. This is the primary mechanism for expressing the archetype's organising principle."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Directional growth uses 2x score bonus along axis, 0.5x perpendicular, to produce elongated strips."]
+ [:db/add -7 :decision/rationale "Commercial strips along roads, industrial strips along waterfronts need elongated rather than circular zones."]
+ [:db/add -7 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -8 :invariant/statement "Budget for each use type = round(totalZoneCells * share) cells."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "land-reservation.md"]
+
+ [:db/add -9 :invariant/statement "Reservation types are uint8: 1=commercial, 2=industrial, 3=civic, 4=open space."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "land-reservation.md"]
+
+ [:db/add -10 :invariant/statement "All five spatial layers (centrality, waterfrontness, edgeness, roadFrontage, downwindness) are 0-1 floats masked by terrain suitability."]
+ [:db/add -10 :invariant/confidence :high]
+ [:db/add -10 :invariant/source-page "land-reservation.md"]]

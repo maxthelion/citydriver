@@ -1,0 +1,77 @@
+[;; === bitmap-invariants.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Bitmap Invariants"]
+ [:db/add -1 :concept/summary "Grid-level invariants that must hold at every pipeline step, defining exclusion, derivation, and consistency rules between bitmap layers."]
+ [:db/add -1 :concept/source-page "bitmap-invariants.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Bitmap Pipeline Model"]
+ [:db/add -2 :rel/type :rel/constrains]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Pipeline Invariant Tests"]
+ [:db/add -3 :rel/type :rel/implements]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "City Generation Pipeline"]
+ [:db/add -4 :rel/type :rel/constrains]
+
+ [:db/add -5 :rel/source -1]
+ [:db/add -5 :rel/target "Regional Pipeline"]
+ [:db/add -5 :rel/type :rel/constrains]
+
+ ;; Pass 3 — Decisions
+ [:db/add -6 :decision/summary "Invariants should be checked at every pipeline step, not just at the end."]
+ [:db/add -6 :decision/rationale "A violation introduced at step 3 is much easier to diagnose when caught at step 3 than when it causes a rendering glitch at step 7."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "The grid must be derived from the polyline, never computed independently (polyline-grid agreement)."]
+ [:db/add -7 :decision/rationale "One source of truth (the polyline), grid derived from it. Violations happen when grid is stamped from raw A* path vs simplified polyline, or two code paths stamp the same grid."]
+ [:db/add -7 :decision/affects -1]
+
+ [:db/add -8 :decision/summary "Sampled checks or GPU acceleration for performance on large grids."]
+ [:db/add -8 :decision/rationale "Full 1200x1200 grid checks (1.4M cells) across multiple seeds could be slow; sampling catches most violations at O(1/N) cost."]
+ [:db/add -8 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -10 :invariant/statement "waterMask and roadGrid must not overlap (no roads in water, bridges are separate)."]
+ [:db/add -10 :invariant/confidence :high]
+ [:db/add -10 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -11 :invariant/statement "waterMask and railwayGrid must not overlap."]
+ [:db/add -11 :invariant/confidence :high]
+ [:db/add -11 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -12 :invariant/statement "waterMask and buildingGrid must not overlap."]
+ [:db/add -12 :invariant/confidence :high]
+ [:db/add -12 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -13 :invariant/statement "railwayGrid and buildingGrid must not overlap."]
+ [:db/add -13 :invariant/confidence :high]
+ [:db/add -13 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -14 :invariant/statement "roadGrid and buildingGrid must not overlap."]
+ [:db/add -14 :invariant/confidence :high]
+ [:db/add -14 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -15 :invariant/statement "Station must be on dry land (waterMask = 0)."]
+ [:db/add -15 :invariant/confidence :high]
+ [:db/add -15 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -16 :invariant/statement "Station must be near railway (railwayGrid > 0 within 3 cells)."]
+ [:db/add -16 :invariant/confidence :high]
+ [:db/add -16 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -17 :invariant/statement "Nuclei must be on buildable land (buildability > 0.2)."]
+ [:db/add -17 :invariant/confidence :high]
+ [:db/add -17 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -18 :invariant/statement "Reserved cells must be within zones (reservationGrid cells imply zoneGrid > 0)."]
+ [:db/add -18 :invariant/confidence :high]
+ [:db/add -18 :invariant/source-page "bitmap-invariants.md"]
+
+ [:db/add -19 :invariant/statement "Road polylines must match roadGrid exactly (polyline-grid agreement)."]
+ [:db/add -19 :invariant/confidence :high]
+ [:db/add -19 :invariant/source-page "bitmap-invariants.md"]]

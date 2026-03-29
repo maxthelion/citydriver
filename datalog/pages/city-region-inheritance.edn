@@ -1,0 +1,45 @@
+[;; === city-region-inheritance.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "City Region Inheritance"]
+ [:db/add -1 :concept/summary "How city generation extracts and refines terrain, rivers, railways, and settlements from the regional map during tick 0 setup."]
+ [:db/add -1 :concept/source-page "city-region-inheritance.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "Regional Pipeline"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "City Generation Pipeline"]
+ [:db/add -3 :rel/type :rel/implements]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Pipelines Overview"]
+ [:db/add -4 :rel/type :rel/implements]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Elevation refined with 3-octave Perlin noise (2m amplitude) for local detail not present at regional scale."]
+ [:db/add -5 :decision/rationale "Regional 200m cells lack fine surface detail; noise adds realistic local variation without changing large-scale shape."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Water mask seeded from sea level threshold on refined elevation, not inherited from regional waterMask."]
+ [:db/add -6 :decision/rationale "Regional waterMask has coarse 200m river stamps that don't match city resolution."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Station placed at nearest dry-land point along track near city centre."]
+ [:db/add -7 :decision/rationale "Station needs to be on land, close to centre, and aligned with track direction for building placement."]
+ [:db/add -7 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -8 :invariant/statement "City grid centred on settlement position, extending CITY_RADIUS (15) regional cells in each direction."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "city-region-inheritance.md"]
+
+ [:db/add -9 :invariant/statement "Railway grid cells are marked occupied, preventing buildings on tracks (8m total width corridor)."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "city-region-inheritance.md"]
+
+ [:db/add -10 :invariant/statement "River polylines are Chaikin-smoothed (1 pass) and width computed from sqrt(accumulation)."]
+ [:db/add -10 :invariant/confidence :high]
+ [:db/add -10 :invariant/source-page "city-region-inheritance.md"]]

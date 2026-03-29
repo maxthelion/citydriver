@@ -1,0 +1,53 @@
+[;; === pipeline-abstraction.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Pipeline Abstraction"]
+ [:db/add -1 :concept/summary "Design for an explicit composeable pipeline using JavaScript generators, where the outer structure is fixed, growth strategies are archetype-selected, and sub-phase ordering is algorithmic."]
+ [:db/add -1 :concept/source-page "pipeline-abstraction.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Generation Pipeline"]
+ [:db/add -2 :rel/type :rel/constrains]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Pipeline Observability"]
+ [:db/add -3 :rel/type :rel/implements]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Pipeline Performance"]
+ [:db/add -4 :rel/type :rel/implements]
+
+ [:db/add -5 :rel/source -1]
+ [:db/add -5 :rel/target "City Archetypes"]
+ [:db/add -5 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -6 :decision/summary "JavaScript generators are the right primitive for pauseable, resumeable execution with named steps."]
+ [:db/add -6 :decision/rationale "A generator function IS the pipeline definition; generator.next() is a tick. yield* composes sub-generators transparently."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Organic and planned cities have genuinely different growth algorithms — different generators, not just different parameters."]
+ [:db/add -7 :decision/rationale "Organic: allocation first, roads follow demand. Planned: roads imposed first, allocation fills blocks. The ordering of road vs allocation is inverted."]
+ [:db/add -7 :decision/affects -1]
+
+ [:db/add -8 :decision/summary "Phase ordering within a strategy is fixed in code (not configurable), while strategy selection and phase parameters are in archetype config (data)."]
+ [:db/add -8 :decision/rationale "Phase ordering encodes algorithmic constraints that can't be safely relaxed. Exposing orderings as configurable arrays would let config violate them."]
+ [:db/add -8 :decision/affects -1]
+
+ [:db/add -9 :decision/summary "All observability tools become PipelineRunner hooks — no bespoke code per strategy."]
+ [:db/add -9 :decision/rationale "Both the benchmark profiler and bitmap tracer work identically across organic, planned, and desire-lines pipelines because they all emit step(id, fn) descriptors."]
+ [:db/add -9 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -10 :invariant/statement "The outer pipeline sequence (terrain, skeleton, land value, zones, spatial, growth, finish) is the same for every city."]
+ [:db/add -10 :invariant/confidence :high]
+ [:db/add -10 :invariant/source-page "pipeline-abstraction.md"]
+
+ [:db/add -11 :invariant/statement "Phase ordering within a growth strategy must NOT be configurable — it must be fixed in the generator code."]
+ [:db/add -11 :invariant/confidence :high]
+ [:db/add -11 :invariant/source-page "pipeline-abstraction.md"]
+
+ [:db/add -12 :invariant/statement "Strategy selection maps archetype config to generator functions via a registry."]
+ [:db/add -12 :invariant/confidence :high]
+ [:db/add -12 :invariant/source-page "pipeline-abstraction.md"]]

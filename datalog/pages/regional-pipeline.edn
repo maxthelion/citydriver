@@ -1,0 +1,41 @@
+[;; === regional-pipeline.md ===
+
+ ;; Pass 1 — Concepts
+ [:db/add -1 :concept/name "Regional Pipeline"]
+ [:db/add -1 :concept/summary "Full phase-by-phase breakdown of the regional generation pipeline producing landscapes with terrain, rivers, settlements, roads, and railways."]
+ [:db/add -1 :concept/source-page "regional-pipeline.md"]
+
+ ;; Pass 2 — Relationships
+ [:db/add -2 :rel/source -1]
+ [:db/add -2 :rel/target "City Region Inheritance"]
+ [:db/add -2 :rel/type :rel/depends-on]
+
+ [:db/add -3 :rel/source -1]
+ [:db/add -3 :rel/target "Regional Rivers"]
+ [:db/add -3 :rel/type :rel/depends-on]
+
+ [:db/add -4 :rel/source -1]
+ [:db/add -4 :rel/target "Regional Railways Pipeline"]
+ [:db/add -4 :rel/type :rel/depends-on]
+
+ ;; Pass 3 — Decisions
+ [:db/add -5 :decision/summary "Settlement/road phases use a feedback loop: settlements placed, roads built, market towns attracted to junctions, more roads built, settlements promoted."]
+ [:db/add -5 :decision/rationale "Real settlements and roads co-evolve — roads attract settlements, settlements justify roads."]
+ [:db/add -5 :decision/affects -1]
+
+ [:db/add -6 :decision/summary "Phases run out of numeric order for dependency reasons (A4 coastline runs before A3 hydrology)."]
+ [:db/add -6 :decision/rationale "Coastal erosion must shape terrain before rivers are routed through it."]
+ [:db/add -6 :decision/affects -1]
+
+ [:db/add -7 :decision/summary "Geology modulates terrain generation: each rock type has distinct erosion resistance, permeability, soil fertility, and cliff tendency."]
+ [:db/add -7 :decision/rationale "Creates realistic geological diversity: hard rock = higher elevation, soft rock = broader valleys."]
+ [:db/add -7 :decision/affects -1]
+
+ ;; Pass 4 — Invariants
+ [:db/add -8 :invariant/statement "Default regional grid is 256x256 cells at 50m resolution = 12.8km x 12.8km region."]
+ [:db/add -8 :invariant/confidence :high]
+ [:db/add -8 :invariant/source-page "regional-pipeline.md"]
+
+ [:db/add -9 :invariant/statement "generateRegion returns a LayerStack containing all grids and data structures."]
+ [:db/add -9 :invariant/confidence :high]
+ [:db/add -9 :invariant/source-page "regional-pipeline.md"]]
