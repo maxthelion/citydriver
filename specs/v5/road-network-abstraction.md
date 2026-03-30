@@ -1,334 +1,167 @@
-# Road Network Abstraction
+# Road Network Abstraction — Bypass Violations and Fix Plan
 
-## Status: Implemented (pipeline refactor complete)
+## The Intended Contract
 
-## Problem Statement
+`RoadNetwork` (`src/core/RoadNetwork.js`) is designed as the **single mutation point** for roads, graph, and grids. Its JSDoc states this explicitly. It keeps three representations in sync:
 
-Roads are currently represented in three independent structures that can drift out of sync:
+- **`Road` objects** — canonical polylines with id, width, hierarchy, source, bridges
+- **`PlanarGraph`** — topological representation: nodes at intersections, edges along roads
+- **`roadGrid`** — rasterised bitmap: which cells are covered by a road
 
-| Structure | Location | Purpose |
-|---|---|---|
-| `map.roads[]` / `map.features[]` | `FeatureMap` | Plain JS objects, polylines for rendering |
-| `map.graph` | `PlanarGraph` | Topology — junctions, faces, pathfinding |
-| `map.roadGrid` | `Grid2D` uint8 | Rasterised cells for path cost and block extraction |
+All mutations are meant to go through its public API:
 
-Nothing enforces that they agree. Mutations to one don't propagate to the others. The concrete bugs this produces:
+| Method | Purpose |
+|--------|---------|
+| `add(polyline, attrs)` | Add a road, stamp grid, add graph edge |
+| `addFromCells(cells, attrs)` | Same, from grid cells |
+| `remove(id)` | Remove road, unstamp grid, remove graph edge |
+| `updatePolyline(id, newPolyline)` | Replace polyline, re-stamp grid, update graph |
+| `addBridge(roadId, ...)` | Add bridge, stamp bridgeGrid |
+| `ensureGraphNodeOnRoad(roadId, x, z)` | Split graph edge at point, return node id |
+| `connectRoadsAtPoint(roadIdA, roadIdB, x, z)` | Form junction at a point |
 
-1. **`growRoads()` writes only to `roadGrid`** — ribbon roads and cross streets stamped during growth ticks never appear in `map.roads` or `map.graph`. The graph is structurally incomplete after any growth tick. Block extraction, shortest-path queries, and face traversal all miss these roads.
+The invariants this supports (from `world-state-invariants.md`):
+- "Road grid matches polylines — every road grid cell is explainable by walking the road's polyline"
+- "No duplicate road grid stamps — only one code path stamps a given road into the grid"
 
-2. **`roadGrid` is never cleared when roads are removed** — `compactRoads()` filters roads out of `map.roads` but the cells those roads stamped remain in `roadGrid`. Ghost corridors persist: pathfinding gives a 99% reuse discount to cells with no corresponding road feature, block boundaries are wrong, and zone subdivision splits blocks that no longer have roads between them.
+## Current Violations
 
-3. **Bridge splice mutates the polyline destructively** — `_spliceBridge` replaces part of a road's `polyline[]` array in place. The bridge geometry becomes invisible to anything that held a reference to the original polyline. The graph edge's `points[]` no longer matches the road's actual geometry. There is no way to query "does this road have a bridge, and where?"
-
-4. **Alternate routes silently dropped** — `addRoadToGraph` skips a road if `graph.neighbors(startNodeId).includes(endNodeId)` is already true. A road that takes a genuinely different path between two already-connected junctions is discarded without warning.
-
-5. **`_snapPaths` can produce non-adjacent cell sequences** — cells are snapped up to 2 grid cells away from their original position. `mergeRoadPaths` then treats snapped-but-non-adjacent consecutive cells as connected, producing segments with physical discontinuities.
-
-6. **Minor dead code** — `_stampRoadValue()` is called on every `addFeature('road', …)` but is permanently empty. `findNearestRoad()` in `connectIslandZones.js` is defined but never called.
-
-The root cause is **scattered mutation**: adding, removing, or modifying a road means touching three data structures independently, and every code path is responsible for updating all of them correctly. Getting this wrong produces bugs that are hard to detect because the structures look internally consistent — they're just not consistent with each other.
+There are six sites in the pipeline that bypass `RoadNetwork` and write directly to the underlying structures.
 
 ---
 
-## Proposed Design
+### 1. `growRoads.js` — direct `roadGrid.set()` (5 sites)
 
-Two new classes fix the synchronisation problem. The pure functions that currently do the heavy lifting (`mergeRoadPaths`, `buildRoadNetwork`, `_snapPaths`, `PlanarGraph`) are kept intact — they're well-tested and their functional nature is an asset.
-
-### `Road` — replace plain feature object
-
-The main change from a plain object is:
-
-- The polyline is private and not directly mutable.
-- Bridges are a **first-class collection** on the road, not a destructive splice into the polyline array.
-- `resolvedPolyline()` returns the full geometry (base + bridges) for rendering; the underlying `polyline` is never mutated.
-
+**The bypass:**
 ```js
-class Road {
-  #id;
-  #polyline;    // [{x, z}] — base geometry, set once at construction
-  #bridges;     // [{bankA, bankB, entryT, exitT}] — parametric, not spliced
-
-  constructor(polyline, { width = 6, hierarchy = 'local', importance = 0.45, source } = {}) {
-    this.#id       = Road.#nextId++;
-    this.#polyline = polyline.map(p => ({ x: p.x, z: p.z })); // defensive copy
-    this.#bridges  = [];
-    this.width      = width;
-    this.hierarchy  = hierarchy;
-    this.importance = importance;
-    this.source     = source;
-  }
-
-  get id()       { return this.#id; }
-  get polyline() { return this.#polyline; }           // read-only access
-  get start()    { return this.#polyline[0]; }
-  get end()      { return this.#polyline[this.#polyline.length - 1]; }
-  get bridges()  { return [...this.#bridges]; }        // snapshot
-
-  /**
-   * Record a bridge crossing. entryT and exitT are parametric positions
-   * along the polyline (0..1), computed from the water-entry/exit world coords.
-   * bankA and bankB are the perpendicular landing positions on each bank.
-   * No polyline mutation occurs.
-   */
-  addBridge(bankA, bankB, entryT, exitT) {
-    this.#bridges.push({ bankA, bankB, entryT, exitT });
-  }
-
-  /**
-   * Full geometry for rendering: base polyline with bridge segments
-   * substituted in for water-crossing portions.
-   */
-  resolvedPolyline() {
-    if (this.#bridges.length === 0) return this.#polyline;
-    // Merge base polyline with bridge segments ordered by entryT
-    // Returns [{x, z}] with bridge bank points spliced at correct positions
-    // (implementation detail — kept off the class for clarity here)
-    return _resolvePolylineWithBridges(this.#polyline, this.#bridges);
-  }
-
-  toJSON() {
-    return {
-      id: this.#id, polyline: this.#polyline, bridges: this.#bridges,
-      width: this.width, hierarchy: this.hierarchy,
-      importance: this.importance, source: this.source,
-    };
-  }
-
-  static fromJSON(data) {
-    const road = new Road(data.polyline, data);
-    for (const b of data.bridges) road.addBridge(b.bankA, b.bankB, b.entryT, b.exitT);
-    return road;
-  }
-
-  static #nextId = 0;
-}
+roadGrid.set(g.gx, g.gz, 1);
 ```
 
-**Why parametric bridges (`entryT`, `exitT`) instead of index-based splicing?**
+**Where:** `growRoads()` has a dual code path. When `roadNetwork` is passed as an option it uses `roadNetwork.addFromCells()` correctly. When it is not passed, it falls back to direct `roadGrid.set()` calls for ribbon gaps, cross streets, and path-closing connections.
 
-The current `_spliceBridge` finds the closest existing polyline *vertex* to the water edge and splices there. Because polylines are RDP-simplified, the nearest vertex may be far from the actual water edge — potentially hundreds of metres inland. The splice then removes the wrong portion of the polyline.
+**What breaks:** Cells appear in `roadGrid` with no corresponding `Road` object. The graph has no edges for them. `RoadNetwork._cellRefCounts` has no entry for them. If `RoadNetwork.remove()` is ever called for an overlapping road, it will clear those cells because the ref count is zero, silently destroying grid state it didn't create.
 
-A parametric position (fraction 0..1 along the total polyline arc length) is computed from the actual world-coord crossing point, not from the nearest vertex. `resolvedPolyline()` can interpolate precisely to that point without any vertex needing to exist there. The base geometry stays correct regardless.
+**Fix:** Remove the fallback path. `growRoads` should always receive `roadNetwork` and always call `addFromCells()`. All callers in `growthTick.js` already have access to `map.roadNetwork`. The `roadNetwork` parameter should become required.
 
 ---
 
-### `RoadNetwork` — single point of mutation
+### 2. `cityPipeline.js` — `road._replacePolyline()` in smooth-roads step
 
-This class owns all three representations and ensures they stay in sync. All road mutations go through it.
-
+**The bypass:**
 ```js
-class RoadNetwork {
-  #roads;         // Map<id, Road>
-  #graph;         // PlanarGraph
-  #roadGrid;      // Grid2D uint8
-  #bridgeGrid;    // Grid2D uint8
-  #cellRefCounts; // Grid2D uint16 — how many roads have stamped each cell
-
-  // grid geometry (stored for stamping/unstamping)
-  #width; #height; #cellSize; #originX; #originZ;
-
-  constructor(width, height, cellSize, originX = 0, originZ = 0) {
-    this.#roads        = new Map();
-    this.#graph        = new PlanarGraph();
-    this.#roadGrid     = new Grid2D(width, height, { type: 'uint8' });
-    this.#bridgeGrid   = new Grid2D(width, height, { type: 'uint8' });
-    this.#cellRefCounts = new Grid2D(width, height, { type: 'uint16' });
-    this.#width = width; this.#height = height; this.#cellSize = cellSize;
-    this.#originX = originX; this.#originZ = originZ;
-  }
-
-  // ---- Public API ----
-
-  /**
-   * Add a road from a world-coord polyline.
-   * Stamps roadGrid, updates graph, returns the Road.
-   */
-  add(polyline, attrs = {}) {
-    const road = new Road(polyline, attrs);
-    this.#roads.set(road.id, road);
-    this.#stampRoad(road);
-    this.#addToGraph(road);
-    return road;
-  }
-
-  /**
-   * Add a road from grid cells (used by growRoads so growth roads get a
-   * proper identity instead of only existing on roadGrid).
-   * Converts cells → world polyline, then delegates to add().
-   */
-  addFromCells(cells, attrs = {}) {
-    if (cells.length < 2) return null;
-    const polyline = cells.map(c => ({
-      x: this.#originX + c.gx * this.#cellSize,
-      z: this.#originZ + c.gz * this.#cellSize,
-    }));
-    return this.add(polyline, attrs);
-  }
-
-  /**
-   * Remove a road by id.
-   * Decrements cell ref counts and clears roadGrid cells that reach zero.
-   * Removes the corresponding graph edge.
-   */
-  remove(id) {
-    const road = this.#roads.get(id);
-    if (!road) return;
-    this.#unstampRoad(road);
-    this.#removeFromGraph(road);
-    this.#roads.delete(id);
-  }
-
-  /**
-   * Record a bridge on an existing road.
-   * Stamps bridgeGrid for water cells between the banks.
-   */
-  addBridge(roadId, bankA, bankB, entryT, exitT) {
-    const road = this.#roads.get(roadId);
-    if (!road) return;
-    road.addBridge(bankA, bankB, entryT, exitT);
-    this.#stampBridge(bankA, bankB);
-  }
-
-  /**
-   * Replace a road's polyline (e.g. after compaction).
-   * Unstamps old geometry, re-stamps new, updates graph.
-   */
-  updatePolyline(id, newPolyline) {
-    const road = this.#roads.get(id);
-    if (!road) return;
-    this.#unstampRoad(road);
-    this.#removeFromGraph(road);
-    road.#polyline = newPolyline.map(p => ({ x: p.x, z: p.z })); // only RoadNetwork can do this
-    this.#stampRoad(road);
-    this.#addToGraph(road);
-  }
-
-  /** Keep the best-hierarchy road when two roads have the same snapped endpoints. */
-  deduplicateByEndpoints(snapDist) {
-    // groups roads by endpoint pair, removes lower-hierarchy duplicates
-    // calls this.remove() so grid + graph stay in sync
-    // (replaces compactRoads Pass 2)
-  }
-
-  // ---- Read-only accessors ----
-
-  get roads()      { return [...this.#roads.values()]; }
-  get roadCount()  { return this.#roads.size; }
-  get graph()      { return this.#graph; }            // PlanarGraph (read)
-  get roadGrid()   { return this.#roadGrid; }         // Grid2D (read)
-  get bridgeGrid() { return this.#bridgeGrid; }
-
-  getRoad(id)      { return this.#roads.get(id); }
-
-  // ---- Private stamping ----
-
-  #stampRoad(road) {
-    // Walk polyline, stamp roadGrid, increment cellRefCounts
-    // (same geometry as current _stampRoad in FeatureMap)
-  }
-
-  #unstampRoad(road) {
-    // Walk polyline, decrement cellRefCounts
-    // Clear roadGrid cell only when ref count reaches 0
-    // This correctly handles overlapping roads — removing one doesn't
-    // clear cells it shares with another
-  }
-
-  #stampBridge(bankA, bankB) {
-    // Walk bankA→bankB, stamp bridgeGrid for water cells
-    // (same as current _stampBridgeGrid)
-  }
-
-  #addToGraph(road) {
-    // Find-or-create nodes for start/end with snapDist = cellSize * 3
-    // Only add edge if nodes are distinct AND not already connected
-    // Log a warning (don't silently discard) if alternate route is dropped
-  }
-
-  #removeFromGraph(road) {
-    // Find edge(s) between start/end node pair and remove
-    // If a node reaches degree 0, optionally remove it too
-  }
-}
+road._replacePolyline(poly);
 ```
 
----
+**Where:** The `smooth-roads` step at the end of `cityPipeline` iterates over `map.roads` and smooths each polyline using Chaikin subdivision, then calls `_replacePolyline` directly on the `Road` object.
 
-## How This Fixes the Audit Problems
+**What breaks:** `_replacePolyline` is marked package-private — it is intended to be called only by `RoadNetwork.updatePolyline()`. Calling it directly updates the Road's stored polyline but does NOT re-stamp the grid or update the graph. After smoothing, the rendered road shape diverges from the rasterised `roadGrid` cells. The grid shows the pre-smoothing footprint; pathfinding and invariant checks use stale data.
 
-| Problem | Fix |
-|---|---|
-| `growRoads()` roads invisible to graph | Call `network.addFromCells()` instead of stamping `roadGrid` directly |
-| Ghost corridors after compaction | `network.remove(id)` decrements ref counts; cells at zero get cleared |
-| Bridge splice corrupts polyline | `Road.addBridge()` stores parametric bridge data; `resolvedPolyline()` computes geometry on demand without mutation |
-| Alternate routes silently dropped | `#addToGraph` logs a warning instead of silently returning |
-| `_stampRoadValue` no-op | Deleted — it only existed as a hook that was never implemented |
-| `findNearestRoad` dead code | Deleted |
+**Fix:** Replace with `map.roadNetwork.updatePolyline(road.id, smoothedPolyline)`. This correctly unstamps the old geometry, updates the polyline, and re-stamps the new one.
 
 ---
 
-## What Doesn't Change
+### 3. `layoutRibbons.js` — `graph.splitEdge()` directly
 
-The pure functions that implement the heavy algorithms are kept exactly as they are:
-
-- `mergeRoadPaths(paths)` — cell-graph merge, no road objects involved
-- `buildRoadNetwork(options)` — pathfind + snap + merge + simplify pipeline
-- `PlanarGraph` — topology structure, unchanged
-
-`RoadNetwork` calls these functions and then uses the results to call `add()`. The functions' testability and correctness are preserved.
-
----
-
-## Integration with `FeatureMap`
-
-`FeatureMap` currently holds `this.roads`, `this.graph`, `this.roadGrid`, and `this.bridgeGrid` as separate fields. After this change:
-
+**The bypass:**
 ```js
-// Before
-this.roads    = [];
-this.graph    = new PlanarGraph();
-this.roadGrid = new Grid2D(…);
-
-// After
-this.roadNetwork = new RoadNetwork(width, height, cellSize, originX, originZ);
-
-// Convenience getters for backward compatibility during migration
-get roads()     { return this.roadNetwork.roads; }
-get graph()     { return this.roadNetwork.graph; }
-get roadGrid()  { return this.roadNetwork.roadGrid; }
-get bridgeGrid(){ return this.roadNetwork.bridgeGrid; }
+graph.splitEdge(edgeId, projX, projZ);
 ```
 
-`addFeature('road', …)` delegates to `this.roadNetwork.add(data.polyline, data)`.
+**Where:** The T-junction stitching pass at the end of `layoutRibbons` finds ribbon endpoints that land close to an existing graph edge, and splits that edge to create a proper junction node.
 
-Callers that currently write to `roadGrid` directly (e.g. `growRoads`, `_connectDisconnectedNuclei`) are updated to call `roadNetwork.addFromCells()` or `roadNetwork.add()`.
+**What breaks:** `graph.splitEdge()` updates graph topology only. `RoadNetwork` is not notified. The split creates a new node in the graph, but no corresponding update happens to the Road object whose edge was split, and no re-stamping of the grid occurs. The road's polyline still covers the same cells, but the graph now describes a different connectivity. Downstream steps that read `road.id` from graph edge attrs will find the original road id, not the two new half-edges, because `splitEdge` doesn't know about Road objects.
 
----
-
-## Tradeoffs
-
-### Where this clearly wins
-- **Invariant enforcement**: impossible to update one representation without the others
-- **Bridges as data**: queryable, serialisable, not a destructive edit to geometry
-- **Correct removal**: ref-counted unstamping makes `remove()` safe without a full grid rebuild
-- **Growth roads get an identity**: block extraction and face traversal see the complete network
-
-### Genuine costs
-- **Serialisation**: `Road` needs `toJSON()` / `fromJSON()` (outlined above); plain objects serialised for free
-- **The graph snap problem**: `addRoadToGraph` snaps road endpoints to nearby nodes. When a snapped node is later removed via `remove()`, it may be shared with other roads — `#removeFromGraph` needs to check degree before deleting a node. The snapping makes road identity and node identity non-injective; this was true before and OOP doesn't dissolve it, it just forces the decision to be named.
-- **Testing setup**: `RoadNetwork` needs more scaffolding to test than pure functions. Keep the pure functions pure; test them directly; test `RoadNetwork` through its public API with a minimal grid.
-
-### What OOP doesn't fix
-- The `_snapPaths` non-adjacent-cell problem — this is a geometry bug independent of object model. The fix is to verify adjacency after snapping, or reduce snap radius, or switch to a different deduplication strategy.
-- The node-snap ambiguity in `addRoadToGraph` — whether to keep or warn about alternate routes between connected nodes is a product decision, not an architecture one.
+**Fix:** Use `map.roadNetwork.ensureGraphNodeOnRoad(roadId, projX, projZ)` which does the same graph split but through the abstraction — it finds the road from the edge's `roadId` attr and handles the coordination. The `roadId` is already stored on graph edges as `edge.attrs.roadId`.
 
 ---
 
-## Migration Path
+### 4. `zoneBoundaryRoads.js` — `graph.splitEdge()`, `graph.mergeNodes()`, `graph._adjacency.delete()`
 
-1. Add `Road` class alongside plain objects; update `bridges.js` to call `road.addBridge()` instead of `_spliceBridge`.
-2. Add `RoadNetwork` with `add()` and read-only accessors; wire `FeatureMap.addFeature('road', …)` through it.
-3. Update `growRoads()` to call `roadNetwork.addFromCells()`.
-4. Add `remove()` with ref-counted unstamping; update `compactRoads` to use it.
-5. Add backward-compat getters on `FeatureMap`; remove them once all call sites are updated.
-6. Delete `_stampRoadValue`, `findNearestRoad`, the `feature.bridge` branch in `_stampRoad` (replaced by `#stampBridge` in `RoadNetwork`).
+**The bypass:**
+```js
+const splitNodeId = map.graph.splitEdge(edgeId, bestProjX, bestProjZ);
+map.graph.mergeNodes(zbId, splitNodeId);
+
+// and later, for cleanup:
+map.graph._adjacency.delete(id);
+```
+
+**Where:** After adding zone boundary roads, this step tries to snap the new road endpoints onto the existing skeleton by splitting skeleton edges and merging the boundary road's node into the split point. The cleanup loop then removes degree-0 nodes by directly deleting from `_adjacency`.
+
+**What breaks:** Same as above for `splitEdge` and `mergeNodes`. Additionally, `map.graph._adjacency.delete(id)` reaches into a private field of `PlanarGraph`. `PlanarGraph` has no public `removeNode` method that also cleans up adjacency entries, so the workaround goes directly to the internals. This creates graph state that `RoadNetwork` cannot reason about and that will corrupt subsequent graph operations if those nodes had pending entries elsewhere.
+
+**Fix:**
+- Replace `splitEdge` + `mergeNodes` with `map.roadNetwork.connectRoadsAtPoint(skeletonRoadId, zbRoadId, x, z)`.
+- Add a `removeOrphanNodes()` method to `PlanarGraph` (or `RoadNetwork`) that safely removes degree-0 nodes through the public API, then use that instead of `_adjacency.delete`.
+
+---
+
+### 5. `connectToNetwork.js` — `graph._adjacency.get()` for BFS
+
+**The bypass:**
+```js
+const adj = graph._adjacency.get(id);
+```
+
+**Where:** The connected-components BFS in `connectToNetwork` reads the adjacency map directly to walk the graph.
+
+**What breaks:** This is read-only, so no state corruption. But it couples the implementation to `PlanarGraph`'s internal data structure. If the internal representation changes, this silently breaks.
+
+**Fix:** `PlanarGraph` already has a `neighbors(nodeId)` public method. The BFS should use `graph.neighbors(id)` instead of reading `_adjacency` directly.
+
+---
+
+### 6. `addBoundaryEdges.js` — `graph.addNode()` and `graph.addEdge()` directly
+
+**The bypass:**
+```js
+graph.addNode(ox, oz);
+graph.addEdge(nw, ne, { type: 'boundary', hierarchy: 'boundary', width: 0 });
+```
+
+**Where:** The `addBoundaryEdges` step adds map perimeter corners and river polylines as graph edges so that `facesWithEdges()` can produce full face coverage.
+
+**What breaks:** Unlike the other violations, this one is a **genuine API gap**. Boundary edges are not roads — they have no polyline, no physical width, and should never produce a `Road` object. `RoadNetwork.add()` is the wrong call here; it would create spurious Road objects in `map.roads` that renderers and exporters would try to draw as streets.
+
+The issue is that `RoadNetwork` has no concept of non-road topology edges. So this code correctly bypasses it, but leaves the graph in a state where some edges have no corresponding Road — which breaks the assumption that `edge.attrs.roadId` always resolves.
+
+**Fix:** `RoadNetwork` needs a separate method for topology-only edges:
+
+```js
+roadNetwork.addTopologyEdge(fromX, fromZ, toX, toZ, attrs)
+```
+
+This would add nodes and a graph edge but create no `Road` object and stamp no grid cells. Graph edges added this way would have `attrs.roadId = null` or a sentinel value. Code that resolves `roadId` from graph edge attrs must already handle this case (boundary edges don't have a road), which makes the invariant explicit rather than implicit.
+
+---
+
+## Summary Table
+
+| File | Bypass | Root cause | Severity |
+|------|--------|-----------|----------|
+| `growRoads.js` | `roadGrid.set()` ×5 | Optional `roadNetwork` param — fallback path | High — orphan grid cells, no Road objects |
+| `cityPipeline.js` | `road._replacePolyline()` | Missing `updatePolyline` call in smooth step | High — grid/polyline mismatch after smoothing |
+| `layoutRibbons.js` | `graph.splitEdge()` | No road-aware split in public API used | Medium — graph/Road desync at T-junctions |
+| `zoneBoundaryRoads.js` | `graph.splitEdge()`, `mergeNodes()`, `_adjacency.delete()` | Same + private field access for cleanup | High — private field access, graph corruption risk |
+| `connectToNetwork.js` | `graph._adjacency.get()` | Read-only BFS using internal structure | Low — coupling only, no state corruption |
+| `addBoundaryEdges.js` | `graph.addNode()`, `graph.addEdge()` | API gap — RoadNetwork has no topology-only edge | Medium — correct workaround but needs proper API |
+
+## Fix Order
+
+1. **`connectToNetwork.js`** — trivial, swap `_adjacency.get()` for `graph.neighbors()`. No behaviour change.
+2. **`cityPipeline.js`** — swap `road._replacePolyline(poly)` for `map.roadNetwork.updatePolyline(road.id, poly)`. No behaviour change, fixes grid/polyline sync.
+3. **`growRoads.js`** — make `roadNetwork` required, delete the fallback path. Verify callers all pass `map.roadNetwork`.
+4. **`layoutRibbons.js`** — replace `graph.splitEdge()` with `map.roadNetwork.ensureGraphNodeOnRoad(roadId, x, z)`. Requires reading `roadId` from edge attrs (already present).
+5. **`PlanarGraph`** — add `removeOrphanNodes()` public method.
+6. **`zoneBoundaryRoads.js`** — replace `splitEdge`/`mergeNodes` pair with `roadNetwork.connectRoadsAtPoint()`, replace `_adjacency.delete` with `removeOrphanNodes()`.
+7. **`RoadNetwork`** — add `addTopologyEdge()` method. Update `addBoundaryEdges.js` to use it.
+
+Steps 1–3 are independent and can be done in any order. Steps 4 and 6 depend on the relevant `RoadNetwork` / `PlanarGraph` API existing. Step 7 is last because it requires the most careful API design.
+
+## Invariant to Add
+
+Once these fixes are in place, a new invariant can be checked after every pipeline step:
+
+> **Graph/Road consistency** — every graph edge with a non-null `roadId` resolves to a Road in `map.roads`. Every Road in `map.roads` has at least one corresponding graph edge. No grid cell stamped as road is unexplained by a Road's polyline.
+
+This can be a cheap `O(edges + roads)` check added to the existing invariant hook in `PipelineRunner`.
