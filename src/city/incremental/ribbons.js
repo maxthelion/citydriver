@@ -5,8 +5,9 @@
  * perpendicular directions by repeatedly:
  * - launching from the exact junction created by the last step
  * - marching a guide with strong local perpendicular bias and a weak local
- *   contour pull from the terrain gradient field
- * - accepting the first new cross street that the guide actually hits
+ *   contour pull from the terrain gradient field until it reaches a new cross
+ *   street
+ * - then choosing a sampled landing point only on that first-hit street
  *
  * There is intentionally no global street ordering or corridor index in the
  * active walk. Failures are still traced so the renderer can draw them.
@@ -41,9 +42,25 @@ export function layRibbons(crossStreets, zone, map, params = {}) {
     guideMarchPerpBlend: 1.15,
     guideMarchContourBlend: 0.4,
     guideMarchContinuationBlend: 0.12,
+    guideMarchTargetBlend: 0.95,
     guideMarchMaxFactor: 2.8,
     guideMarchMaxDistance: 220,
     streetIndexRadiusMeters: 5,
+    streetSampleStep: 0,
+    targetStreetGuideTolerance: 36,
+    targetStreetElevationTolerance: 2.5,
+    targetStreetElevationWeight: 10,
+    targetStreetFallbackElevationWeight: 0.75,
+    targetStreetAngleWeight: 18,
+    targetStreetGuideWeight: 1.4,
+    targetStreetDistanceWeight: 0.08,
+    targetStreetLocalBand: 42,
+    targetStreetLocalWeight: 0.2,
+    landingRepairBand: 85,
+    landingRepairGuideFactor: 1.5,
+    landingRepairAngleFactor: 1.6,
+    landingRepairDistanceFactor: 0.8,
+    landingRepairLocalFactor: 0.8,
     ...params,
   };
 
@@ -60,7 +77,11 @@ export function layRibbons(crossStreets, zone, map, params = {}) {
   if (crossStreets.length < 2) return emptyRibbonResult();
 
   const paramsByStreet = crossStreets.map(street => parameterise(street.points));
+  if (!p.streetSampleStep || p.streetSampleStep <= 0) {
+    p.streetSampleStep = Math.max(cs * 0.5, 2.5);
+  }
   const gradField = buildGradientField(zone, map, zoneSet);
+  const streetSampleProfiles = buildStreetSampleProfiles(paramsByStreet, map, p);
   const streetIndex = buildStreetIndexBitmap(crossStreets, map, {
     radiusMeters: p.streetIndexRadiusMeters,
     stepSize: p.guideMarchStep,
@@ -87,6 +108,7 @@ export function layRibbons(crossStreets, zone, map, params = {}) {
       anchorT,
       nextRowId,
       paramsByStreet,
+      streetSampleProfiles,
       usedTsByStreet,
       zoneSet,
       waterMask,
@@ -153,6 +175,7 @@ function buildAreaRow(
   anchorT,
   rowId,
   paramsByStreet,
+  streetSampleProfiles,
   usedTsByStreet,
   zoneSet,
   waterMask,
@@ -176,6 +199,7 @@ function buildAreaRow(
     -1,
     anchorPoint,
     paramsByStreet,
+    streetSampleProfiles,
     usedTsByStreet,
     zoneSet,
     waterMask,
@@ -193,6 +217,7 @@ function buildAreaRow(
     1,
     anchorPoint,
     paramsByStreet,
+    streetSampleProfiles,
     usedTsByStreet,
     zoneSet,
     waterMask,
@@ -253,6 +278,7 @@ function extendStreetDirection(
   direction,
   anchorPoint,
   paramsByStreet,
+  streetSampleProfiles,
   usedTsByStreet,
   zoneSet,
   waterMask,
@@ -293,6 +319,7 @@ function extendStreetDirection(
       current.pt,
       currentParam,
       paramsByStreet,
+      streetSampleProfiles,
       usedTsByStreet,
       visitedStreetIdx,
       zoneSet,
@@ -342,6 +369,7 @@ function placeNextStreetPoint(
   currentPt,
   currentParam,
   paramsByStreet,
+  streetSampleProfiles,
   usedTsByStreet,
   visitedStreetIdx,
   zoneSet,
@@ -366,8 +394,10 @@ function placeNextStreetPoint(
   const guideDir = buildGuideDirection(baseGuideDir, rowDir, localContourDir, p);
   const marched = marchGuideToAnyStreet(
     currentIdx,
+    currentT,
     currentPt,
     paramsByStreet,
+    streetSampleProfiles,
     usedTsByStreet,
     visitedStreetIdx,
     guideDir,
@@ -382,6 +412,19 @@ function placeNextStreetPoint(
     ox,
     oz,
     p,
+    ({ candidate, approachPoint }) => chooseLandingSampleOnStreet(
+      currentIdx,
+      currentT,
+      currentPt,
+      approachPoint,
+      baseGuideDir,
+      candidate.streetIdx,
+      candidate.projected,
+      paramsByStreet,
+      streetSampleProfiles,
+      usedTsByStreet,
+      p,
+    ),
   );
   mergeTraceInto(trace, marched.trace);
   return {
@@ -392,10 +435,249 @@ function placeNextStreetPoint(
   };
 }
 
-function marchGuideToAnyStreet(
+function marchGuideToTargetStreet(
   currentIdx,
   currentPt,
+  target,
   paramsByStreet,
+  usedTsByStreet,
+  guideDir,
+  gradField,
+  zoneContourDir,
+  zoneSet,
+  waterMask,
+  streetIndex,
+  cs,
+  W,
+  H,
+  ox,
+  oz,
+  p,
+) {
+  const trace = createTrace();
+  const path = [{ x: currentPt.x, z: currentPt.z }];
+  const directDistance = dist(currentPt, target.point);
+  const maxDistance = Math.min(
+    p.guideMarchMaxDistance,
+    Math.max(directDistance * 1.7, p.minRibbonLength * 2),
+  );
+  const stepSize = Math.max(cs * 0.35, p.guideMarchStep);
+  const minTravel = Math.max(cs, p.minRibbonLength * 0.5);
+  const maxSteps = Math.max(1, Math.ceil(maxDistance / stepSize));
+
+  let marchDir = normalize(guideDir);
+  let current = currentPt;
+  let travelled = 0;
+
+  for (let step = 0; step < maxSteps; step++) {
+    const localContourDir = contourDirectionAtPoint(current, gradField, zoneContourDir);
+    const targetDir = normalize({
+      x: target.point.x - current.x,
+      z: target.point.z - current.z,
+    });
+    const contourStepDir = localContourDir ? orientLike(localContourDir, targetDir) : null;
+    marchDir = blendUnitVectors([
+      { dir: normalize(guideDir), weight: p.guideMarchPerpBlend },
+      { dir: targetDir, weight: p.guideMarchTargetBlend },
+      { dir: marchDir, weight: p.guideMarchContinuationBlend },
+      contourStepDir ? { dir: contourStepDir, weight: p.guideMarchContourBlend } : null,
+    ]);
+
+    const nextPt = {
+      x: current.x + marchDir.x * stepSize,
+      z: current.z + marchDir.z * stepSize,
+    };
+    path.push(nextPt);
+    travelled += stepSize;
+
+    const gx = Math.round((nextPt.x - ox) / cs);
+    const gz = Math.round((nextPt.z - oz) / cs);
+    if (gx < 0 || gx >= W || gz < 0 || gz >= H) {
+      addReasonCount(trace.counts, 'off-map');
+      trace.failedRibbons.push(buildIndexedFailure(
+        'off-map',
+        currentPt,
+        compactPolyline(path),
+        {
+          fromStreetIdx: currentIdx,
+          toStreetIdx: target.streetIdx,
+          stopPoint: nextPt,
+          stopCell: { gx, gz },
+          projectedPoint: target.point,
+        },
+      ));
+      return { streetIdx: null, point: null, polyline: null, trace };
+    }
+
+    if (waterMask && waterMask.get(gx, gz) > 0) {
+      addReasonCount(trace.counts, 'water');
+      trace.failedRibbons.push(buildIndexedFailure(
+        'water',
+        currentPt,
+        compactPolyline(path),
+        {
+          fromStreetIdx: currentIdx,
+          toStreetIdx: target.streetIdx,
+          stopPoint: nextPt,
+          stopCell: { gx, gz },
+          projectedPoint: target.point,
+        },
+      ));
+      return { streetIdx: null, point: null, polyline: null, trace };
+    }
+
+    const ids = lookupStreetIds(streetIndex, gx, gz);
+    const wrongStreetHit = ids.find(streetIdx => streetIdx !== currentIdx && streetIdx !== target.streetIdx);
+    if (travelled >= minTravel && wrongStreetHit !== undefined) {
+      addReasonCount(trace.counts, 'wrong-street');
+      trace.failedRibbons.push(buildIndexedFailure(
+        'wrong-street',
+        currentPt,
+        compactPolyline(path),
+        {
+          fromStreetIdx: currentIdx,
+          toStreetIdx: target.streetIdx,
+          stopPoint: nextPt,
+          stopCell: { gx, gz },
+          projectedPoint: target.point,
+          hitStreetIds: ids,
+        },
+      ));
+      return { streetIdx: null, point: null, polyline: null, trace };
+    }
+
+    const closeToTarget = dist(nextPt, target.point) <= Math.max(stepSize * 1.5, p.streetIndexRadiusMeters + cs * 0.5);
+    if (travelled >= minTravel && (ids.includes(target.streetIdx) || closeToTarget)) {
+      if (isTooClose(target.t, usedTsByStreet[target.streetIdx], p.minParcelDepth * p.nearDuplicateFactor)) {
+        addReasonCount(trace.counts, 'too-close');
+        trace.failedRibbons.push(buildIndexedFailure(
+          'too-close',
+          currentPt,
+          compactPolyline(path),
+          {
+            fromStreetIdx: currentIdx,
+            toStreetIdx: target.streetIdx,
+            stopPoint: target.point,
+            stopCell: { gx, gz },
+            projectedPoint: target.point,
+            hitStreetIds: ids,
+          },
+        ));
+        return { streetIdx: null, point: null, polyline: null, trace };
+      }
+
+      const finalPolyline = compactPolyline([...path.slice(0, -1), target.point]);
+      const finalLength = polylineLength(finalPolyline);
+      if (finalLength < p.minRibbonLength) {
+        addReasonCount(trace.counts, 'too-short');
+        trace.failedRibbons.push(buildIndexedFailure(
+          'too-short',
+          currentPt,
+          finalPolyline,
+          {
+            fromStreetIdx: currentIdx,
+            toStreetIdx: target.streetIdx,
+            stopPoint: target.point,
+            stopCell: { gx, gz },
+            projectedPoint: target.point,
+            hitStreetIds: ids,
+          },
+        ));
+        return { streetIdx: null, point: null, polyline: null, trace };
+      }
+      if (finalLength > p.maxRibbonLength) {
+        addReasonCount(trace.counts, 'too-long');
+        trace.failedRibbons.push(buildIndexedFailure(
+          'too-long',
+          currentPt,
+          finalPolyline,
+          {
+            fromStreetIdx: currentIdx,
+            toStreetIdx: target.streetIdx,
+            stopPoint: target.point,
+            stopCell: { gx, gz },
+            projectedPoint: target.point,
+            hitStreetIds: ids,
+          },
+        ));
+        return { streetIdx: null, point: null, polyline: null, trace };
+      }
+
+      const validity = validateRibbonPolyline(finalPolyline, zoneSet, waterMask, cs, W, H, ox, oz);
+      if (!validity.ok) {
+        addReasonCount(trace.counts, validity.reason);
+        trace.failedRibbons.push(buildIndexedFailure(
+          validity.reason,
+          currentPt,
+          finalPolyline,
+          {
+            fromStreetIdx: currentIdx,
+            toStreetIdx: target.streetIdx,
+            stopPoint: target.point,
+            stopCell: { gx, gz },
+            projectedPoint: target.point,
+            hitStreetIds: ids,
+          },
+        ));
+        return { streetIdx: null, point: null, polyline: null, trace };
+      }
+
+      const nextParam = paramsByStreet[target.streetIdx];
+      const nextTan = ribbonTangentAtArcLength(nextParam, target.t, p);
+      const finalStep = finalPolyline[finalPolyline.length - 2];
+      const approachAngle = perpendicularAngleError(finalStep, target.point, nextTan);
+      if (approachAngle > p.fallbackMaxAngleOff) {
+        trace.angleRejects++;
+        addReasonCount(trace.counts, 'angle');
+        trace.failedRibbons.push(buildIndexedFailure(
+          'angle',
+          currentPt,
+          finalPolyline,
+          {
+            fromStreetIdx: currentIdx,
+            toStreetIdx: target.streetIdx,
+            stopPoint: target.point,
+            stopCell: { gx, gz },
+            projectedPoint: target.point,
+            hitStreetIds: ids,
+          },
+        ));
+        return { streetIdx: null, point: null, polyline: null, trace };
+      }
+
+      return {
+        streetIdx: target.streetIdx,
+        point: { t: target.t, pt: target.point },
+        polyline: finalPolyline,
+        trace,
+      };
+    }
+
+    current = nextPt;
+  }
+
+  addReasonCount(trace.counts, 'ray-miss');
+  trace.failedRibbons.push(buildIndexedFailure(
+    'ray-miss',
+    currentPt,
+    compactPolyline(path),
+    {
+      fromStreetIdx: currentIdx,
+      toStreetIdx: target.streetIdx,
+      stopPoint: path[path.length - 1],
+      projectedPoint: target.point,
+      travelled,
+    },
+  ));
+  return { streetIdx: null, point: null, polyline: null, trace };
+}
+
+function marchGuideToAnyStreet(
+  currentIdx,
+  currentT,
+  currentPt,
+  paramsByStreet,
+  streetSampleProfiles,
   usedTsByStreet,
   visitedStreetIdx,
   guideDir,
@@ -410,6 +692,7 @@ function marchGuideToAnyStreet(
   ox,
   oz,
   p,
+  chooseLandingPoint = null,
 ) {
   const trace = createTrace();
   const path = [{ x: currentPt.x, z: currentPt.z }];
@@ -486,7 +769,17 @@ function marchGuideToAnyStreet(
 
     if (candidate) {
       const { streetIdx: nextIdx, projected } = candidate;
-      if (isTooClose(projected.t, usedTsByStreet[nextIdx], p.minParcelDepth * p.nearDuplicateFactor)) {
+      const landing = chooseLandingPoint
+        ? chooseLandingPoint({ candidate, samplePoint: nextPt, approachPoint: current })
+        : null;
+      const resolvedLanding = landing && landing.streetIdx === nextIdx
+        ? landing
+        : {
+          streetIdx: nextIdx,
+          t: projected.t,
+          point: projected.point,
+        };
+      if (isTooClose(resolvedLanding.t, usedTsByStreet[nextIdx], p.minParcelDepth * p.nearDuplicateFactor)) {
         addReasonCount(trace.counts, 'too-close');
         trace.failedRibbons.push(buildIndexedFailure(
           'too-close',
@@ -495,17 +788,19 @@ function marchGuideToAnyStreet(
           {
             fromStreetIdx: currentIdx,
             toStreetIdx: nextIdx,
-            stopPoint: projected.point,
+            stopPoint: resolvedLanding.point,
             stopCell: { gx, gz },
-            projectedPoint: projected.point,
+            projectedPoint: resolvedLanding.point,
             hitStreetIds: ids,
           },
         ));
         return { streetIdx: null, point: null, polyline: null, trace };
       }
 
-      const finalPolyline = compactPolyline([...path.slice(0, -1), projected.point]);
-      const finalLength = polylineLength(finalPolyline);
+      const pathPrefix = path.slice(0, -1);
+      let finalLanding = resolvedLanding;
+      let finalPolyline = compactPolyline([...pathPrefix, finalLanding.point]);
+      let finalLength = polylineLength(finalPolyline);
       const maxLength = p.maxRibbonLength;
       if (finalLength < p.minRibbonLength) {
         addReasonCount(trace.counts, 'too-short');
@@ -516,9 +811,9 @@ function marchGuideToAnyStreet(
           {
             fromStreetIdx: currentIdx,
             toStreetIdx: nextIdx,
-            stopPoint: projected.point,
+            stopPoint: resolvedLanding.point,
             stopCell: { gx, gz },
-            projectedPoint: projected.point,
+            projectedPoint: resolvedLanding.point,
             hitStreetIds: ids,
           },
         ));
@@ -533,9 +828,9 @@ function marchGuideToAnyStreet(
           {
             fromStreetIdx: currentIdx,
             toStreetIdx: nextIdx,
-            stopPoint: projected.point,
+            stopPoint: resolvedLanding.point,
             stopCell: { gx, gz },
-            projectedPoint: projected.point,
+            projectedPoint: resolvedLanding.point,
             hitStreetIds: ids,
           },
         ));
@@ -552,9 +847,9 @@ function marchGuideToAnyStreet(
           {
             fromStreetIdx: currentIdx,
             toStreetIdx: nextIdx,
-            stopPoint: projected.point,
+            stopPoint: resolvedLanding.point,
             stopCell: { gx, gz },
-            projectedPoint: projected.point,
+            projectedPoint: resolvedLanding.point,
             hitStreetIds: ids,
           },
         ));
@@ -562,9 +857,40 @@ function marchGuideToAnyStreet(
       }
 
       const nextParam = paramsByStreet[nextIdx];
-      const nextTan = ribbonTangentAtArcLength(nextParam, projected.t, p);
-      const finalStep = finalPolyline[finalPolyline.length - 2];
-      const approachAngle = perpendicularAngleError(finalStep, projected.point, nextTan);
+      let nextTan = ribbonTangentAtArcLength(nextParam, finalLanding.t, p);
+      let finalStep = finalPolyline[finalPolyline.length - 2];
+      let approachAngle = perpendicularAngleError(finalStep, finalLanding.point, nextTan);
+      if (approachAngle > p.fallbackMaxAngleOff) {
+        const repaired = repairLandingOnStreet(
+          currentIdx,
+          currentT,
+          currentPt,
+          nextIdx,
+          projected,
+          finalLanding,
+          pathPrefix,
+          paramsByStreet,
+          streetSampleProfiles,
+          usedTsByStreet,
+          guideDir,
+          zoneSet,
+          waterMask,
+          cs,
+          W,
+          H,
+          ox,
+          oz,
+          p,
+        );
+        if (repaired) {
+          finalLanding = repaired.landing;
+          finalPolyline = repaired.finalPolyline;
+          finalLength = repaired.length;
+          nextTan = repaired.nextTan;
+          finalStep = repaired.finalStep;
+          approachAngle = repaired.approachAngle;
+        }
+      }
       if (approachAngle > p.fallbackMaxAngleOff) {
         trace.angleRejects++;
         addReasonCount(trace.counts, 'angle');
@@ -575,9 +901,9 @@ function marchGuideToAnyStreet(
           {
             fromStreetIdx: currentIdx,
             toStreetIdx: nextIdx,
-            stopPoint: projected.point,
+            stopPoint: finalLanding.point,
             stopCell: { gx, gz },
-            projectedPoint: projected.point,
+            projectedPoint: finalLanding.point,
             hitStreetIds: ids,
           },
         ));
@@ -586,7 +912,7 @@ function marchGuideToAnyStreet(
 
       return {
         streetIdx: nextIdx,
-        point: { t: projected.t, pt: projected.point },
+        point: { t: finalLanding.t, pt: finalLanding.point },
         polyline: finalPolyline,
         trace,
       };
@@ -647,6 +973,239 @@ function chooseFirstHitStreet(
   }
 
   return best;
+}
+
+function chooseLandingSampleOnStreet(
+  currentIdx,
+  currentT,
+  currentPt,
+  approachPoint,
+  guideDir,
+  targetStreetIdx,
+  referenceHit,
+  paramsByStreet,
+  streetSampleProfiles,
+  usedTsByStreet,
+  p,
+) {
+  const currentElevation = sampleStreetElevationAtT(streetSampleProfiles[currentIdx], currentT);
+  const nextParam = paramsByStreet[targetStreetIdx];
+  const samples = streetSampleProfiles[targetStreetIdx] || [];
+  const localBand = Math.max(p.targetStreetLocalBand, p.streetSampleStep * 2);
+  let bestMatched = null;
+  let bestFallback = null;
+
+  for (const sample of samples) {
+    if (Math.abs(sample.t - referenceHit.t) > localBand) continue;
+    if (dist(sample.point, referenceHit.point) > localBand * 1.4) continue;
+    if (isTooClose(sample.t, usedTsByStreet[targetStreetIdx], p.minParcelDepth * p.nearDuplicateFactor)) continue;
+
+    const delta = {
+      x: sample.point.x - currentPt.x,
+      z: sample.point.z - currentPt.z,
+    };
+    const forward = dot2(delta, guideDir);
+    if (forward < p.minRibbonLength * 0.5) continue;
+
+    const distance = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+    if (distance > p.maxRibbonLength) continue;
+
+    const guideOffset = pointLineDistance(sample.point, currentPt, guideDir);
+    if (guideOffset > p.targetStreetGuideTolerance) continue;
+
+    const guideAngle = guideAngleError(currentPt, sample.point, guideDir);
+    const nextTan = ribbonTangentAtArcLength(nextParam, sample.t, p);
+    const arrivalAngle = perpendicularAngleError(approachPoint || currentPt, sample.point, nextTan);
+    const localOffset = dist(sample.point, referenceHit.point);
+    const elevDiff =
+      currentElevation !== null && sample.elevation !== null
+        ? Math.abs(sample.elevation - currentElevation)
+        : null;
+
+    const commonScore =
+      (guideAngle + arrivalAngle * 0.75) * p.targetStreetAngleWeight +
+      guideOffset * p.targetStreetGuideWeight +
+      distance * p.targetStreetDistanceWeight +
+      localOffset * p.targetStreetLocalWeight;
+
+    const candidate = {
+      streetIdx: targetStreetIdx,
+      t: sample.t,
+      point: sample.point,
+      elevation: sample.elevation,
+    };
+
+    const fallbackScore = commonScore + (elevDiff ?? 0) * p.targetStreetFallbackElevationWeight;
+    if (!bestFallback || fallbackScore < bestFallback.score) {
+      bestFallback = { ...candidate, score: fallbackScore };
+    }
+
+    if (elevDiff !== null && elevDiff <= p.targetStreetElevationTolerance) {
+      const matchedScore = commonScore + elevDiff * p.targetStreetElevationWeight;
+      if (!bestMatched || matchedScore < bestMatched.score) {
+        bestMatched = { ...candidate, score: matchedScore };
+      }
+    }
+  }
+
+  return bestMatched || bestFallback || {
+    streetIdx: targetStreetIdx,
+    t: referenceHit.t,
+    point: referenceHit.point,
+    elevation: sampleStreetElevationAtT(streetSampleProfiles[targetStreetIdx], referenceHit.t),
+  };
+}
+
+function repairLandingOnStreet(
+  currentIdx,
+  currentT,
+  currentPt,
+  targetStreetIdx,
+  referenceHit,
+  initialLanding,
+  pathPrefix,
+  paramsByStreet,
+  streetSampleProfiles,
+  usedTsByStreet,
+  guideDir,
+  zoneSet,
+  waterMask,
+  cs,
+  W,
+  H,
+  ox,
+  oz,
+  p,
+) {
+  const currentElevation = sampleStreetElevationAtT(streetSampleProfiles[currentIdx], currentT);
+  const nextParam = paramsByStreet[targetStreetIdx];
+  const samples = streetSampleProfiles[targetStreetIdx] || [];
+  const repairBand = Math.max(p.landingRepairBand, p.streetSampleStep * 4);
+  let best = null;
+
+  for (const sample of samples) {
+    const deltaT = Math.min(
+      Math.abs(sample.t - referenceHit.t),
+      Math.abs(sample.t - initialLanding.t),
+    );
+    if (deltaT > repairBand) continue;
+    if (
+      dist(sample.point, referenceHit.point) > repairBand * 1.8 &&
+      dist(sample.point, initialLanding.point) > repairBand * 1.8
+    ) {
+      continue;
+    }
+    if (isTooClose(sample.t, usedTsByStreet[targetStreetIdx], p.minParcelDepth * p.nearDuplicateFactor)) continue;
+
+    const delta = {
+      x: sample.point.x - currentPt.x,
+      z: sample.point.z - currentPt.z,
+    };
+    const forward = dot2(delta, guideDir);
+    if (forward < p.minRibbonLength * 0.5) continue;
+
+    const guideOffset = pointLineDistance(sample.point, currentPt, guideDir);
+    if (guideOffset > p.targetStreetGuideTolerance * p.landingRepairGuideFactor) continue;
+
+    const finalPolyline = compactPolyline([...pathPrefix, sample.point]);
+    const length = polylineLength(finalPolyline);
+    if (length < p.minRibbonLength || length > p.maxRibbonLength) continue;
+
+    const validity = validateRibbonPolyline(finalPolyline, zoneSet, waterMask, cs, W, H, ox, oz);
+    if (!validity.ok) continue;
+
+    const nextTan = ribbonTangentAtArcLength(nextParam, sample.t, p);
+    const finalStep = finalPolyline[finalPolyline.length - 2];
+    const approachAngle = perpendicularAngleError(finalStep, sample.point, nextTan);
+    if (approachAngle > p.fallbackMaxAngleOff) continue;
+
+    const guideAngle = guideAngleError(currentPt, sample.point, guideDir);
+    const localOffset = Math.min(
+      dist(sample.point, referenceHit.point),
+      dist(sample.point, initialLanding.point),
+    );
+    const elevDiff =
+      currentElevation !== null && sample.elevation !== null
+        ? Math.abs(sample.elevation - currentElevation)
+        : null;
+
+    const score =
+      approachAngle * p.targetStreetAngleWeight * p.landingRepairAngleFactor +
+      guideAngle * p.targetStreetAngleWeight * 0.6 +
+      guideOffset * p.targetStreetGuideWeight * p.landingRepairGuideFactor +
+      localOffset * p.targetStreetLocalWeight * p.landingRepairLocalFactor +
+      length * p.targetStreetDistanceWeight * p.landingRepairDistanceFactor +
+      (elevDiff ?? 0) * p.targetStreetFallbackElevationWeight;
+
+    if (!best || score < best.score) {
+      best = {
+        landing: {
+          streetIdx: targetStreetIdx,
+          t: sample.t,
+          point: sample.point,
+          elevation: sample.elevation,
+        },
+        finalPolyline,
+        finalStep,
+        nextTan,
+        approachAngle,
+        length,
+        score,
+      };
+    }
+  }
+
+  return best;
+}
+
+function buildStreetSampleProfiles(paramsByStreet, map, p) {
+  const elevation = map.hasLayer('elevation') ? map.getLayer('elevation') : null;
+  return paramsByStreet.map(param => buildStreetSampleProfile(param, elevation, map, p));
+}
+
+function buildStreetSampleProfile(param, elevation, map, p) {
+  if (!param || param.totalLength <= 1e-9) return [];
+
+  const margin = Math.min(p.edgeMargin, param.totalLength * 0.5);
+  const startT = margin;
+  const endT = Math.max(startT, param.totalLength - margin);
+  const samples = [];
+  for (const t of sampleRange(startT, endT, p.streetSampleStep, endT)) {
+    const point = pointAtArcLength(param, t);
+    samples.push({
+      t,
+      point,
+      elevation: sampleElevationAtWorld(elevation, map, point),
+    });
+  }
+  return samples;
+}
+
+function sampleStreetElevationAtT(profile, t) {
+  if (!profile || profile.length === 0) return null;
+  let best = profile[0];
+  let bestDelta = Math.abs(profile[0].t - t);
+  for (let i = 1; i < profile.length; i++) {
+    const delta = Math.abs(profile[i].t - t);
+    if (delta < bestDelta) {
+      best = profile[i];
+      bestDelta = delta;
+    }
+  }
+  return best.elevation ?? null;
+}
+
+function sampleElevationAtWorld(elevation, map, point) {
+  if (!elevation || !point) return null;
+  if (typeof elevation.sampleWorld === 'function') {
+    return elevation.sampleWorld(point.x, point.z);
+  }
+  if (typeof elevation.get === 'function') {
+    const gx = Math.round((point.x - map.originX) / map.cellSize);
+    const gz = Math.round((point.z - map.originZ) / map.cellSize);
+    return elevation.get(gx, gz);
+  }
+  return null;
 }
 
 function chooseAdjacentCandidate(
