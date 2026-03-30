@@ -170,6 +170,106 @@ export class RoadNetwork {
     this.#addToGraph(road);
   }
 
+  /**
+   * Ensure there is a graph node on the given road at (x, z).
+   * Returns an existing endpoint node when the point is already near one;
+   * otherwise splits the road's graph edge at the closest projection point.
+   *
+   * This updates graph topology only. It does not split the Road polyline into
+   * multiple Road objects.
+   *
+   * @param {number} roadId
+   * @param {number} x
+   * @param {number} z
+   * @param {object} [opts]
+   * @param {number} [opts.snapDist=this._cellSize*3]
+   * @param {object} [opts.nodeAttrs={}]
+   * @returns {number|null}
+   */
+  ensureGraphNodeOnRoad(roadId, x, z, opts = {}) {
+    const road = this._roads.get(roadId);
+    if (!road) return null;
+
+    const {
+      snapDist = this._cellSize * 3,
+      nodeAttrs = {},
+    } = opts;
+
+    const edgeCandidates = [];
+    for (const [edgeId, edge] of this._graph.edges) {
+      if (edge?.attrs?.roadId === roadId) {
+        edgeCandidates.push({ edgeId, edge });
+      }
+    }
+    if (edgeCandidates.length === 0) return null;
+
+    let best = null;
+    for (const { edgeId, edge } of edgeCandidates) {
+      const poly = this._graph.edgePolyline(edgeId);
+      const fromNode = this._graph.getNode(edge.from);
+      const toNode = this._graph.getNode(edge.to);
+      if (!fromNode || !toNode || poly.length < 2) continue;
+
+      const startDist = Math.hypot(fromNode.x - x, fromNode.z - z);
+      if (startDist <= snapDist) {
+        return edge.from;
+      }
+      const endDist = Math.hypot(toNode.x - x, toNode.z - z);
+      if (endDist <= snapDist) {
+        return edge.to;
+      }
+
+      for (let i = 0; i < poly.length - 1; i++) {
+        const proj = projectPointOntoSegment(x, z, poly[i], poly[i + 1]);
+        if (!best || proj.distSq < best.distSq) {
+          best = {
+            edgeId,
+            projX: proj.x,
+            projZ: proj.z,
+            distSq: proj.distSq,
+          };
+        }
+      }
+    }
+
+    if (!best) return null;
+
+    return this._graph.splitEdge(best.edgeId, best.projX, best.projZ, nodeAttrs);
+  }
+
+  /**
+   * Ensure both roads have a graph node at (x, z), then merge those nodes into
+   * a single junction when necessary.
+   *
+   * This is the safe road-level way to form a T-junction or crossing junction
+   * at a specific point without bypassing RoadNetwork.
+   *
+   * @param {number} roadIdA
+   * @param {number} roadIdB
+   * @param {number} x
+   * @param {number} z
+   * @param {object} [opts]
+   * @param {number} [opts.snapDist=this._cellSize*3]
+   * @param {object} [opts.nodeAttrs={}]
+   * @returns {number|null}
+   */
+  connectRoadsAtPoint(roadIdA, roadIdB, x, z, opts = {}) {
+    const {
+      snapDist = this._cellSize * 3,
+      nodeAttrs = {},
+    } = opts;
+
+    const nodeA = this.ensureGraphNodeOnRoad(roadIdA, x, z, { snapDist, nodeAttrs });
+    const nodeB = this.ensureGraphNodeOnRoad(roadIdB, x, z, { snapDist, nodeAttrs });
+
+    if (nodeA === null) return nodeB;
+    if (nodeB === null) return nodeA;
+    if (nodeA === nodeB) return nodeA;
+
+    this._graph.mergeNodes(nodeB, nodeA);
+    return nodeA;
+  }
+
   // ── Private: stamping ───────────────────────────────────────────────────────
 
   /**
@@ -312,6 +412,7 @@ export class RoadNetwork {
       points,
       width: road.width,
       hierarchy: road.hierarchy,
+      roadId: road.id,
     });
   }
 
@@ -373,4 +474,27 @@ export class RoadNetwork {
     }
     return this._graph.addNode(x, z);
   }
+}
+
+function projectPointOntoSegment(px, pz, a, b) {
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const lenSq = dx * dx + dz * dz;
+  if (lenSq < 1e-9) {
+    return {
+      x: a.x,
+      z: a.z,
+      distSq: (px - a.x) * (px - a.x) + (pz - a.z) * (pz - a.z),
+    };
+  }
+
+  let t = ((px - a.x) * dx + (pz - a.z) * dz) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const x = a.x + dx * t;
+  const z = a.z + dz * t;
+  return {
+    x,
+    z,
+    distSq: (px - x) * (px - x) + (pz - z) * (pz - z),
+  };
 }

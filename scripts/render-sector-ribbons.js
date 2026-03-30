@@ -158,6 +158,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
   // Run cross streets and ribbons per sector, committing via tryAddRoad
   const allCrossStreets = [];
   const allRibbons = [];
+  const allRibbonJunctions = [];
   const allFailedRibbons = [];
   const allSeedAnchors = [];
   let totalParcels = 0;
@@ -175,7 +176,10 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
     for (const cs2 of crossStreets) {
       const result = tryAddRoad(map, cs2.points, { hierarchy: 'residential', source: 'cross-street' });
       if (result.accepted) {
-        committedCrossStreets.push(cs2);
+        committedCrossStreets.push({
+          ...cs2,
+          roadId: result.road.id,
+        });
       } else {
         csRejects++;
       }
@@ -203,7 +207,13 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       for (const ribbon of ribbons) {
         const result = tryAddRoad(map, ribbon.points, { hierarchy: 'residential', source: 'ribbon' });
         if (result.accepted) {
-          committedRibbons.push(ribbon);
+          const junctions = splitRibbonHitJunctions(map, result.road.id, ribbon, committedCrossStreets);
+          allRibbonJunctions.push(...junctions);
+          committedRibbons.push({
+            ...ribbon,
+            roadId: result.road.id,
+            junctions,
+          });
         } else {
           ribbonRejects++;
           const reason = classifyTransactionFailure(result.violations);
@@ -356,7 +366,9 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
   for (const ribbon of allRibbons) {
     drawRoad(pixels, ribbon.points, cropW, cropH, cs, ox, oz, minGx, minGz, [0, 255, 255]);
     drawEndpointDots(pixels, ribbon.points, cropW, cropH, cs, ox, oz, minGx, minGz, [255, 165, 0]);
+    drawStreetHitPoints(pixels, ribbon.streetPoints || [], cropW, cropH, cs, ox, oz, minGx, minGz);
   }
+  drawConfirmedJunctions(pixels, allRibbonJunctions, cropW, cropH, cs, ox, oz, minGx, minGz);
   for (const anchor of allSeedAnchors) {
     drawAnchorCircle(pixels, anchor.point, cropW, cropH, cs, ox, oz, minGx, minGz, anchor.accepted);
   }
@@ -364,11 +376,13 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
   const failurePixels = basePixels.slice();
   for (const ribbon of allRibbons) {
     drawRoad(failurePixels, ribbon.points, cropW, cropH, cs, ox, oz, minGx, minGz, [80, 200, 200]);
+    drawStreetHitPoints(failurePixels, ribbon.streetPoints || [], cropW, cropH, cs, ox, oz, minGx, minGz);
   }
+  drawConfirmedJunctions(failurePixels, allRibbonJunctions, cropW, cropH, cs, ox, oz, minGx, minGz);
   for (const failure of allFailedRibbons) {
     drawRoad(
       failurePixels,
-      failure.points,
+      failure.attemptPath || failure.points,
       cropW,
       cropH,
       cs,
@@ -380,7 +394,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
     );
   }
   for (const failure of allFailedRibbons) {
-    if (failure.guideLine) {
+    if (failure.guideLine && !samePolyline(failure.guideLine, failure.attemptPath || failure.points)) {
       drawRoad(
         failurePixels,
         failure.guideLine,
@@ -393,6 +407,17 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
         minGz,
         [255, 255, 255],
       );
+    }
+  }
+  for (const failure of allFailedRibbons) {
+    if (failure.startPoint) {
+      drawMarker(failurePixels, failure.startPoint, cropW, cropH, cs, ox, oz, minGx, minGz, [220, 220, 220], 2);
+    }
+    if (failure.projectedPoint) {
+      drawMarker(failurePixels, failure.projectedPoint, cropW, cropH, cs, ox, oz, minGx, minGz, [120, 255, 255], 2);
+    }
+    if (failure.stopPoint) {
+      drawMarker(failurePixels, failure.stopPoint, cropW, cropH, cs, ox, oz, minGx, minGz, failureColor(failure.reason), 3, [0, 0, 0]);
     }
   }
   for (const anchor of allSeedAnchors) {
@@ -444,6 +469,36 @@ function drawRoad(pixels, points, cropW, cropH, cs, ox, oz, minGx, minGz, color)
   }
 }
 
+function splitRibbonHitJunctions(map, ribbonRoadId, ribbon, crossStreets) {
+  if (!map?.roadNetwork || ribbonRoadId === null || ribbonRoadId === undefined) return [];
+  const hits = ribbon?.streetPoints || [];
+  const junctions = [];
+  const seenNodeIds = new Set();
+  for (const entry of hits) {
+    if (!entry || !entry.pt || !Number.isInteger(entry.streetIdx)) continue;
+    const crossStreet = crossStreets[entry.streetIdx];
+    if (!crossStreet || crossStreet.roadId === null || crossStreet.roadId === undefined) continue;
+    const junctionId = map.roadNetwork.connectRoadsAtPoint(
+      ribbonRoadId,
+      crossStreet.roadId,
+      entry.pt.x,
+      entry.pt.z,
+      { nodeAttrs: { type: 'ribbon-hit', source: 'ribbon-hit' } },
+    );
+    if (junctionId === null || junctionId === undefined || seenNodeIds.has(junctionId)) continue;
+    const node = map.graph?.getNode ? map.graph.getNode(junctionId) : null;
+    if (!node) continue;
+    seenNodeIds.add(junctionId);
+    junctions.push({
+      id: junctionId,
+      x: node.x,
+      z: node.z,
+      streetIdx: entry.streetIdx,
+    });
+  }
+  return junctions;
+}
+
 function drawEndpointDots(pixels, points, cropW, cropH, cs, ox, oz, minGx, minGz, color) {
   for (const pt of [points[0], points[points.length - 1]]) {
     const px = Math.round((pt.x - ox) / cs) - minGx;
@@ -470,6 +525,28 @@ function drawAnchorCircle(pixels, point, cropW, cropH, cs, ox, oz, minGx, minGz,
   stampCircle(pixels, cropW, cropH, px, pz, 3, ringColor);
 }
 
+function drawStreetHitPoints(pixels, streetPoints, cropW, cropH, cs, ox, oz, minGx, minGz) {
+  for (const entry of streetPoints) {
+    const pt = entry && entry.pt ? entry.pt : entry;
+    if (!pt) continue;
+    drawMarker(pixels, pt, cropW, cropH, cs, ox, oz, minGx, minGz, [180, 255, 80], 1, [0, 0, 0]);
+  }
+}
+
+function drawConfirmedJunctions(pixels, junctions, cropW, cropH, cs, ox, oz, minGx, minGz) {
+  for (const node of junctions) {
+    if (!node) continue;
+    drawMarker(pixels, node, cropW, cropH, cs, ox, oz, minGx, minGz, [80, 200, 255], 2, [255, 255, 255]);
+  }
+}
+
+function drawMarker(pixels, point, cropW, cropH, cs, ox, oz, minGx, minGz, color, radius = 2, outline = null) {
+  const px = Math.round((point.x - ox) / cs) - minGx;
+  const pz = Math.round((point.z - oz) / cs) - minGz;
+  if (outline) stampFilledCircle(pixels, cropW, cropH, px, pz, radius + 1, outline);
+  stampFilledCircle(pixels, cropW, cropH, px, pz, radius, color);
+}
+
 function stampCircle(pixels, cropW, cropH, cx, cz, radius, color) {
   const rOuterSq = radius * radius;
   const rInnerSq = (radius - 1) * (radius - 1);
@@ -477,6 +554,23 @@ function stampCircle(pixels, cropW, cropH, cx, cz, radius, color) {
     for (let dx = -radius; dx <= radius; dx++) {
       const dSq = dx * dx + dz * dz;
       if (dSq > rOuterSq || dSq < rInnerSq) continue;
+      const px = cx + dx;
+      const pz = cz + dz;
+      if (px < 0 || px >= cropW || pz < 0 || pz >= cropH) continue;
+      const idx = (pz * cropW + px) * 3;
+      pixels[idx] = color[0];
+      pixels[idx + 1] = color[1];
+      pixels[idx + 2] = color[2];
+    }
+  }
+}
+
+function stampFilledCircle(pixels, cropW, cropH, cx, cz, radius, color) {
+  const rSq = radius * radius;
+  for (let dz = -radius; dz <= radius; dz++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const dSq = dx * dx + dz * dz;
+      if (dSq > rSq) continue;
       const px = cx + dx;
       const pz = cz + dz;
       if (px < 0 || px >= cropW || pz < 0 || pz >= cropH) continue;
@@ -503,11 +597,11 @@ function classifyTransactionFailure(violations) {
 }
 
 function failureColor(reason) {
-  if (reason === 'wrong-street') return [255, 60, 0];
+  if (reason === 'wrong-street') return [255, 120, 0];
   if (reason === 'ray-miss') return [255, 210, 120];
   if (reason === 'guide-direction') return [255, 40, 40];
   if (reason === 'guide-offset') return [255, 120, 120];
-  if (reason === 'angle') return [255, 80, 80];
+  if (reason === 'angle') return [190, 60, 255];
   if (reason === 'too-short') return [255, 170, 0];
   if (reason === 'too-long') return [255, 120, 0];
   if (reason === 'water' || reason === 'txn-water') return [80, 160, 255];
@@ -535,4 +629,13 @@ function mergeCounts(target, counts) {
 
 function addCount(target, key) {
   target[key] = (target[key] || 0) + 1;
+}
+
+function samePolyline(a, b) {
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (Math.abs(a[i].x - b[i].x) > 0.01 || Math.abs(a[i].z - b[i].z) > 0.01) return false;
+  }
+  return true;
 }

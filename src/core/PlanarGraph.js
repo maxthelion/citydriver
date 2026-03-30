@@ -2,6 +2,13 @@
  * Planar graph for road networks.
  * Nodes (position + attributes), edges (polyline + width + hierarchy),
  * face extraction (closed block polygons via edge-loop walking).
+ *
+ * Architecture note:
+ * Prefer mutating road topology through RoadNetwork when the change corresponds
+ * to a real road mutation. RoadNetwork keeps the canonical Road collection,
+ * graph topology, and raster roadGrid in sync. Direct PlanarGraph edits are
+ * best reserved for topology-only structures or carefully scoped post-process
+ * operations that do not also need Road/grid updates.
  */
 
 export class PlanarGraph {

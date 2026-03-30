@@ -362,3 +362,25 @@ describe('updatePolyline() — changes road polyline and re-stamps grid', () => 
     expect(net.graph.edges.size).toBe(1);
   });
 });
+
+describe('connectRoadsAtPoint() — creates a real graph junction at a mid-edge hit', () => {
+  it('splits both roads and merges the split nodes into one junction', () => {
+    const net = makeNetwork();
+    const horizontal = net.add([{ x: 0, z: 50 }, { x: 100, z: 50 }]);
+    const vertical = net.add([{ x: 50, z: 0 }, { x: 50, z: 100 }]);
+
+    expect(net.graph.nodes.size).toBe(4);
+    expect(net.graph.edges.size).toBe(2);
+
+    const junctionId = net.connectRoadsAtPoint(horizontal.id, vertical.id, 50, 50);
+
+    expect(junctionId).not.toBeNull();
+    expect(net.graph.nodes.size).toBe(5);
+    expect(net.graph.edges.size).toBe(4);
+
+    const junction = net.graph.getNode(junctionId);
+    expect(junction.x).toBe(50);
+    expect(junction.z).toBe(50);
+    expect(net.graph.degree(junctionId)).toBe(4);
+  });
+});

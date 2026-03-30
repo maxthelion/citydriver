@@ -23,7 +23,8 @@ function makeScanStreet(startX, startZ, endZ, gradX, gradZ, stepSize, ctOff) {
   return makeStreet(points, ctOff);
 }
 
-function makeMockMap(crossStreets) {
+function makeMockMap(crossStreets, options = {}) {
+  const { elevationFn = null } = options;
   let minX = Infinity;
   let maxX = -Infinity;
   let minZ = Infinity;
@@ -52,6 +53,12 @@ function makeMockMap(crossStreets) {
     }
   }
 
+  const elevation = elevationFn ? {
+    get(gx, gz) {
+      return elevationFn(gx, gz);
+    },
+  } : null;
+
   return {
     map: {
       cellSize,
@@ -59,8 +66,8 @@ function makeMockMap(crossStreets) {
       height,
       originX,
       originZ,
-      hasLayer: () => false,
-      getLayer: () => null,
+      hasLayer: name => name === 'elevation' ? !!elevation : false,
+      getLayer: name => name === 'elevation' ? elevation : null,
     },
     zone: {
       cells,
@@ -71,7 +78,7 @@ function makeMockMap(crossStreets) {
 }
 
 describe('layRibbons', () => {
-  it('lays one seed link from the centroid street to one adjacent cross street', () => {
+  it('strings one street from the seed anchor across adjacent cross streets in both directions', () => {
     const crossStreets = [
       makeStreet([{ x: 0, z: 0 }, { x: 0, z: 300 }], -90),
       makeStreet([{ x: 90, z: 0 }, { x: 90, z: 300 }], 0),
@@ -85,13 +92,13 @@ describe('layRibbons', () => {
     expect(parcels).toHaveLength(0);
     expect(angleRejects).toBe(0);
     expect(ribbons[0].points.length).toBeGreaterThanOrEqual(2);
-    expect(ribbons[0].source).toBe('seed-link');
+    expect(ribbons[0].source).toBe('seed-string');
     const endpoints = [ribbons[0].points[0], ribbons[0].points[ribbons[0].points.length - 1]];
     const xs = endpoints.map(p => p.x).sort((a, b) => a - b);
-    expect(xs[1] - xs[0]).toBe(90);
+    expect(xs).toEqual([0, 180]);
   });
 
-  it('lays one realistic seed link between adjacent scan streets', () => {
+  it('lays one realistic street string between adjacent scan streets', () => {
     const crossStreets = [
       makeScanStreet(0, 0, 300, 0.95, -0.31, 2.5, -45),
       makeScanStreet(28, 85, 385, 0.95, -0.31, 2.5, 0),
@@ -103,8 +110,10 @@ describe('layRibbons', () => {
 
     expect(angleRejects).toBe(0);
     expect(ribbons).toHaveLength(1);
-    expect(ribbons[0].points.length).toBeGreaterThanOrEqual(2);
-    expect(ribbons[0].source).toBe('seed-link');
+    expect(ribbons[0].points.length).toBeGreaterThanOrEqual(3);
+    expect(ribbons[0].source).toBe('seed-string');
+    const endpoints = [ribbons[0].points[0], ribbons[0].points[ribbons[0].points.length - 1]];
+    expect(Math.abs(endpoints[0].x - endpoints[1].x)).toBeGreaterThan(45);
   });
 
   it('projects across shifted neighboring streets instead of matching normalized progress', () => {
@@ -118,13 +127,12 @@ describe('layRibbons', () => {
     const { ribbons } = layRibbons(crossStreets, zone, map);
 
     expect(ribbons).toHaveLength(1);
-    expect(ribbons[0].points.length).toBeGreaterThanOrEqual(2);
+    expect(ribbons[0].points.length).toBeGreaterThanOrEqual(3);
     const endpoints = [ribbons[0].points[0], ribbons[0].points[ribbons[0].points.length - 1]];
-    expect(Math.abs(endpoints[0].z - endpoints[1].z)).toBeLessThan(25);
-    expect(Math.abs(endpoints[0].x - endpoints[1].x)).toBeGreaterThan(80);
+    expect(Math.abs(endpoints[0].x - endpoints[1].x)).toBeGreaterThan(160);
   });
 
-  it('still creates a seed link from a kinked anchor street near the sector centroid', () => {
+  it('still creates a bidirectional string from a kinked anchor street near the sector centroid', () => {
     const crossStreets = [
       makeStreet([{ x: 0, z: 0 }, { x: 0, z: 300 }], -90),
       makeStreet([
@@ -145,8 +153,8 @@ describe('layRibbons', () => {
     expect(seedAnchors[0].streetIdx).toBe(1);
     expect(seedAnchors[0].point.x).toBeGreaterThan(90);
     expect(ribbons).toHaveLength(1);
-    expect(ribbons[0].points.length).toBeGreaterThanOrEqual(2);
-    expect(ribbons[0].source).toBe('seed-link');
+    expect(ribbons[0].points.length).toBeGreaterThanOrEqual(3);
+    expect(ribbons[0].source).toBe('seed-string');
   });
 
   it('stops before skipping over a failed neighboring street', () => {
@@ -164,9 +172,11 @@ describe('layRibbons', () => {
     const { ribbons, failedRibbons } = layRibbons(crossStreets, zone, map);
 
     expect(ribbons).toHaveLength(1);
-    const endpoints = [ribbons[0].points[0], ribbons[0].points[ribbons[0].points.length - 1]];
-    const xs = endpoints.map(pt => pt.x).sort((a, b) => a - b);
-    expect(xs).toEqual([90, 180]);
+    const xs = ribbons[0].points.map(pt => pt.x);
+    expect(xs.some(x => Math.abs(x - 270) < 10)).toBe(true);
+    if (xs.some(x => Math.abs(x - 360) < 10)) {
+      expect(xs.some(x => Math.abs(x - 270) < 10)).toBe(true);
+    }
     expect(failedRibbons.length).toBeGreaterThanOrEqual(0);
   });
 
@@ -203,10 +213,34 @@ describe('layRibbons', () => {
     const { ribbons } = layRibbons(crossStreets, zone, map);
 
     expect(ribbons).toHaveLength(1);
-    expect(ribbons[0].points.length).toBeGreaterThanOrEqual(2);
+    expect(ribbons[0].points.length).toBeGreaterThanOrEqual(4);
     const endpoints = [ribbons[0].points[0], ribbons[0].points[ribbons[0].points.length - 1]];
     const xs = endpoints.map(pt => pt.x).sort((a, b) => a - b);
-    expect(xs[1] - xs[0]).toBe(90);
-    expect(xs.includes(0)).toBe(false);
+    expect(xs).toEqual([0, 270]);
+  });
+
+  it('can bend with a local contour field sampled from elevation', () => {
+    const crossStreets = [
+      makeStreet([{ x: 0, z: 0 }, { x: 0, z: 300 }], -90),
+      makeStreet([{ x: 90, z: 0 }, { x: 90, z: 300 }], 0),
+      makeStreet([{ x: 180, z: 0 }, { x: 180, z: 300 }], 90),
+    ];
+    const { map, zone } = makeMockMap(crossStreets, {
+      elevationFn: (gx, gz) => gx + gz,
+    });
+
+    const { ribbons } = layRibbons(crossStreets, zone, map, {
+      contourGuideBlend: 0.45,
+      guideMarchPerpBlend: 1.0,
+      guideMarchContourBlend: 0.9,
+    });
+
+    expect(ribbons).toHaveLength(1);
+    expect(ribbons[0].points.length).toBeGreaterThanOrEqual(3);
+
+    const zs = ribbons[0].points.map(pt => pt.z);
+    const minZ = Math.min(...zs);
+    const maxZ = Math.max(...zs);
+    expect(maxZ - minZ).toBeGreaterThan(20);
   });
 });

@@ -65,7 +65,38 @@ export function buildGradientField(zone, map, zoneSet) {
       const idx = gz * W + gx;
       return { x: smoothX[idx], z: smoothZ[idx] };
     },
+    getGradWorld(wx, wz) {
+      const gx = (wx - map.originX) / cs;
+      const gz = (wz - map.originZ) / cs;
+      return {
+        x: sampleScalarField(smoothX, W, H, gx, gz),
+        z: sampleScalarField(smoothZ, W, H, gx, gz),
+      };
+    },
   };
+}
+
+function sampleScalarField(data, width, height, gx, gz) {
+  const x0 = Math.floor(gx);
+  const z0 = Math.floor(gz);
+  const x1 = x0 + 1;
+  const z1 = z0 + 1;
+  const fx = gx - x0;
+  const fz = gz - z0;
+
+  const v00 = fieldValue(data, width, height, x0, z0);
+  const v10 = fieldValue(data, width, height, x1, z0);
+  const v01 = fieldValue(data, width, height, x0, z1);
+  const v11 = fieldValue(data, width, height, x1, z1);
+
+  const top = v00 + (v10 - v00) * fx;
+  const bot = v01 + (v11 - v01) * fx;
+  return top + (bot - top) * fz;
+}
+
+function fieldValue(data, width, height, gx, gz) {
+  if (gx < 0 || gx >= width || gz < 0 || gz >= height) return 0;
+  return data[gz * width + gx];
 }
 
 export function buildConstructionLines(zone, map, gradDir, contourDir, zoneSet, params, gradField) {

@@ -88,9 +88,40 @@ The viewer (`experiments/index.html`) reads from two manifest files:
 
 Both are written automatically by `run-experiment.js`. If an experiment doesn't appear in the viewer, re-run it through `run-experiment.js`.
 
+## Variants
+
+When iterating on a single hypothesis, use **letter suffixes** (e.g. 022a, 022b, 022c) rather than new experiment numbers. Each variant gets its own output directory and preserves the previous variant's results for comparison.
+
+**Never overwrite a previous variant's output** — always create a new variant so the progression is visible.
+
+```
+experiments/
+  022-output/         ← first attempt (baseline for this hypothesis)
+  022a-output/        ← angle checks added
+  022b-output/        ← invariant audit
+  022c-output/        ← tryAddRoad transaction pattern
+  ...
+```
+
+Use a new experiment number (023, 024) when moving to a different hypothesis or feature. Use variants (022a, 022b) when iterating on the same feature.
+
+## Test Fixtures
+
+When an algorithm isn't producing expected results on real data, create **synthetic test fixtures** with known geometry to debug in isolation. This is faster than running the full pipeline and makes it easy to identify exactly which geometric configuration breaks.
+
+Example: `scripts/test-ribbons.js` creates synthetic cross street pairs (parallel, offset, converging, different lengths) and runs the ribbon algorithm on each, rendering the results. This revealed that the axis projection was failing on nearly-horizontal gradient directions — a bug invisible in full pipeline output.
+
+Test fixtures should:
+- Cover the simple case first (two parallel lines, same length)
+- Add complexity incrementally (offset starts, different lengths, slight angle differences)
+- Include a mock map/zone so validity checks pass
+- Render results as images for visual inspection
+- Report counts and per-ribbon geometry for comparison
+
 ## Rules
 
 - One commit per experiment (if kept)
+- Never overwrite previous experiment or variant output
 - Always render the same seeds for comparability
 - Always link to the previous experiment's output for comparison
 - If reverting, still keep the experiment file documenting what was tried and why it didn't work
