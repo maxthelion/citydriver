@@ -33,3 +33,17 @@ The terrain mesh is a uniform-resolution PlaneGeometry with vertex colors — ri
 Rivers still have significant problems:
 - Disconnected segments appearing
 - Overall river generation doesn't work well — needs a fundamental rethink
+
+## Ribbon event log / replay
+
+Add a replayable event log for ribbon generation so we can inspect ordered
+operations, trace family history, and rerun individual failed attempts.
+See [ribbon-event-log-replay-plan.md](/Users/maxwilliams/dev/citygenerator/specs/v5/ribbon-event-log-replay-plan.md).
+
+## Shared-node road cutover
+
+Replace the current `Road` + mutable `PlanarGraph` dual model with shared
+road nodes and ordered road ways as the canonical internal representation.
+This is primarily to help seam joining, ribbon junction sharing, and remove
+the sync problems in `RoadNetwork`.
+See [shared-node-road-cutover.md](/Users/maxwilliams/dev/citygenerator/specs/v5/shared-node-road-cutover.md).
