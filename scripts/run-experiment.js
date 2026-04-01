@@ -15,7 +15,7 @@
  *
  * Writes:
  *   experiments/NNN-output/manifest.json
- *   experiments/NNN-output/*.png
+ *   experiments/NNN-output/*.(png|svg)
  */
 
 import { existsSync, mkdirSync, writeFileSync, readdirSync } from 'fs';
@@ -65,7 +65,7 @@ for (const { seed, gx, gz } of seeds) {
   console.log(`--- seed ${seed} ---`);
   const seedStart = performance.now();
   if (customScript) {
-    const cmd = `bun scripts/${customScript} ${seed} ${gx} ${gz} ${outDir}`;
+    const cmd = `bun scripts/${customScript} ${seed} ${gx} ${gz} ${outDir} ${num}`;
     try {
       const output = execSync(cmd, { encoding: 'utf-8', timeout: 300000 });
       console.log(output);
@@ -86,11 +86,14 @@ for (const { seed, gx, gz } of seeds) {
 }
 console.log(`Total: ${((performance.now() - totalStart) / 1000).toFixed(1)}s\n`);
 
-// Scan output directory for PNGs and build manifest
-const files = readdirSync(outDir).filter(f => f.endsWith('.png'));
+// Scan output directory for render outputs and build manifest
+const files = readdirSync(outDir).filter(f => f.endsWith('.png') || f.endsWith('.svg'));
 const images = files.map(f => {
+  const formatMatch = f.match(/\.(png|svg)$/);
+  const format = formatMatch ? formatMatch[1] : null;
+  const baseName = format ? f.slice(0, -(format.length + 1)) : f;
   // Parse filename: layer-seedNNN-tickNNN.png or layer-seedNNN.png
-  const match = f.match(/^(.+)-seed(\d+)(?:-tick(\d+))?\.png$/);
+  const match = baseName.match(/^(.+)-seed(\d+)(?:-tick(\d+))?$/);
   if (match) {
     return {
       file: f,
@@ -98,9 +101,17 @@ const images = files.map(f => {
       layer: match[1],
       seed: match[2],
       tick: match[3] || null,
+      format,
     };
   }
-  return { file: f, path: `${num}-output/${f}`, layer: f.replace('.png', ''), seed: null, tick: null };
+  return {
+    file: f,
+    path: `${num}-output/${f}`,
+    layer: baseName,
+    seed: null,
+    tick: null,
+    format,
+  };
 });
 
 const manifest = {

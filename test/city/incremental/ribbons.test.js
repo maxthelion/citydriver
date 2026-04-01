@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layRibbons } from '../../../src/city/incremental/ribbons.js';
+import { layRibbons, truncateRibbonAtRelationFailure } from '../../../src/city/incremental/ribbons.js';
 
 function makeStreet(points, ctOff) {
   let length = 0;
@@ -242,5 +242,265 @@ describe('layRibbons', () => {
     const minZ = Math.min(...zs);
     const maxZ = Math.max(...zs);
     expect(maxZ - minZ).toBeGreaterThan(20);
+  });
+
+  it('can spawn parallel follow-on rows from the middle junction of an accepted row', () => {
+    const crossStreets = [
+      makeStreet([{ x: 0, z: 0 }, { x: 0, z: 300 }], -90),
+      makeStreet([{ x: 90, z: 0 }, { x: 90, z: 300 }], 0),
+      makeStreet([{ x: 180, z: 0 }, { x: 180, z: 300 }], 90),
+    ];
+    const { map, zone } = makeMockMap(crossStreets);
+
+    const { ribbons, seedAnchors } = layRibbons(crossStreets, zone, map, {
+      maxRowsTotal: 3,
+      parallelReseedRows: true,
+      parallelReseedSpacing: 40,
+      parallelReseedMaxGeneration: 1,
+    });
+
+    expect(ribbons).toHaveLength(3);
+    expect(seedAnchors.length).toBeGreaterThanOrEqual(3);
+    const centerTs = ribbons.map(r => r.centerT).sort((a, b) => a - b);
+    expect(centerTs[0]).toBeLessThan(130);
+    expect(centerTs[1]).toBeGreaterThan(140);
+    expect(centerTs[1]).toBeLessThan(160);
+    expect(centerTs[2]).toBeGreaterThan(170);
+    expect(ribbons.some(r => r.source === 'parallel-string')).toBe(true);
+  });
+
+  it('can enlarge reseed spacing to satisfy a minimum road gap', () => {
+    const crossStreets = [
+      makeStreet([{ x: 0, z: 0 }, { x: 0, z: 300 }], -90),
+      makeStreet([{ x: 90, z: 0 }, { x: 90, z: 300 }], 0),
+      makeStreet([{ x: 180, z: 0 }, { x: 180, z: 300 }], 90),
+    ];
+    const { map, zone } = makeMockMap(crossStreets);
+
+    const { ribbons } = layRibbons(crossStreets, zone, map, {
+      maxRowsTotal: 3,
+      parallelReseedRows: true,
+      parallelReseedSpacing: 20,
+      parallelReseedMaxGeneration: 1,
+      parallelMinRoadGap: 40,
+    });
+
+    expect(ribbons).toHaveLength(3);
+    const centerTs = ribbons.map(r => r.centerT).sort((a, b) => a - b);
+    expect(centerTs[1] - centerTs[0]).toBeGreaterThan(35);
+    expect(centerTs[2] - centerTs[1]).toBeGreaterThan(35);
+  });
+
+  it('can reject a parallel follow-on row when it diverges too far from the parent row angle', () => {
+    const crossStreets = [
+      makeStreet([{ x: 0, z: 0 }, { x: 0, z: 320 }], -135),
+      makeStreet([
+        { x: 80, z: 40 },
+        { x: 80, z: 160 },
+        { x: 130, z: 210 },
+        { x: 130, z: 360 },
+      ], -45),
+      makeStreet([
+        { x: 170, z: 10 },
+        { x: 170, z: 120 },
+        { x: 140, z: 170 },
+        { x: 140, z: 340 },
+      ], 45),
+      makeStreet([{ x: 250, z: 0 }, { x: 250, z: 320 }], 135),
+    ];
+    const { map, zone } = makeMockMap(crossStreets);
+
+    const loose = layRibbons(crossStreets, zone, map, {
+      maxRowsTotal: 3,
+      parallelReseedRows: true,
+      parallelReseedSpacing: 32,
+      parallelReseedMaxGeneration: 1,
+      parallelMinRoadGap: 15,
+      parallelKeepSide: true,
+      parallelRejectCrossovers: true,
+      parallelMaxAngleDeltaDeg: 180,
+    });
+
+    const strict = layRibbons(crossStreets, zone, map, {
+      maxRowsTotal: 3,
+      parallelReseedRows: true,
+      parallelReseedSpacing: 32,
+      parallelReseedMaxGeneration: 1,
+      parallelMinRoadGap: 15,
+      parallelKeepSide: true,
+      parallelRejectCrossovers: true,
+      parallelMaxAngleDeltaDeg: 10,
+    });
+
+    expect(loose.ribbons.length).toBeGreaterThan(strict.ribbons.length);
+    expect(strict.failureSummary.reasons['parallel-angle']).toBeGreaterThanOrEqual(1);
+  });
+
+  it('can build a follow-on row by offsetting the parent row junction chain', () => {
+    const crossStreets = [
+      makeStreet([{ x: 0, z: 0 }, { x: 0, z: 320 }], -135),
+      makeStreet([{ x: 90, z: 0 }, { x: 90, z: 320 }], -45),
+      makeStreet([{ x: 180, z: 0 }, { x: 180, z: 320 }], 45),
+      makeStreet([{ x: 270, z: 0 }, { x: 270, z: 320 }], 135),
+    ];
+    const { map, zone } = makeMockMap(crossStreets);
+
+    const { ribbons } = layRibbons(crossStreets, zone, map, {
+      maxRowsTotal: 3,
+      parallelReseedRows: true,
+      parallelReseedSpacing: 40,
+      parallelReseedMaxGeneration: 1,
+      parallelMinRoadGap: 15,
+      parallelKeepSide: true,
+      parallelRejectCrossovers: true,
+      parallelMaxAngleDeltaDeg: 180,
+      parallelInheritParentJunctions: true,
+    });
+
+    const parent = ribbons.find(r => r.source === 'seed-string');
+    const child = ribbons.find(r => r.source === 'parallel-string');
+
+    expect(parent).toBeTruthy();
+    expect(child).toBeTruthy();
+    expect(child.streetPoints.map(point => point.streetIdx)).toEqual(parent.streetPoints.map(point => point.streetIdx));
+
+    const deltas = child.streetPoints.map((point, index) => point.t - parent.streetPoints[index].t);
+    expect(Math.abs(deltas[0])).toBeGreaterThan(35);
+    for (const delta of deltas) {
+      expect(Math.abs(delta - deltas[0])).toBeLessThan(1e-6);
+    }
+  });
+
+  it('can fill a family from ordered slot offsets on one pivot street instead of spawning chained families', () => {
+    const crossStreets = [
+      makeStreet([{ x: 0, z: 0 }, { x: 0, z: 320 }], -135),
+      makeStreet([{ x: 90, z: 0 }, { x: 90, z: 320 }], -45),
+      makeStreet([{ x: 180, z: 0 }, { x: 180, z: 320 }], 45),
+      makeStreet([{ x: 270, z: 0 }, { x: 270, z: 320 }], 135),
+    ];
+    const { map, zone } = makeMockMap(crossStreets);
+
+    const { ribbons } = layRibbons(crossStreets, zone, map, {
+      maxRowsTotal: 5,
+      parallelReseedRows: false,
+      parallelReseedSpacing: 40,
+      parallelMinRoadGap: 15,
+      parallelKeepSide: true,
+      parallelRejectCrossovers: true,
+      parallelMaxAngleDeltaDeg: 180,
+      parallelInheritParentJunctions: true,
+      parallelSlotFamilies: true,
+    });
+
+    expect(ribbons).toHaveLength(5);
+    const seed = ribbons.find(r => r.source === 'seed-string');
+    const children = ribbons.filter(r => r.source === 'parallel-string');
+    expect(seed).toBeTruthy();
+    expect(children).toHaveLength(4);
+    for (const child of children) {
+      expect(child.parentRowId).toBe(seed.rowId);
+      expect(child.streetPoints.map(point => point.streetIdx)).toEqual(seed.streetPoints.map(point => point.streetIdx));
+    }
+
+    const pivot = seed.streetPoints[Math.floor(seed.streetPoints.length / 2)];
+    const deltas = children
+      .map(row => row.streetPoints.find(point => point.streetIdx === pivot.streetIdx))
+      .filter(Boolean)
+      .map(point => Math.round(Math.abs(point.t - pivot.t)));
+
+    expect(new Set(deltas)).toEqual(new Set([40, 80]));
+  });
+
+  it('can start a new seed family in a leftover street gap when the first family cannot reach unused streets', () => {
+    const crossStreets = [
+      makeStreet([{ x: 0, z: 0 }, { x: 0, z: 320 }], -135),
+      makeStreet([{ x: 90, z: 0 }, { x: 90, z: 320 }], -45),
+      makeStreet([{ x: 340, z: 0 }, { x: 340, z: 320 }], 45),
+      makeStreet([{ x: 430, z: 0 }, { x: 430, z: 320 }], 135),
+    ];
+    const { map, zone } = makeMockMap(crossStreets);
+    zone.centroidGx = (90 - map.originX) / map.cellSize;
+    zone.centroidGz = (160 - map.originZ) / map.cellSize;
+
+    const { ribbons } = layRibbons(crossStreets, zone, map, {
+      maxRowsTotal: 2,
+      parallelReseedRows: false,
+      fillRemainingStreetGaps: true,
+      fillGapThreshold: 60,
+    });
+
+    expect(ribbons).toHaveLength(2);
+    const streetSets = ribbons.map(ribbon => new Set(ribbon.streetPoints.map(point => point.streetIdx)));
+    expect(streetSets.some(set => set.has(0) && set.has(1))).toBe(true);
+    expect(streetSets.some(set => set.has(2) && set.has(3))).toBe(true);
+  });
+
+  it('can reject fill rows that break spacing relative to an older family, not just the parent family', () => {
+    const crossStreets = [
+      makeStreet([{ x: 0, z: 0 }, { x: 0, z: 320 }], -180),
+      makeStreet([{ x: 70, z: 0 }, { x: 70, z: 320 }], -60),
+      makeStreet([
+        { x: 160, z: 0 },
+        { x: 160, z: 140 },
+        { x: 210, z: 220 },
+        { x: 210, z: 320 },
+      ], 60),
+      makeStreet([{ x: 290, z: 0 }, { x: 290, z: 320 }], 180),
+      makeStreet([{ x: 380, z: 0 }, { x: 380, z: 320 }], 240),
+    ];
+    const { map, zone } = makeMockMap(crossStreets);
+
+    const baseParams = {
+      maxRowsTotal: 10,
+      parallelReseedRows: true,
+      parallelReseedSpacing: 32,
+      parallelReseedMaxGeneration: 1,
+      parallelMinRoadGap: 15,
+      parallelKeepSide: true,
+      parallelRejectCrossovers: true,
+      parallelMaxAngleDeltaDeg: 20,
+      parallelInheritParentJunctions: true,
+      parallelExtendPastParent: true,
+      fillRemainingStreetGaps: true,
+      fillUnusedStreetSeedsOnly: false,
+      fillGapThreshold: 60,
+    };
+
+    const loose = layRibbons(crossStreets, zone, map, baseParams);
+    const strict = layRibbons(crossStreets, zone, map, {
+      ...baseParams,
+      parallelValidateAgainstAllRows: true,
+    });
+
+    expect(loose.ribbons.length).toBeGreaterThan(strict.ribbons.length);
+    expect(strict.failureSummary.reasons['parallel-gap']).toBeGreaterThanOrEqual(1);
+  });
+
+  it('can trim only the violating tail of a child row instead of dropping the whole row', () => {
+    const streetPoints = [
+      { streetIdx: 0, t: 40, pt: { x: 0, z: 0 } },
+      { streetIdx: 1, t: 40, pt: { x: 80, z: 0 } },
+      { streetIdx: 2, t: 40, pt: { x: 160, z: 0 } },
+      { streetIdx: 3, t: 40, pt: { x: 240, z: 25 } },
+      { streetIdx: 4, t: 40, pt: { x: 320, z: 60 } },
+    ];
+    const ribbon = {
+      rowId: 7,
+      centerT: 40,
+      points: streetPoints.map(point => point.pt),
+      streetPoints,
+      length: 0,
+    };
+
+    const trimmed = truncateRibbonAtRelationFailure(
+      ribbon,
+      { reason: 'parallel-angle', childIndex: 3 },
+      2,
+      40,
+      { minRibbonLength: 15 },
+    );
+
+    expect(trimmed).toBeTruthy();
+    expect(trimmed.streetPoints.map(point => point.streetIdx)).toEqual([0, 1, 2]);
   });
 });
