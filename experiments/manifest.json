@@ -4088,6 +4088,42 @@
     "md": "031j-used-street-gap-restarts.md",
     "images": [
       {
+        "path": "031j-output/cross-failures-zone0-seed884469.png",
+        "layer": "cross-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "031j-output/cross-failures-zone2-seed884469.svg",
+        "layer": "cross-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "031j-output/cross-failures-zone1-seed884469.png",
+        "layer": "cross-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "031j-output/cross-failures-zone1-seed884469.svg",
+        "layer": "cross-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "031j-output/cross-failures-zone2-seed884469.png",
+        "layer": "cross-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "031j-output/cross-failures-zone0-seed884469.svg",
+        "layer": "cross-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
         "path": "031j-output/ribbons-zone0-seed884469.svg",
         "layer": "ribbons-zone0",
         "seed": "884469",
@@ -4234,6 +4270,703 @@
       },
       {
         "path": "031k-output/ribbons-zone0-seed884469.png",
+        "layer": "ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "032",
+    "slug": "shared-boundary-phase-cross-streets",
+    "md": "032-shared-boundary-phase-cross-streets.md",
+    "images": [
+      {
+        "path": "032-output/ribbons-zone0-seed884469.svg",
+        "layer": "ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "032-output/ribbons-zone2-seed884469.png",
+        "layer": "ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "032-output/ribbon-failures-zone1-seed884469.png",
+        "layer": "ribbon-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "032-output/ribbon-failures-zone2-seed884469.svg",
+        "layer": "ribbon-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "032-output/ribbon-failures-zone0-seed884469.png",
+        "layer": "ribbon-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "032-output/ribbons-zone1-seed884469.svg",
+        "layer": "ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "032-output/ribbons-zone1-seed884469.png",
+        "layer": "ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "032-output/ribbon-failures-zone0-seed884469.svg",
+        "layer": "ribbon-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "032-output/ribbon-failures-zone2-seed884469.png",
+        "layer": "ribbon-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "032-output/ribbon-failures-zone1-seed884469.svg",
+        "layer": "ribbon-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "032-output/ribbons-zone2-seed884469.svg",
+        "layer": "ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "032-output/ribbons-zone0-seed884469.png",
+        "layer": "ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "033",
+    "slug": "boundary-end-snap-cross-streets",
+    "md": "033-boundary-end-snap-cross-streets.md",
+    "images": [
+      {
+        "path": "033-output/ribbons-zone0-seed884469.svg",
+        "layer": "ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "033-output/ribbons-zone2-seed884469.png",
+        "layer": "ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "033-output/ribbon-failures-zone1-seed884469.png",
+        "layer": "ribbon-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "033-output/ribbon-failures-zone2-seed884469.svg",
+        "layer": "ribbon-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "033-output/ribbon-failures-zone0-seed884469.png",
+        "layer": "ribbon-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "033-output/ribbons-zone1-seed884469.svg",
+        "layer": "ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "033-output/ribbons-zone1-seed884469.png",
+        "layer": "ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "033-output/ribbon-failures-zone0-seed884469.svg",
+        "layer": "ribbon-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "033-output/ribbon-failures-zone2-seed884469.png",
+        "layer": "ribbon-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "033-output/ribbon-failures-zone1-seed884469.svg",
+        "layer": "ribbon-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "033-output/ribbons-zone2-seed884469.svg",
+        "layer": "ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "033-output/ribbons-zone0-seed884469.png",
+        "layer": "ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "034",
+    "slug": "shared-boundary-anchor-cross-streets",
+    "md": "034-shared-boundary-anchor-cross-streets.md",
+    "images": [
+      {
+        "path": "034-output/ribbons-zone0-seed884469.svg",
+        "layer": "ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "034-output/ribbons-zone2-seed884469.png",
+        "layer": "ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "034-output/ribbon-failures-zone1-seed884469.png",
+        "layer": "ribbon-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "034-output/ribbon-failures-zone2-seed884469.svg",
+        "layer": "ribbon-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "034-output/ribbon-failures-zone0-seed884469.png",
+        "layer": "ribbon-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "034-output/ribbons-zone1-seed884469.svg",
+        "layer": "ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "034-output/ribbons-zone1-seed884469.png",
+        "layer": "ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "034-output/ribbon-failures-zone0-seed884469.svg",
+        "layer": "ribbon-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "034-output/ribbon-failures-zone2-seed884469.png",
+        "layer": "ribbon-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "034-output/ribbon-failures-zone1-seed884469.svg",
+        "layer": "ribbon-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "034-output/ribbons-zone2-seed884469.svg",
+        "layer": "ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "034-output/ribbons-zone0-seed884469.png",
+        "layer": "ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "035",
+    "slug": "borrow-shared-boundary-phase",
+    "md": "035-borrow-shared-boundary-phase.md",
+    "images": [
+      {
+        "path": "035-output/cross-failures-zone0-seed884469.png",
+        "layer": "cross-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/cross-failures-zone2-seed884469.svg",
+        "layer": "cross-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/cross-failures-zone1-seed884469.png",
+        "layer": "cross-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/cross-failures-zone1-seed884469.svg",
+        "layer": "cross-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/cross-failures-zone2-seed884469.png",
+        "layer": "cross-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/cross-failures-zone0-seed884469.svg",
+        "layer": "cross-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/ribbons-zone0-seed884469.svg",
+        "layer": "ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/ribbons-zone2-seed884469.png",
+        "layer": "ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/ribbon-failures-zone1-seed884469.png",
+        "layer": "ribbon-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/ribbon-failures-zone2-seed884469.svg",
+        "layer": "ribbon-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/ribbon-failures-zone0-seed884469.png",
+        "layer": "ribbon-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/ribbons-zone1-seed884469.svg",
+        "layer": "ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/ribbons-zone1-seed884469.png",
+        "layer": "ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/ribbon-failures-zone0-seed884469.svg",
+        "layer": "ribbon-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/ribbon-failures-zone2-seed884469.png",
+        "layer": "ribbon-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/ribbon-failures-zone1-seed884469.svg",
+        "layer": "ribbon-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/ribbons-zone2-seed884469.svg",
+        "layer": "ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "035-output/ribbons-zone0-seed884469.png",
+        "layer": "ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "036",
+    "slug": "borrowed-phase-meets-boundary-road",
+    "md": "036-borrowed-phase-meets-boundary-road.md",
+    "images": [
+      {
+        "path": "036-output/cross-failures-zone0-seed884469.png",
+        "layer": "cross-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/cross-failures-zone2-seed884469.svg",
+        "layer": "cross-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/cross-failures-zone1-seed884469.png",
+        "layer": "cross-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/cross-failures-zone1-seed884469.svg",
+        "layer": "cross-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/cross-failures-zone2-seed884469.png",
+        "layer": "cross-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/cross-failures-zone0-seed884469.svg",
+        "layer": "cross-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/ribbons-zone0-seed884469.svg",
+        "layer": "ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/ribbons-zone2-seed884469.png",
+        "layer": "ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/ribbon-failures-zone1-seed884469.png",
+        "layer": "ribbon-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/ribbon-failures-zone2-seed884469.svg",
+        "layer": "ribbon-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/ribbon-failures-zone0-seed884469.png",
+        "layer": "ribbon-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/ribbons-zone1-seed884469.svg",
+        "layer": "ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/ribbons-zone1-seed884469.png",
+        "layer": "ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/ribbon-failures-zone0-seed884469.svg",
+        "layer": "ribbon-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/ribbon-failures-zone2-seed884469.png",
+        "layer": "ribbon-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/ribbon-failures-zone1-seed884469.svg",
+        "layer": "ribbon-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/ribbons-zone2-seed884469.svg",
+        "layer": "ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "036-output/ribbons-zone0-seed884469.png",
+        "layer": "ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "037",
+    "slug": "borrowed-phase-seed-lines",
+    "md": "037-borrowed-phase-seed-lines.md",
+    "images": [
+      {
+        "path": "037-output/cross-failures-zone0-seed884469.png",
+        "layer": "cross-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/cross-failures-zone2-seed884469.svg",
+        "layer": "cross-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/cross-failures-zone1-seed884469.png",
+        "layer": "cross-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/cross-failures-zone1-seed884469.svg",
+        "layer": "cross-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/cross-failures-zone2-seed884469.png",
+        "layer": "cross-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/cross-failures-zone0-seed884469.svg",
+        "layer": "cross-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/ribbons-zone0-seed884469.svg",
+        "layer": "ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/ribbons-zone2-seed884469.png",
+        "layer": "ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/ribbon-failures-zone1-seed884469.png",
+        "layer": "ribbon-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/ribbon-failures-zone2-seed884469.svg",
+        "layer": "ribbon-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/ribbon-failures-zone0-seed884469.png",
+        "layer": "ribbon-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/ribbons-zone1-seed884469.svg",
+        "layer": "ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/ribbons-zone1-seed884469.png",
+        "layer": "ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/ribbon-failures-zone0-seed884469.svg",
+        "layer": "ribbon-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/ribbon-failures-zone2-seed884469.png",
+        "layer": "ribbon-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/ribbon-failures-zone1-seed884469.svg",
+        "layer": "ribbon-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/ribbons-zone2-seed884469.svg",
+        "layer": "ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "037-output/ribbons-zone0-seed884469.png",
+        "layer": "ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "038",
+    "slug": "precommit-boundary-endpoint-join",
+    "md": "038-precommit-boundary-endpoint-join.md",
+    "images": [
+      {
+        "path": "038-output/cross-failures-zone0-seed884469.png",
+        "layer": "cross-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/cross-failures-zone2-seed884469.svg",
+        "layer": "cross-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/cross-failures-zone1-seed884469.png",
+        "layer": "cross-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/cross-failures-zone1-seed884469.svg",
+        "layer": "cross-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/cross-failures-zone2-seed884469.png",
+        "layer": "cross-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/cross-failures-zone0-seed884469.svg",
+        "layer": "cross-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/ribbons-zone0-seed884469.svg",
+        "layer": "ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/ribbons-zone2-seed884469.png",
+        "layer": "ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/ribbon-failures-zone1-seed884469.png",
+        "layer": "ribbon-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/ribbon-failures-zone2-seed884469.svg",
+        "layer": "ribbon-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/ribbon-failures-zone0-seed884469.png",
+        "layer": "ribbon-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/ribbons-zone1-seed884469.svg",
+        "layer": "ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/ribbons-zone1-seed884469.png",
+        "layer": "ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/ribbon-failures-zone0-seed884469.svg",
+        "layer": "ribbon-failures-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/ribbon-failures-zone2-seed884469.png",
+        "layer": "ribbon-failures-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/ribbon-failures-zone1-seed884469.svg",
+        "layer": "ribbon-failures-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/ribbons-zone2-seed884469.svg",
+        "layer": "ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "038-output/ribbons-zone0-seed884469.png",
         "layer": "ribbons-zone0",
         "seed": "884469",
         "tick": null

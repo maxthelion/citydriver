@@ -40,10 +40,20 @@
     }
 
     .viewer {
-      display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px;
-      align-items: start; margin-bottom: 16px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      grid-template-areas:
+        "top top"
+        "stage side";
+      gap: 16px;
+      align-items: start;
+      margin-bottom: 16px;
+    }
+    .viewer-top {
+      grid-area: top;
     }
     .stage {
+      grid-area: stage;
       min-width: 0;
       background: #222240; border-radius: 6px; padding: 12px;
       border: 1px solid #2e2e52;
@@ -102,6 +112,7 @@
     }
 
     .thumb-column {
+      grid-area: side;
       background: #16162a; border-radius: 6px; padding: 12px;
       border: 1px solid #2a2a44;
       position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto;
@@ -128,6 +139,71 @@
     .thumb-text { min-width: 0; }
     .thumb-label { font-size: 11px; color: #eef; }
     .thumb-meta { font-size: 10px; color: #778; margin-top: 3px; }
+
+    .event-toolbar {
+      background: #16162a;
+      border: 1px solid #2a2a44;
+      border-radius: 6px;
+      padding: 12px;
+    }
+    .event-toolbar h4,
+    .event-panel h4 {
+      color: #a8c0ff; font-size: 12px; margin-bottom: 10px;
+    }
+    .event-panel {
+      margin-top: 16px; border-top: 1px solid #2f3251; padding-top: 14px;
+    }
+    .event-panel-empty,
+    .event-panel-loading,
+    .event-toolbar-empty,
+    .event-toolbar-loading {
+      font-size: 11px; color: #8893b8; line-height: 1.5;
+    }
+    .event-controls {
+      display: grid; gap: 8px; margin-bottom: 10px;
+      padding: 10px; border: 1px solid #303454; border-radius: 6px; background: #1d2034;
+    }
+    .event-controls-top {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      font-size: 11px; color: #d8e1ff;
+    }
+    .event-controls-top button {
+      background: #2b3568; border: 1px solid #4b63b8; color: #eef3ff;
+      border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer;
+    }
+    .event-controls-top button:hover {
+      background: #344180;
+    }
+    .event-slider {
+      width: 100%;
+    }
+    .event-current {
+      font-size: 11px; color: #aeb9e6;
+    }
+    .event-list {
+      display: flex; flex-direction: column; gap: 6px;
+      max-height: 38vh; overflow-y: auto;
+    }
+    .event-item {
+      width: 100%; text-align: left; cursor: pointer;
+      border: 1px solid #303454; border-radius: 6px;
+      background: #1b1e31; color: inherit; padding: 7px 8px;
+    }
+    .event-item:hover {
+      border-color: #5d74ca;
+    }
+    .event-item.active {
+      border-color: #88aaff; background: #242a49;
+    }
+    .event-item-seq {
+      font-size: 10px; color: #8ca0e8; margin-bottom: 2px;
+    }
+    .event-item-type {
+      font-size: 11px; color: #eef3ff;
+    }
+    .event-item-summary {
+      font-size: 10px; color: #9ca8d5; margin-top: 3px; line-height: 1.45;
+    }
 
     .description {
       max-width: 960px; padding: 12px;
@@ -177,6 +253,10 @@
     ];
 
     const RIBBON_FAILURE_ITEMS = [
+      { label: 'Rejected cross street', kind: 'line', stroke: 'rgb(150, 110, 255)', strokeWidth: 2 },
+      { label: 'Pruned cross street', kind: 'line', stroke: 'rgb(255, 185, 80)', strokeWidth: 2 },
+      { label: 'Commit-rejected cross street', kind: 'line', stroke: 'rgb(255, 70, 70)', strokeWidth: 2 },
+      { label: 'Missing cross-street scanline', kind: 'line', stroke: 'rgb(168, 168, 168)', strokeWidth: 2 },
       { label: 'Ray miss', kind: 'line', stroke: 'rgb(255, 210, 120)', strokeWidth: 2 },
       { label: 'Angle reject', kind: 'line', stroke: 'rgb(190, 60, 255)', strokeWidth: 2 },
       { label: 'Parallel gap / too close', kind: 'line', stroke: 'rgb(200, 110, 255)', strokeWidth: 2 },
@@ -197,7 +277,7 @@
 
     async function init() {
       try {
-        const resp = await fetch('manifest.json?t=' + Date.now());
+        const resp = await fetch(resolveAssetPath('manifest.json') + '?t=' + Date.now());
         if (!resp.ok) { document.getElementById('main').textContent = 'No manifest.json found'; return; }
         const entries = await resp.json();
 
@@ -229,7 +309,7 @@
       let text = '', title = slug;
       if (md) {
         try {
-          const resp = await fetch(md);
+          const resp = await fetch(resolveAssetPath(md));
           if (resp.ok) {
             text = await resp.text();
             title = text.match(/^# (?:Experiment )?\S+: (.+)/m)?.[1] || slug;
@@ -239,7 +319,7 @@
 
       let meta = null;
       try {
-        const manifestResp = await fetch(`${num}-output/manifest.json?t=${Date.now()}`);
+        const manifestResp = await fetch(resolveAssetPath(`${num}-output/manifest.json`) + `?t=${Date.now()}`);
         if (manifestResp.ok) meta = await manifestResp.json();
       } catch (e) {}
 
@@ -317,17 +397,29 @@
       const stageFrame = main.querySelector('.stage-frame');
       if (stageFrame && selectedVisual) {
         hydrateStageFrame(stageFrame, selectedVisual);
+        hydrateEventPanel(main, exp, selectedVisual);
       }
     }
 
     function renderViewer(exp, selectedVisual) {
       const groups = groupVisualsByZone(exp.visuals);
       const links = [];
-      if (selectedVisual?.paths.svg) links.push(`<a href="${selectedVisual.paths.svg}" target="_blank" rel="noopener">Open SVG</a>`);
-      if (selectedVisual?.paths.png) links.push(`<a href="${selectedVisual.paths.png}" target="_blank" rel="noopener">Open PNG</a>`);
+      const ribbonView = isRibbonVisual(exp, selectedVisual);
+      if (selectedVisual?.paths.svg) links.push(`<a href="${resolveAssetPath(selectedVisual.paths.svg)}" target="_blank" rel="noopener">Open SVG</a>`);
+      if (selectedVisual?.paths.png) links.push(`<a href="${resolveAssetPath(selectedVisual.paths.png)}" target="_blank" rel="noopener">Open PNG</a>`);
+      const eventPath = eventLogPathForVisual(exp, selectedVisual);
+      if (eventPath) links.push(`<a href="${resolveAssetPath(eventPath)}" target="_blank" rel="noopener">Open Events</a>`);
 
       return `
         <div class="viewer">
+          ${ribbonView ? `
+            <div class="viewer-top">
+              <div class="event-toolbar" data-visual-key="${selectedVisual?.key || ''}">
+                <h4>Events & Replay</h4>
+                <div class="event-toolbar-loading">Loading event log…</div>
+              </div>
+            </div>
+          ` : ''}
           <div class="stage">
             <div class="stage-header">
               <div>
@@ -348,7 +440,7 @@
                 <div class="thumb-list">
                   ${group.items.map(item => `
                     <button class="thumb ${item.key === selectedVisual?.key ? 'active' : ''}" data-key="${item.key}">
-                      <img src="${item.paths.png || item.paths.svg}" alt="${item.displayLabel}" class="${item.paths.png ? 'pixelated' : ''}">
+                      <img src="${resolveAssetPath(item.paths.png || item.paths.svg)}" alt="${item.displayLabel}" class="${item.paths.png ? 'pixelated' : ''}">
                       <span class="thumb-text">
                         <span class="thumb-label">${item.displayLabel}</span>
                         <span class="thumb-meta">${item.detailLabel}</span>
@@ -358,6 +450,12 @@
                 </div>
               </div>
             `).join('')}
+            ${ribbonView ? `
+              <div class="event-panel" data-visual-key="${selectedVisual?.key || ''}">
+                <h4>Event History</h4>
+                <div class="event-panel-loading">Loading event log…</div>
+              </div>
+            ` : ''}
           </div>
         </div>
       `;
@@ -372,7 +470,7 @@
       if (selectedVisual.paths.svg) {
         stageFrame.innerHTML = '<div class="stage-loading">Loading SVG…</div>';
         try {
-          const resp = await fetch(`${selectedVisual.paths.svg}?t=${Date.now()}`);
+          const resp = await fetch(`${resolveAssetPath(selectedVisual.paths.svg)}?t=${Date.now()}`);
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const text = await resp.text();
           if (stageFrame.dataset.visualKey !== visualKey) return;
@@ -388,6 +486,7 @@
           stageFrame.innerHTML = '';
           stageFrame.appendChild(document.importNode(svg, true));
           bindSvgInteractivity(stageFrame);
+          applyReplayIfReady(stageFrame);
           return;
         } catch (error) {
           console.warn('Failed to load SVG view', error);
@@ -400,14 +499,418 @@
     function renderStageImage(stageFrame, selectedVisual) {
       clearPinnedTooltip();
       if (selectedVisual?.paths.png) {
-        stageFrame.innerHTML = `<img src="${selectedVisual.paths.png}" alt="${selectedVisual?.displayLabel || 'output'}" class="pixelated">`;
+        stageFrame.innerHTML = `<img src="${resolveAssetPath(selectedVisual.paths.png)}" alt="${selectedVisual?.displayLabel || 'output'}" class="pixelated">`;
         return;
       }
       if (selectedVisual?.paths.svg) {
-        stageFrame.innerHTML = `<img src="${selectedVisual.paths.svg}" alt="${selectedVisual?.displayLabel || 'output'}">`;
+        stageFrame.innerHTML = `<img src="${resolveAssetPath(selectedVisual.paths.svg)}" alt="${selectedVisual?.displayLabel || 'output'}">`;
         return;
       }
       stageFrame.innerHTML = '<div class="stage-loading">No render found for this view.</div>';
+    }
+
+    async function hydrateEventPanel(main, exp, selectedVisual) {
+      const toolbar = main.querySelector('.event-toolbar');
+      const panel = main.querySelector('.event-panel');
+      const stageFrame = main.querySelector('.stage-frame');
+      if ((!toolbar && !panel) || !stageFrame || !selectedVisual) return;
+      const visualKey = selectedVisual.key || '';
+      if (toolbar) toolbar.dataset.visualKey = visualKey;
+      if (panel) panel.dataset.visualKey = visualKey;
+      stageFrame._replayExp = exp;
+      stageFrame._replaySelectedVisual = selectedVisual;
+
+      const eventPaths = eventLogCandidatePathsForVisual(exp, selectedVisual);
+      if (!eventPaths.length) {
+        if (toolbar) {
+          toolbar.innerHTML = `<h4>Events & Replay</h4><div class="event-toolbar-empty">This view doesn’t have a ribbon event log.</div>`;
+        }
+        if (panel) {
+          panel.innerHTML = `<h4>Event History</h4><div class="event-panel-empty">This view doesn’t have a ribbon event log.</div>`;
+        }
+        stageFrame._eventLog = null;
+        stageFrame._replaySeq = null;
+        return;
+      }
+
+      if (toolbar) {
+        toolbar.innerHTML = `<h4>Events & Replay</h4><div class="event-toolbar-loading">Loading event log…</div>`;
+      }
+      if (panel) {
+        panel.innerHTML = `<h4>Event History</h4><div class="event-panel-loading">Loading event log…</div>`;
+      }
+
+      try {
+        const events = await loadEventLog(exp, eventPaths);
+        if ((toolbar && toolbar.dataset.visualKey !== visualKey) || (panel && panel.dataset.visualKey !== visualKey)) return;
+        if (!events || events.length === 0) {
+          if (toolbar) {
+            toolbar.innerHTML = `<h4>Events & Replay</h4><div class="event-toolbar-empty">No event log for this experiment view yet. Rerun the experiment after the event-log changes to generate one.</div>`;
+          }
+          if (panel) {
+            panel.innerHTML = `<h4>Event History</h4><div class="event-panel-empty">No event log for this experiment view yet. Rerun the experiment after the event-log changes to generate one.</div>`;
+          }
+          stageFrame._eventLog = null;
+          stageFrame._replaySeq = null;
+          return;
+        }
+
+        const replaySeq = getReplaySequence(exp, visualKey, events);
+        stageFrame._eventLog = events;
+        stageFrame._replaySeq = replaySeq;
+        stageFrame._replayVisualKey = visualKey;
+        renderEventPanel(toolbar, panel, exp, selectedVisual, events, replaySeq, stageFrame);
+        applyReplayIfReady(stageFrame);
+      } catch (error) {
+        if ((toolbar && toolbar.dataset.visualKey !== visualKey) || (panel && panel.dataset.visualKey !== visualKey)) return;
+        if (toolbar) {
+          toolbar.innerHTML = `<h4>Events & Replay</h4><div class="event-toolbar-empty">Failed to load event log: ${escapeHtml(error.message)}</div>`;
+        }
+        if (panel) {
+          panel.innerHTML = `<h4>Event History</h4><div class="event-panel-empty">Failed to load event log: ${escapeHtml(error.message)}</div>`;
+        }
+      }
+    }
+
+    async function loadEventLog(exp, eventPathOrPaths) {
+      const eventPaths = Array.isArray(eventPathOrPaths) ? eventPathOrPaths : [eventPathOrPaths];
+      const cacheKey = eventPaths.join('|');
+      if (!exp.eventLogs) exp.eventLogs = new Map();
+      if (exp.eventLogs.has(cacheKey)) return exp.eventLogs.get(cacheKey);
+
+      for (const eventPath of eventPaths) {
+        const resp = await fetch(`${resolveAssetPath(eventPath)}?t=${Date.now()}`);
+        if (resp.status === 404) continue;
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const text = await resp.text();
+        const events = text
+          .split('\n')
+          .map(line => line.trim())
+          .filter(Boolean)
+          .map(line => JSON.parse(line));
+        exp.eventLogs.set(cacheKey, events);
+        return events;
+      }
+
+      exp.eventLogs.set(cacheKey, null);
+      return null;
+    }
+
+    function getReplaySequence(exp, visualKey, events) {
+      if (!exp.replayStateByKey) exp.replayStateByKey = new Map();
+      if (exp.replayStateByKey.has(visualKey)) {
+        return exp.replayStateByKey.get(visualKey);
+      }
+      return events.length ? events[events.length - 1].seq : 0;
+    }
+
+    function setReplaySequence(exp, visualKey, seq) {
+      if (!exp.replayStateByKey) exp.replayStateByKey = new Map();
+      exp.replayStateByKey.set(visualKey, seq);
+    }
+
+    function renderEventPanel(toolbar, panel, exp, selectedVisual, events, replaySeq, stageFrame) {
+      const currentEvent = events.find(event => event.seq === replaySeq) || null;
+      const maxSeq = events.length ? events[events.length - 1].seq : 0;
+      if (toolbar) {
+        toolbar.innerHTML = `
+          <h4>Events & Replay</h4>
+          <div class="event-controls">
+            <div class="event-controls-top">
+              <span class="event-seq-label">Seq ${replaySeq} / ${maxSeq}</span>
+              <button type="button" class="event-live-button">Live</button>
+            </div>
+            <input class="event-slider" type="range" min="0" max="${maxSeq}" value="${replaySeq}" step="1">
+            <div class="event-current">${currentEvent ? escapeHtml(eventSummary(currentEvent)) : 'Before first event'}</div>
+          </div>
+        `;
+      }
+
+      if (panel) {
+        panel.innerHTML = `
+          <h4>Event History</h4>
+          <div class="event-list">
+            ${events.map(event => `
+              <button class="event-item ${event.seq === replaySeq ? 'active' : ''}" data-seq="${event.seq}">
+                <div class="event-item-seq">#${event.seq}</div>
+                <div class="event-item-type">${escapeHtml(event.type)}</div>
+                <div class="event-item-summary">${escapeHtml(eventSummary(event))}</div>
+              </button>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      toolbar?.querySelector('.event-slider')?.addEventListener('input', event => {
+        previewReplaySelection(stageFrame, Number(event.target.value));
+      });
+
+      toolbar?.querySelector('.event-slider')?.addEventListener('change', event => {
+        updateReplaySelection(stageFrame, Number(event.target.value));
+      });
+
+      toolbar?.querySelector('.event-live-button')?.addEventListener('click', () => {
+        updateReplaySelection(stageFrame, maxSeq);
+      });
+
+      panel?.querySelectorAll('.event-item').forEach(button => {
+        button.addEventListener('click', () => {
+          updateReplaySelection(stageFrame, Number(button.dataset.seq));
+        });
+      });
+    }
+
+    function updateReplaySelection(stageFrame, seq) {
+      const exp = stageFrame?._replayExp;
+      const selectedVisual = stageFrame?._replaySelectedVisual;
+      const events = stageFrame?._eventLog;
+      if (!exp || !selectedVisual || !events?.length) return;
+      const viewer = stageFrame.closest('.viewer');
+      const toolbar = viewer?.querySelector('.event-toolbar');
+      const panel = viewer?.querySelector('.event-panel');
+      setReplaySequence(exp, selectedVisual.key, seq);
+      stageFrame._replaySeq = seq;
+      renderEventPanel(toolbar, panel, exp, selectedVisual, events, seq, stageFrame);
+      applyReplayIfReady(stageFrame);
+    }
+
+    function previewReplaySelection(stageFrame, seq) {
+      const exp = stageFrame?._replayExp;
+      const selectedVisual = stageFrame?._replaySelectedVisual;
+      const events = stageFrame?._eventLog;
+      if (!exp || !selectedVisual || !events?.length) return;
+      stageFrame._previewReplaySeq = seq;
+      if (stageFrame._previewReplayFrame) return;
+      stageFrame._previewReplayFrame = window.requestAnimationFrame(() => {
+        stageFrame._previewReplayFrame = null;
+        const nextSeq = stageFrame._previewReplaySeq;
+        const viewer = stageFrame.closest('.viewer');
+        const toolbar = viewer?.querySelector('.event-toolbar');
+        stageFrame._replaySeq = nextSeq;
+        updateEventToolbar(toolbar, events, nextSeq);
+        applyReplayIfReady(stageFrame);
+      });
+    }
+
+    function updateEventToolbar(toolbar, events, replaySeq) {
+      if (!toolbar) return;
+      const currentEvent = events.find(event => event.seq === replaySeq) || null;
+      const maxSeq = events.length ? events[events.length - 1].seq : 0;
+      const seqLabel = toolbar.querySelector('.event-seq-label');
+      const slider = toolbar.querySelector('.event-slider');
+      const current = toolbar.querySelector('.event-current');
+      if (seqLabel) seqLabel.textContent = `Seq ${replaySeq} / ${maxSeq}`;
+      if (slider && Number(slider.value) !== replaySeq) slider.value = String(replaySeq);
+      if (current) current.textContent = currentEvent ? eventSummary(currentEvent) : 'Before first event';
+    }
+
+    function eventLogCandidatePathsForVisual(exp, selectedVisual) {
+      if (!isRibbonVisual(exp, selectedVisual)) return [];
+      if (selectedVisual?.zone === null || selectedVisual?.zone === undefined) return [];
+      if (!selectedVisual?.seed) return [];
+      return [
+        `${exp.num}-output/events-zone${selectedVisual.zone}-seed${selectedVisual.seed}.ndjson`,
+        `${exp.num}-output/ribbon-events-zone${selectedVisual.zone}-seed${selectedVisual.seed}.ndjson`,
+      ];
+    }
+
+    function eventLogPathForVisual(exp, selectedVisual) {
+      return eventLogCandidatePathsForVisual(exp, selectedVisual)?.[0] || null;
+    }
+
+    function isRibbonVisual(exp, selectedVisual) {
+      return exp?.meta?.script === 'render-sector-ribbons.js'
+        || /ribbon/i.test(selectedVisual?.layer || '');
+    }
+
+    function applyReplayIfReady(stageFrame) {
+      const svg = stageFrame?.querySelector('svg');
+      const events = stageFrame?._eventLog;
+      if (!svg || !events || !events.length) return;
+      applyReplayState(svg, events, stageFrame._replaySeq ?? events[events.length - 1].seq);
+    }
+
+    function applyReplayState(svg, events, replaySeq) {
+      const hasCrossStreetReplay = events.some(event => event.type === 'cross-street-committed');
+      const visibleCrossStreets = new Set();
+      const visibleRows = new Set();
+      const visibleAnchors = new Set();
+      const visibleFailures = new Set();
+
+      for (const event of events) {
+        if (event.seq > replaySeq) break;
+        if (event.type === 'cross-street-committed') {
+          visibleCrossStreets.add(crossStreetEventKey(event));
+        } else if (event.type === 'anchor-dequeued') {
+          visibleAnchors.add(anchorEventKey(event));
+        } else if (event.type === 'row-accepted') {
+          visibleRows.add(rowEventKey(event));
+        } else if (event.type === 'row-rejected') {
+          visibleFailures.add(anchorEventKey(event));
+          visibleAnchors.add(anchorEventKey(event));
+        }
+      }
+
+      if (hasCrossStreetReplay) {
+        svg.querySelectorAll('.debug-cross-street').forEach(el => {
+          setReplayVisibility(el, visibleCrossStreets.has(crossStreetElementKey(el)));
+        });
+      }
+      svg.querySelectorAll('.debug-ribbon').forEach(el => {
+        setReplayVisibility(el, visibleRows.has(rowElementKey(el)));
+      });
+      svg.querySelectorAll('.debug-junction').forEach(el => {
+        setReplayVisibility(el, visibleRows.has(rowElementKey(el)));
+      });
+      svg.querySelectorAll('.debug-anchor, .debug-anchor-sequence').forEach(el => {
+        setReplayVisibility(el, visibleAnchors.has(anchorElementKey(el)));
+      });
+      svg.querySelectorAll('.debug-failure-guide, .debug-failure-path, .debug-failure-start, .debug-failure-projected, .debug-failure-stop, .debug-conflict-point').forEach(el => {
+        setReplayVisibility(el, visibleFailures.has(failureElementKey(el)));
+      });
+    }
+
+    function setReplayVisibility(el, visible) {
+      el.style.display = visible ? '' : 'none';
+    }
+
+    function rowEventKey(event) {
+      return `${event.sectorIdx ?? ''}:${event.rowIdAttempt ?? ''}`;
+    }
+
+    function rowElementKey(el) {
+      return `${el.dataset.sectorIdx ?? ''}:${el.dataset.rowId ?? ''}`;
+    }
+
+    function crossStreetEventKey(event) {
+      return `${event.sectorIdx ?? ''}:${event.payload?.streetKey ?? ''}`;
+    }
+
+    function crossStreetElementKey(el) {
+      return `${el.dataset.sectorIdx ?? ''}:${el.dataset.streetKey ?? ''}`;
+    }
+
+    function anchorEventKey(event) {
+      return [
+        event.sectorIdx ?? '',
+        event.familyRootRowId ?? '',
+        event.anchorSource ?? '',
+        event.anchorStreetIdx ?? '',
+        replayNumber(event.anchorT),
+        event.anchorGeneration ?? '',
+        event.anchorSlotIndex ?? '',
+      ].join('|');
+    }
+
+    function anchorElementKey(el) {
+      return [
+        el.dataset.sectorIdx ?? '',
+        el.dataset.familyRootRowId ?? '',
+        el.dataset.source ?? '',
+        el.dataset.streetIdx ?? '',
+        replayNumber(el.dataset.t),
+        el.dataset.generation ?? '',
+        el.dataset.slotIndex ?? '',
+      ].join('|');
+    }
+
+    function failureElementKey(el) {
+      return [
+        el.dataset.sectorIdx ?? '',
+        el.dataset.familyRootRowId ?? '',
+        el.dataset.anchorSource ?? '',
+        el.dataset.anchorStreetIdx ?? '',
+        replayNumber(el.dataset.anchorT),
+        el.dataset.anchorGeneration ?? '',
+        el.dataset.anchorSlotIndex ?? '',
+      ].join('|');
+    }
+
+    function replaySequenceForElement(stageFrame, target) {
+      const events = stageFrame?._eventLog;
+      if (!events?.length || !target) return null;
+
+      if (target.matches('.debug-cross-street')) {
+        const key = crossStreetElementKey(target);
+        return events.find(event => event.type === 'cross-street-committed' && crossStreetEventKey(event) === key)?.seq ?? null;
+      }
+
+      if (target.matches('.debug-ribbon, .debug-junction')) {
+        const key = rowElementKey(target);
+        return events.find(event => event.type === 'row-accepted' && rowEventKey(event) === key)?.seq ?? null;
+      }
+
+      if (target.matches('.debug-anchor, .debug-anchor-sequence')) {
+        const key = anchorElementKey(target);
+        return events.find(event => event.type === 'anchor-dequeued' && anchorEventKey(event) === key)?.seq
+          ?? events.find(event => event.type === 'anchor-enqueued' && anchorEventKey(event) === key)?.seq
+          ?? null;
+      }
+
+      if (target.matches('.debug-failure-guide, .debug-failure-path, .debug-failure-start, .debug-failure-projected, .debug-failure-stop, .debug-conflict-point')) {
+        const key = failureElementKey(target);
+        return events.find(event => event.type === 'row-rejected' && anchorEventKey(event) === key)?.seq ?? null;
+      }
+
+      return null;
+    }
+
+    function replayNumber(value) {
+      const num = Number(value);
+      return Number.isFinite(num) ? num.toFixed(2) : '';
+    }
+
+    function eventSummary(event) {
+        const anchorBit = event.anchorStreetIdx !== undefined && event.anchorStreetIdx !== null
+        ? `street ${event.anchorStreetIdx} @ ${replayNumber(event.anchorT)}`
+        : null;
+      switch (event.type) {
+        case 'sweep-plan':
+          return `cross-street sweep from ${event.payload?.phaseOriginSource || 'origin'} @ ${Math.round(event.payload?.spacing || 0)}m${event.payload?.phaseBorrowPointCount ? ` using ${event.payload.phaseBorrowPointCount} borrowed boundary points` : ''}`;
+        case 'scanline-start':
+          return `scanline ct ${replayNumber(event.payload?.ctOff)}`;
+        case 'scanline-runs':
+          return `${event.payload?.runCount ?? 0} run${event.payload?.runCount === 1 ? '' : 's'}, ${event.payload?.breakCount ?? 0} break${event.payload?.breakCount === 1 ? '' : 's'} on ct ${replayNumber(event.payload?.ctOff)}`;
+        case 'scanline-break':
+          return `${event.payload?.reason || 'break'} at ${replayNumber(event.payload?.point?.x)}, ${replayNumber(event.payload?.point?.z)}`;
+        case 'scanline-no-street':
+          return `no street kept on ct ${replayNumber(event.payload?.ctOff)} (${event.payload?.candidateCount ?? 0} candidates, ${event.payload?.prunedCount ?? 0} pruned)`;
+        case 'street-candidate':
+          return `${event.payload?.candidateKey || 'candidate'} on ct ${replayNumber(event.payload?.ctOff)}${event.payload?.snapped ? ' (snapped)' : ''}`;
+        case 'street-snapped':
+          return `snapped ${event.payload?.side || 'boundary'} end toward shared boundary`;
+        case 'street-rejected':
+          return `${event.payload?.candidateKey || 'candidate'} rejected: ${event.payload?.reason || 'unknown'}`;
+        case 'street-accepted':
+          return `${event.payload?.candidateKey || 'candidate'} accepted on ct ${replayNumber(event.payload?.ctOff)}`;
+        case 'street-pruned':
+          return `${event.payload?.candidateKey || 'candidate'} pruned: ${event.payload?.reason || 'unknown'}`;
+        case 'cross-street-committed':
+          return `cross street committed${event.payload?.snapped ? ' (snapped)' : ''}`;
+        case 'cross-street-prejoin':
+          return `prejoin cross street to ${replayNumber(event.payload?.snapPoint?.x)}, ${replayNumber(event.payload?.snapPoint?.z)}`;
+        case 'cross-street-commit-rejected':
+          return `cross street rejected: ${event.payload?.reason || 'unknown'}`;
+        case 'cross-street-commit-retry':
+          return `retry cross street via roads ${(event.payload?.conflictRoadIds || []).join(', ') || 'n/a'}`;
+        case 'anchor-enqueued':
+        case 'anchor-dequeued':
+          return `${event.anchorSource || 'anchor'} ${anchorBit || ''}`.trim();
+        case 'row-build-start':
+          return `attempt row ${event.rowIdAttempt} from ${event.anchorSource || 'anchor'}`;
+        case 'row-accepted':
+          return `row ${event.rowIdAttempt} accepted, ${event.payload?.streetCount ?? '?'} streets`;
+        case 'row-rejected':
+          return `row ${event.rowIdAttempt} rejected: ${event.payload?.reason || 'unknown'}`;
+        case 'relation-check-failed':
+          return `relation failure: ${event.payload?.reason || 'unknown'} vs row ${event.payload?.conflictRowId ?? 'n/a'}`;
+        case 'family-slot-derived':
+          return `slot ${event.payload?.slotIndex ?? '?'} from row ${event.payload?.parentRowId ?? 'n/a'}`;
+        case 'gap-seed-created':
+          return `gap seed on ${anchorBit || 'street'} (gap ${Math.round(event.payload?.gap || 0)})`;
+        default:
+          return `${event.type}${anchorBit ? ` · ${anchorBit}` : ''}`;
+      }
     }
 
     function bindSvgInteractivity(stageFrame) {
@@ -446,6 +949,16 @@
           return;
         }
         showTooltipForTarget(target, event.clientX, event.clientY, true);
+      };
+
+      stageFrame.ondblclick = event => {
+        const target = findTooltipTarget(event.target);
+        if (!target) return;
+        const seq = replaySequenceForElement(stageFrame, target);
+        if (!Number.isFinite(seq)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        updateReplaySelection(stageFrame, seq);
       };
     }
 
@@ -720,6 +1233,24 @@
         return window.CSS.escape(String(value));
       }
       return String(value).replace(/["\\]/g, '\\$&');
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
+    }
+
+    function resolveAssetPath(path) {
+      if (!path) return '';
+      if (/^(https?:)?\/\//.test(path)) return path;
+      const pathname = window.location.pathname || '/';
+      const basePath = pathname.endsWith('/')
+        ? pathname
+        : (pathname.endsWith('.html') ? pathname.replace(/[^/]+$/, '') : `${pathname}/`);
+      return new URL(path, `${window.location.origin}${basePath}`).pathname;
     }
 
     init();

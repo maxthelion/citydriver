@@ -21,6 +21,7 @@ import { layCrossStreets } from '../src/city/incremental/crossStreets.js';
 import { layRibbons } from '../src/city/incremental/ribbons.js';
 import { segmentTerrainV2 } from '../src/city/incremental/ridgeSegmentationV2.js';
 import { tryAddRoad } from '../src/city/incremental/roadTransaction.js';
+import { NdjsonEventSink, FanoutEventSink, FilteredEventSink } from '../src/core/EventSink.js';
 
 // === CLI ===
 const seed = parseInt(process.argv[2]) || 42;
@@ -313,6 +314,11 @@ function ribbonParamsForExperiment(num) {
         fillGapThreshold: 48,
       };
     case '031j':
+    case '032':
+    case '033':
+    case '034':
+    case '035':
+    case '036':
       return {
         maxRowsTotal: 28,
         initialSeedCount: 1,
@@ -369,7 +375,101 @@ function ribbonParamsForExperiment(num) {
   }
 }
 
+function crossStreetParamsForExperiment(num) {
+  switch (num) {
+    case '032':
+      return {
+        alignSharedBoundaryPhase: true,
+        sharedBoundaryMinCells: 6,
+        sharedBoundaryTangentThreshold: 0.72,
+      };
+    case '033':
+      return {
+        snapSharedBoundaryEndpoints: true,
+        sharedBoundaryMinCells: 6,
+        sharedBoundaryTangentThreshold: 0.72,
+        boundarySnapBoundaryTolerance: 18,
+        boundarySnapMaxDistance: 28,
+        boundarySnapMaxAngleDeltaDeg: 18,
+        boundarySnapMinImprovement: 3,
+      };
+    case '034':
+      return {
+        alignSharedBoundaryAnchor: true,
+        sharedBoundaryMinCells: 6,
+        sharedBoundaryTangentThreshold: 0.72,
+        sharedBoundaryAnchorBoundaryTolerance: 18,
+      };
+    case '035':
+      return {
+        borrowSharedBoundaryPhase: true,
+        sharedBoundaryMinCells: 6,
+        sharedBoundaryTangentThreshold: 0.72,
+        sharedGradientSimilarityThreshold: 0.92,
+        phaseBorrowBoundaryTolerance: 18,
+      };
+    case '036':
+      return {
+        borrowSharedBoundaryPhase: true,
+        connectBorrowedBoundaryPhase: true,
+        connectBorrowedBoundaryPhaseRetry: true,
+        connectBorrowedBoundaryPhaseRetryMaxDistance: 22,
+        sharedBoundaryMinCells: 6,
+        sharedBoundaryTangentThreshold: 0.72,
+        sharedGradientSimilarityThreshold: 0.92,
+        phaseBorrowBoundaryTolerance: 18,
+        boundarySnapBoundaryTolerance: 18,
+        boundarySnapMaxDistance: 36,
+        boundarySnapMaxAngleDeltaDeg: 22,
+        boundarySnapMinImprovement: 1,
+        boundarySnapForceEndpoint: true,
+        boundarySnapForceEndpointMaxDistance: 14,
+      };
+    case '037':
+      return {
+        borrowSharedBoundaryPhase: true,
+        borrowSharedBoundaryExplicitOffsets: true,
+        connectBorrowedBoundaryPhase: true,
+        connectBorrowedBoundaryPhaseRetry: true,
+        connectBorrowedBoundaryPhaseRetryMaxDistance: 22,
+        sharedBoundaryMinCells: 6,
+        sharedBoundaryTangentThreshold: 0.72,
+        sharedGradientSimilarityThreshold: 0.92,
+        phaseBorrowBoundaryTolerance: 18,
+        boundarySnapBoundaryTolerance: 18,
+        boundarySnapMaxDistance: 36,
+        boundarySnapMaxAngleDeltaDeg: 22,
+        boundarySnapMinImprovement: 1,
+        boundarySnapForceEndpoint: true,
+        boundarySnapForceEndpointMaxDistance: 14,
+      };
+    case '038':
+      return {
+        borrowSharedBoundaryPhase: true,
+        borrowSharedBoundaryExplicitOffsets: true,
+        connectBorrowedBoundaryPhase: true,
+        connectBorrowedBoundaryPhasePreJoin: true,
+        connectBorrowedBoundaryPhasePreJoinMaxDistance: 16,
+        connectBorrowedBoundaryPhaseRetry: true,
+        connectBorrowedBoundaryPhaseRetryMaxDistance: 22,
+        sharedBoundaryMinCells: 6,
+        sharedBoundaryTangentThreshold: 0.72,
+        sharedGradientSimilarityThreshold: 0.92,
+        phaseBorrowBoundaryTolerance: 18,
+        boundarySnapBoundaryTolerance: 18,
+        boundarySnapMaxDistance: 36,
+        boundarySnapMaxAngleDeltaDeg: 22,
+        boundarySnapMinImprovement: 1,
+        boundarySnapForceEndpoint: true,
+        boundarySnapForceEndpointMaxDistance: 14,
+      };
+    default:
+      return {};
+  }
+}
+
 const ribbonParams = ribbonParamsForExperiment(experimentNum);
+const crossStreetParams = crossStreetParamsForExperiment(experimentNum);
 
 // === Pipeline setup ===
 const t0 = performance.now();
@@ -447,6 +547,16 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
   const zone = selectedZones[zi];
   console.log(`\n=== Zone ${zi} ===`);
   console.log(`  ${zone.cells.length} cells, avgSlope=${zone.avgSlope.toFixed(3)}`);
+  const combinedEventSink = new NdjsonEventSink(`${outDir}/events-zone${zi}-seed${seed}.ndjson`);
+  const crossEventSink = new FilteredEventSink(
+    new NdjsonEventSink(`${outDir}/cross-events-zone${zi}-seed${seed}.ndjson`),
+    event => event.stepId === 'cross-streets',
+  );
+  const ribbonEventSink = new FilteredEventSink(
+    new NdjsonEventSink(`${outDir}/ribbon-events-zone${zi}-seed${seed}.ndjson`),
+    event => event.stepId === 'ribbons',
+  );
+  const zoneEventSink = new FanoutEventSink([combinedEventSink, crossEventSink, ribbonEventSink]);
 
   // Zone bounding box for cropped render
   let minGx = W, maxGx = 0, minGz = H, maxGz = 0;
@@ -497,8 +607,20 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
 
   console.log(`  Sectors: ${sectors.length} (from ${sectorMap.size} face intersections, min ${MIN_SECTOR_CELLS} cells)`);
 
+  const cellToSector = new Map();
+  for (let si = 0; si < sectors.length; si++) {
+    for (const c of sectors[si].cells) {
+      cellToSector.set(c.gz * W + c.gx, si);
+    }
+  }
+  const sharedBoundaryData = buildSectorSharedBoundaryData(sectors, cellToSector, W, cs, ox, oz);
+
   // Run cross streets and ribbons per sector, committing via tryAddRoad
   const allCrossStreets = [];
+  const allRejectedCrossStreets = [];
+  const allPrunedCrossStreets = [];
+  const allMissingCrossStreetScanlines = [];
+  const allCommitRejectedCrossStreets = [];
   const allRibbons = [];
   const allRibbonJunctions = [];
   const allFailedRibbons = [];
@@ -510,20 +632,160 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
   for (let si = 0; si < sectors.length; si++) {
     const sector = sectors[si];
     const sectorFailureCounts = {};
-    const { crossStreets } = layCrossStreets(sector, map);
+    const sectorCrossParams = buildSectorCrossStreetParams(
+      sector,
+      sharedBoundaryData[si],
+      crossStreetParams,
+      allCrossStreets,
+    );
+    const { crossStreets, debug: crossDebug = {} } = layCrossStreets(sector, map, {
+      ...sectorCrossParams,
+      eventSink: zoneEventSink,
+      eventStepId: 'cross-streets',
+      eventContext: {
+        experiment: experimentNum,
+        seed,
+        zoneIdx: zi,
+        sectorIdx: si,
+        faceIdx: sector.faceIdx,
+      },
+    });
+    allRejectedCrossStreets.push(...(crossDebug.rejectedStreets || []).map(street => ({
+      ...street,
+      zoneIdx: zi,
+      sectorIdx: si,
+    })));
+    allPrunedCrossStreets.push(...(crossDebug.prunedStreets || []).map(street => ({
+      ...street,
+      zoneIdx: zi,
+      sectorIdx: si,
+    })));
+    allMissingCrossStreetScanlines.push(...(crossDebug.missingScanlines || []).map(scanline => ({
+      ...scanline,
+      zoneIdx: zi,
+      sectorIdx: si,
+    })));
 
     // Commit cross streets via tryAddRoad
     const committedCrossStreets = [];
     let csRejects = 0;
     for (const cs2 of crossStreets) {
-      const result = tryAddRoad(map, cs2.points, { hierarchy: 'residential', source: 'cross-street' });
+      let attemptPoints = cs2.points;
+      let preJoined = false;
+      if (sectorCrossParams.connectBorrowedBoundaryPhasePreJoin) {
+        const preJoin = connectCrossStreetToBoundarySnapPoint(attemptPoints, sectorCrossParams);
+        if (preJoin) {
+          emitZoneEvent(zoneEventSink, 'cross-streets', {
+            experiment: experimentNum,
+            seed,
+            zoneIdx: zi,
+            sectorIdx: si,
+            faceIdx: sector.faceIdx,
+          }, 'cross-street-prejoin', {
+            streetKey: streetEventKey(cs2),
+            ctOff: roundEventNumber(cs2.ctOff),
+            snappedEndpoint: roundEventPoint(preJoin.snappedEndpoint),
+            snapPoint: roundEventPoint(preJoin.snapPoint),
+          });
+          attemptPoints = preJoin.points;
+          preJoined = true;
+        }
+      }
+      let result = tryAddRoad(map, attemptPoints, { hierarchy: 'residential', source: 'cross-street' });
+      let commitMeta = {
+        preJoined,
+        connectedRetry: false,
+        conflictRoadIds: [],
+        conflictPoints: [],
+      };
+      if (!result.accepted && sectorCrossParams.connectBorrowedBoundaryPhaseRetry) {
+        const txnReason = classifyTransactionFailure(result.violations);
+        if (txnReason === 'txn-parallel') {
+          const retry = reconnectCrossStreetToConflictRoad(map, attemptPoints, result.violationDetails, sectorCrossParams);
+          if (retry) {
+            emitZoneEvent(zoneEventSink, 'cross-streets', {
+              experiment: experimentNum,
+              seed,
+              zoneIdx: zi,
+              sectorIdx: si,
+              faceIdx: sector.faceIdx,
+            }, 'cross-street-commit-retry', {
+              streetKey: streetEventKey(cs2),
+              ctOff: roundEventNumber(cs2.ctOff),
+              conflictRoadIds: retry.conflictRoadIds,
+              snappedEndpoint: roundEventPoint(retry.snappedEndpoint),
+            });
+            attemptPoints = retry.points;
+            result = tryAddRoad(map, attemptPoints, { hierarchy: 'residential', source: 'cross-street' });
+            commitMeta = {
+              connectedRetry: true,
+              conflictRoadIds: retry.conflictRoadIds,
+              conflictPoints: retry.conflictPoints,
+            };
+          }
+        }
+      }
       if (result.accepted) {
-        committedCrossStreets.push({
+        const committedStreet = {
           ...cs2,
+          points: attemptPoints,
           roadId: result.road.id,
+          preJoined: commitMeta.preJoined,
+          connectedRetry: commitMeta.connectedRetry,
+          conflictRoadIds: commitMeta.conflictRoadIds,
+          conflictPoints: commitMeta.conflictPoints,
+        };
+        committedCrossStreets.push(committedStreet);
+        emitZoneEvent(zoneEventSink, 'cross-streets', {
+          experiment: experimentNum,
+          seed,
+          zoneIdx: zi,
+          sectorIdx: si,
+          faceIdx: sector.faceIdx,
+        }, 'cross-street-committed', {
+          streetKey: streetEventKey(committedStreet),
+          roadId: result.road.id,
+          ctOff: roundEventNumber(committedStreet.ctOff),
+          length: roundEventNumber(committedStreet.length),
+          startPoint: roundEventPoint(committedStreet.points[0]),
+          endPoint: roundEventPoint(committedStreet.points[committedStreet.points.length - 1]),
+          snapped: !!committedStreet.snapped,
+          snapPoint: roundEventPoint(committedStreet.snapPoint),
+          preJoined: committedStreet.preJoined || undefined,
+          connectedRetry: committedStreet.connectedRetry || undefined,
+          conflictRoadIds: committedStreet.conflictRoadIds?.length ? committedStreet.conflictRoadIds : undefined,
         });
       } else {
         csRejects++;
+        const txnReason = classifyTransactionFailure(result.violations);
+        const txnConflict = describeTransactionConflict(map, result.violationDetails);
+        allCommitRejectedCrossStreets.push({
+          ...cs2,
+          points: attemptPoints,
+          zoneIdx: zi,
+          sectorIdx: si,
+          reason: txnReason,
+          conflictRoadIds: txnConflict.roadIds,
+          conflictRoads: txnConflict.roads,
+          conflictPoints: txnConflict.points,
+          violationDetails: result.violationDetails || [],
+        });
+        emitZoneEvent(zoneEventSink, 'cross-streets', {
+          experiment: experimentNum,
+          seed,
+          zoneIdx: zi,
+          sectorIdx: si,
+          faceIdx: sector.faceIdx,
+        }, 'cross-street-commit-rejected', {
+          streetKey: streetEventKey(cs2),
+          ctOff: roundEventNumber(cs2.ctOff),
+          length: roundEventNumber(arcLength(attemptPoints)),
+          startPoint: roundEventPoint(attemptPoints[0]),
+          endPoint: roundEventPoint(attemptPoints[attemptPoints.length - 1]),
+          reason: txnReason,
+          conflictRoadIds: txnConflict.roadIds,
+          conflictPoints: txnConflict.points.map(roundEventPoint),
+        });
       }
     }
     allCrossStreets.push(...committedCrossStreets.map(street => ({
@@ -542,7 +804,18 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
         failedRibbons = [],
         seedAnchors = [],
         failureSummary = { reasons: {} },
-      } = layRibbons(committedCrossStreets, sector, map, ribbonParams);
+      } = layRibbons(committedCrossStreets, sector, map, {
+        ...ribbonParams,
+        eventSink: zoneEventSink,
+        eventStepId: 'ribbons',
+        eventContext: {
+          experiment: experimentNum,
+          seed,
+          zoneIdx: zi,
+          sectorIdx: si,
+          faceIdx: sector.faceIdx,
+        },
+      });
       allFailedRibbons.push(...failedRibbons.map((failure, index) => ({
         ...failure,
         zoneIdx: zi,
@@ -614,14 +887,6 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
   }
 
   console.log(`  Total: ${allCrossStreets.length} cross streets (${totalCsRejects} rejected), ${allRibbons.length} ribbons (${totalRibbonRejects} rejected), ${totalParcels} parcels`);
-
-  // === Build sector cell lookup for boundary detection ===
-  const cellToSector = new Map();
-  for (let si = 0; si < sectors.length; si++) {
-    for (const c of sectors[si].cells) {
-      cellToSector.set(c.gz * W + c.gx, si);
-    }
-  }
 
   const sectorColors = sectors.map((_, i) => {
     const hue = (i * 137.508) % 360;
@@ -750,6 +1015,32 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
     drawRoad(failurePixels, ribbon.points, cropW, cropH, cs, ox, oz, minGx, minGz, [80, 200, 200]);
     drawStreetHitPoints(failurePixels, ribbon.streetPoints || [], cropW, cropH, cs, ox, oz, minGx, minGz);
   }
+  for (const street of allRejectedCrossStreets) {
+    drawCrossStreetDebug(failurePixels, street, cropW, cropH, cs, ox, oz, minGx, minGz, crossStreetDebugColor(street.reason));
+  }
+  for (const street of allPrunedCrossStreets) {
+    drawCrossStreetDebug(failurePixels, street, cropW, cropH, cs, ox, oz, minGx, minGz, crossStreetDebugColor(street.reason));
+    if (street.conflictPoint) {
+      drawMarker(failurePixels, street.conflictPoint, cropW, cropH, cs, ox, oz, minGx, minGz, [255, 255, 255], 2, [0, 0, 0]);
+    }
+  }
+  for (const scanline of allMissingCrossStreetScanlines) {
+    if (scanline.guidePoints?.length >= 2) {
+      drawRoad(failurePixels, scanline.guidePoints, cropW, cropH, cs, ox, oz, minGx, minGz, [160, 160, 160]);
+    }
+    if (scanline.seedPoint) {
+      drawMarker(failurePixels, scanline.seedPoint, cropW, cropH, cs, ox, oz, minGx, minGz, [255, 255, 255], 1, [0, 0, 0]);
+    }
+  }
+  for (const street of allCommitRejectedCrossStreets) {
+    drawCrossStreetDebug(failurePixels, street, cropW, cropH, cs, ox, oz, minGx, minGz, [255, 70, 70]);
+    for (const road of street.conflictRoads || []) {
+      drawRoad(failurePixels, road.points, cropW, cropH, cs, ox, oz, minGx, minGz, [255, 255, 255]);
+    }
+    for (const point of street.conflictPoints || []) {
+      drawMarker(failurePixels, point, cropW, cropH, cs, ox, oz, minGx, minGz, [255, 255, 255], 2, [0, 0, 0]);
+    }
+  }
   drawConfirmedJunctions(failurePixels, allRibbonJunctions, cropW, cropH, cs, ox, oz, minGx, minGz);
   for (const failure of allFailedRibbons) {
     drawRoad(
@@ -810,6 +1101,10 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       minGz,
       zone,
       allCrossStreets,
+      allRejectedCrossStreets: [],
+      allPrunedCrossStreets: [],
+      allMissingCrossStreetScanlines: [],
+      allCommitRejectedCrossStreets: [],
       allRibbons,
       allRibbonJunctions,
       allSeedAnchors,
@@ -834,6 +1129,10 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
         minGz,
         zone,
         allCrossStreets,
+        allRejectedCrossStreets,
+        allPrunedCrossStreets,
+        allMissingCrossStreetScanlines,
+        allCommitRejectedCrossStreets,
         allRibbons,
         allRibbonJunctions,
         allSeedAnchors,
@@ -842,6 +1141,66 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       },
     );
     console.log(`  Written to ${outDir}/ribbon-failures-zone${zi}-seed${seed}.svg (${cropW}x${cropH})`);
+  }
+
+  const crossFailurePixels = basePixels.slice();
+  for (const street of allCrossStreets) {
+    drawRoad(crossFailurePixels, street.points, cropW, cropH, cs, ox, oz, minGx, minGz, [180, 80, 180]);
+  }
+  for (const street of allRejectedCrossStreets) {
+    drawCrossStreetDebug(crossFailurePixels, street, cropW, cropH, cs, ox, oz, minGx, minGz, crossStreetDebugColor(street.reason));
+  }
+  for (const street of allPrunedCrossStreets) {
+    drawCrossStreetDebug(crossFailurePixels, street, cropW, cropH, cs, ox, oz, minGx, minGz, crossStreetDebugColor(street.reason));
+    if (street.conflictPoint) {
+      drawMarker(crossFailurePixels, street.conflictPoint, cropW, cropH, cs, ox, oz, minGx, minGz, [255, 255, 255], 2, [0, 0, 0]);
+    }
+  }
+  for (const street of allCommitRejectedCrossStreets) {
+    drawCrossStreetDebug(crossFailurePixels, street, cropW, cropH, cs, ox, oz, minGx, minGz, [255, 70, 70]);
+    for (const road of street.conflictRoads || []) {
+      drawRoad(crossFailurePixels, road.points, cropW, cropH, cs, ox, oz, minGx, minGz, [255, 255, 255]);
+    }
+    for (const point of street.conflictPoints || []) {
+      drawMarker(crossFailurePixels, point, cropW, cropH, cs, ox, oz, minGx, minGz, [255, 255, 255], 2, [0, 0, 0]);
+    }
+  }
+  for (const scanline of allMissingCrossStreetScanlines) {
+    if (scanline.guidePoints?.length >= 2) {
+      drawRoad(crossFailurePixels, scanline.guidePoints, cropW, cropH, cs, ox, oz, minGx, minGz, [160, 160, 160]);
+    }
+    if (scanline.seedPoint) {
+      drawMarker(crossFailurePixels, scanline.seedPoint, cropW, cropH, cs, ox, oz, minGx, minGz, [255, 255, 255], 1, [0, 0, 0]);
+    }
+  }
+
+  if (allRejectedCrossStreets.length > 0 || allPrunedCrossStreets.length > 0 || allMissingCrossStreetScanlines.length > 0 || allCommitRejectedCrossStreets.length > 0) {
+    writeRaster(`${outDir}/cross-failures-zone${zi}-seed${seed}`, cropW, cropH, crossFailurePixels);
+    console.log(`  Written to ${outDir}/cross-failures-zone${zi}-seed${seed}.png (${cropW}x${cropH})`);
+    writeDebugSvg(
+      `${outDir}/cross-failures-zone${zi}-seed${seed}.svg`,
+      {
+        cropW,
+        cropH,
+        cs,
+        ox,
+        oz,
+        minGx,
+        minGz,
+        zone,
+        allCrossStreets,
+        allRejectedCrossStreets,
+        allPrunedCrossStreets,
+        allMissingCrossStreetScanlines,
+        allCommitRejectedCrossStreets,
+        allRibbons: [],
+        allRibbonJunctions: [],
+        allSeedAnchors: [],
+        allFailedRibbons: [],
+        showFailures: true,
+      },
+    );
+    console.log(`  Written to ${outDir}/cross-failures-zone${zi}-seed${seed}.svg (${cropW}x${cropH})`);
   }
   writeDebugJson(
     `${outDir}/ribbon-debug-zone${zi}-seed${seed}.json`,
@@ -853,7 +1212,12 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       zoneIdx: zi,
       crop: { minGx, minGz, cropW, cropH, cellSize: cs, originX: ox, originZ: oz },
       ribbonParams,
+      crossStreetParams,
       crossStreets: allCrossStreets,
+      rejectedCrossStreets: allRejectedCrossStreets,
+      prunedCrossStreets: allPrunedCrossStreets,
+      missingCrossStreetScanlines: allMissingCrossStreetScanlines,
+      commitRejectedCrossStreets: allCommitRejectedCrossStreets,
       ribbons: allRibbons,
       junctions: allRibbonJunctions,
       anchors: allSeedAnchors,
@@ -861,9 +1225,320 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
     },
   );
   console.log(`  Written to ${outDir}/ribbon-debug-zone${zi}-seed${seed}.json`);
+  zoneEventSink.close();
+  console.log(`  Written to ${outDir}/events-zone${zi}-seed${seed}.ndjson`);
+  console.log(`  Written to ${outDir}/cross-events-zone${zi}-seed${seed}.ndjson`);
+  console.log(`  Written to ${outDir}/ribbon-events-zone${zi}-seed${seed}.ndjson`);
 }
 
 console.log(`\nTotal time: ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+
+function buildSectorCrossStreetParams(sector, boundaryData, params, existingCrossStreets = []) {
+  const result = {};
+  if (!boundaryData?.midpoint || !boundaryData?.tangent) {
+    return result;
+  }
+
+  const slopeDir = sector?.slopeDir || { x: 1, z: 0 };
+  const contourDir = normalize2({ x: -slopeDir.z, z: slopeDir.x });
+  const boundaryTangent = normalize2(boundaryData.tangent);
+  if (!contourDir || !boundaryTangent) return result;
+
+  const tangentAlignment = Math.abs(dot2(contourDir, boundaryTangent));
+  if (tangentAlignment < (params.sharedBoundaryTangentThreshold ?? 0.72)) {
+    return result;
+  }
+  if ((boundaryData.pointCount ?? 0) < (params.sharedBoundaryMinCells ?? 6)) {
+    return result;
+  }
+
+  if (params?.borrowSharedBoundaryPhase) {
+    const phaseBorrow = deriveSharedBoundaryPhaseBorrow(sector, boundaryData, existingCrossStreets, params);
+    if (phaseBorrow) {
+      result.phaseOrigin = phaseBorrow.phaseOrigin;
+      result.phaseOffset = phaseBorrow.phaseOffset;
+      result.phaseOriginSource = 'shared-boundary-borrowed-phase';
+      result.phaseBorrowPointCount = phaseBorrow.pointCount;
+      result.phaseBorrowExplicitCtOffsetCount = phaseBorrow.explicitCtOffsets?.length || 0;
+      result.phaseBorrowBoundarySource = phaseBorrow.otherSectorIdx;
+      if (params?.borrowSharedBoundaryExplicitOffsets && phaseBorrow.explicitCtOffsets?.length) {
+        result.explicitCtOffsets = phaseBorrow.explicitCtOffsets;
+      }
+      result.connectBorrowedBoundaryPhasePreJoin = !!params.connectBorrowedBoundaryPhasePreJoin;
+      result.connectBorrowedBoundaryPhasePreJoinMaxDistance = params.connectBorrowedBoundaryPhasePreJoinMaxDistance;
+      result.connectBorrowedBoundaryPhaseRetry = !!params.connectBorrowedBoundaryPhaseRetry;
+      result.connectBorrowedBoundaryPhaseRetryMaxDistance = params.connectBorrowedBoundaryPhaseRetryMaxDistance;
+      if (params?.connectBorrowedBoundaryPhase) {
+        const boundarySnapPoints = buildSharedBoundarySnapPoints(boundaryData, existingCrossStreets, params);
+        if (boundarySnapPoints.length > 0) {
+          result.boundarySnapPoints = boundarySnapPoints;
+          result.boundarySnapMaxDistance = params.boundarySnapMaxDistance;
+          result.boundarySnapMaxAngleDeltaDeg = params.boundarySnapMaxAngleDeltaDeg;
+          result.boundarySnapMinImprovement = params.boundarySnapMinImprovement;
+          result.boundarySnapForceEndpoint = params.boundarySnapForceEndpoint;
+          result.boundarySnapForceEndpointMaxDistance = params.boundarySnapForceEndpointMaxDistance;
+        }
+      }
+      return result;
+    }
+  }
+
+  if (params?.alignSharedBoundaryAnchor) {
+    const anchorPoint = buildSharedBoundaryAnchorPoint(boundaryData, existingCrossStreets, params);
+    if (anchorPoint) {
+      result.phaseOrigin = anchorPoint;
+      result.phaseOriginSource = 'shared-boundary-anchor';
+      return result;
+    }
+  }
+
+  if (params?.alignSharedBoundaryPhase) {
+    result.phaseOrigin = boundaryData.midpoint;
+    result.phaseOriginSource = 'shared-boundary';
+  }
+
+  if (params?.snapSharedBoundaryEndpoints) {
+    const boundarySnapPoints = buildSharedBoundarySnapPoints(boundaryData, existingCrossStreets, params);
+    if (boundarySnapPoints.length > 0) {
+      result.boundarySnapPoints = boundarySnapPoints;
+      result.boundarySnapMaxDistance = params.boundarySnapMaxDistance;
+      result.boundarySnapMaxAngleDeltaDeg = params.boundarySnapMaxAngleDeltaDeg;
+      result.boundarySnapMinImprovement = params.boundarySnapMinImprovement;
+    }
+  }
+
+  return result;
+}
+
+function buildSharedBoundaryAnchorPoint(boundaryData, existingCrossStreets, params) {
+  const otherSectorIdx = boundaryData?.otherSectorIdx;
+  if (otherSectorIdx === undefined || otherSectorIdx === null) return null;
+  if (!Array.isArray(boundaryData?.points) || boundaryData.points.length === 0) return null;
+
+  const toleranceSq = (params.sharedBoundaryAnchorBoundaryTolerance ?? 18) ** 2;
+  const candidates = [];
+
+  for (const street of existingCrossStreets) {
+    if (street.sectorIdx !== otherSectorIdx || !street.points?.length) continue;
+    const endpoints = [street.points[0], street.points[street.points.length - 1]];
+    for (const endpoint of endpoints) {
+      if (!boundaryData.points.some(point => dotDistSq(point, endpoint) <= toleranceSq)) continue;
+      candidates.push(endpoint);
+    }
+  }
+
+  if (candidates.length === 0) return null;
+  let best = candidates[0];
+  let bestScore = dotDistSq(best, boundaryData.midpoint);
+  for (let i = 1; i < candidates.length; i++) {
+    const score = dotDistSq(candidates[i], boundaryData.midpoint);
+    if (score < bestScore) {
+      best = candidates[i];
+      bestScore = score;
+    }
+  }
+  return { x: best.x, z: best.z };
+}
+
+function buildSectorSharedBoundaryData(sectors, cellToSector, W, cs, ox, oz) {
+  const pairPoints = new Map();
+
+  for (let si = 0; si < sectors.length; si++) {
+    for (const cell of sectors[si].cells) {
+      for (const [dx, dz] of [[1, 0], [0, 1]]) {
+        const ngx = cell.gx + dx;
+        const ngz = cell.gz + dz;
+        const otherSectorIdx = cellToSector.get(ngz * W + ngx);
+        if (otherSectorIdx === undefined || otherSectorIdx === si) continue;
+        const pairKey = si < otherSectorIdx ? `${si}:${otherSectorIdx}` : `${otherSectorIdx}:${si}`;
+        if (!pairPoints.has(pairKey)) pairPoints.set(pairKey, []);
+        pairPoints.get(pairKey).push({
+          x: ox + (cell.gx + ngx) * 0.5 * cs,
+          z: oz + (cell.gz + ngz) * 0.5 * cs,
+        });
+      }
+    }
+  }
+
+  const bestBySector = Array.from({ length: sectors.length }, () => null);
+  for (const [pairKey, points] of pairPoints.entries()) {
+    const descriptor = describeSharedBoundary(points);
+    if (!descriptor) continue;
+    const [a, b] = pairKey.split(':').map(Number);
+    const shared = {
+      ...descriptor,
+      otherSectorIdx: b,
+      otherSlopeDir: sectors[b]?.slopeDir ?? null,
+    };
+    if (!bestBySector[a] || shared.pointCount > bestBySector[a].pointCount) {
+      bestBySector[a] = shared;
+    }
+    const reverseShared = {
+      ...descriptor,
+      otherSectorIdx: a,
+      otherSlopeDir: sectors[a]?.slopeDir ?? null,
+    };
+    if (!bestBySector[b] || reverseShared.pointCount > bestBySector[b].pointCount) {
+      bestBySector[b] = reverseShared;
+    }
+  }
+
+  return bestBySector;
+}
+
+function describeSharedBoundary(points) {
+  if (!points || points.length < 2) return null;
+
+  let meanX = 0;
+  let meanZ = 0;
+  for (const point of points) {
+    meanX += point.x;
+    meanZ += point.z;
+  }
+  meanX /= points.length;
+  meanZ /= points.length;
+
+  let xx = 0;
+  let zz = 0;
+  let xz = 0;
+  for (const point of points) {
+    const dx = point.x - meanX;
+    const dz = point.z - meanZ;
+    xx += dx * dx;
+    zz += dz * dz;
+    xz += dx * dz;
+  }
+
+  const theta = 0.5 * Math.atan2(2 * xz, xx - zz);
+  return {
+    midpoint: { x: meanX, z: meanZ },
+    tangent: { x: Math.cos(theta), z: Math.sin(theta) },
+    pointCount: points.length,
+    points,
+  };
+}
+
+function buildSharedBoundarySnapPoints(boundaryData, existingCrossStreets, params) {
+  const otherSectorIdx = boundaryData?.otherSectorIdx;
+  if (otherSectorIdx === undefined || otherSectorIdx === null) return [];
+  if (!Array.isArray(boundaryData?.points) || boundaryData.points.length === 0) return [];
+
+  const toleranceSq = (params.boundarySnapBoundaryTolerance ?? 18) ** 2;
+  const snapPoints = [];
+
+  for (const street of existingCrossStreets) {
+    if (street.sectorIdx !== otherSectorIdx || !street.points?.length) continue;
+    const endpoints = [street.points[0], street.points[street.points.length - 1]];
+    for (const endpoint of endpoints) {
+      const nearBoundary = boundaryData.points.some(point => dotDistSq(point, endpoint) <= toleranceSq);
+      if (nearBoundary) {
+        snapPoints.push({ x: endpoint.x, z: endpoint.z });
+      }
+    }
+  }
+
+  return dedupeSnapPoints(snapPoints, 4);
+}
+
+function deriveSharedBoundaryPhaseBorrow(sector, boundaryData, existingCrossStreets, params) {
+  const slopeDir = normalize2(sector?.slopeDir || { x: 1, z: 0 });
+  const otherSlopeDir = normalize2(boundaryData?.otherSlopeDir);
+  if (!slopeDir || !otherSlopeDir) return null;
+  const gradientAlignment = Math.abs(dot2(slopeDir, otherSlopeDir));
+  if (gradientAlignment < (params.sharedGradientSimilarityThreshold ?? 0.92)) return null;
+
+  const phaseOrigin = boundaryData.midpoint;
+  const contourDir = normalize2({ x: -slopeDir.z, z: slopeDir.x });
+  if (!phaseOrigin || !contourDir) return null;
+
+  const boundaryPoints = buildSharedBoundarySnapPoints({
+    ...boundaryData,
+    otherSectorIdx: boundaryData.otherSectorIdx,
+  }, existingCrossStreets, {
+    ...params,
+    boundarySnapBoundaryTolerance: params.phaseBorrowBoundaryTolerance ?? 18,
+  });
+  if (boundaryPoints.length === 0) return null;
+
+  const phaseOffset = averagePhaseOffset(
+    boundaryPoints.map(point => dot2({
+      x: point.x - phaseOrigin.x,
+      z: point.z - phaseOrigin.z,
+    }, contourDir)),
+    params.spacing ?? 90,
+  );
+  if (phaseOffset === null || phaseOffset === undefined) return null;
+
+  return {
+    phaseOrigin,
+    phaseOffset,
+    pointCount: boundaryPoints.length,
+    otherSectorIdx: boundaryData.otherSectorIdx,
+    explicitCtOffsets: dedupePhaseCtOffsets(
+      boundaryPoints.map(point => dot2({
+        x: point.x - phaseOrigin.x,
+        z: point.z - phaseOrigin.z,
+      }, contourDir)),
+      4,
+    ),
+  };
+}
+
+function averagePhaseOffset(values, spacing) {
+  if (!Array.isArray(values) || values.length === 0 || !Number.isFinite(spacing) || spacing <= 0) return null;
+  let sumSin = 0;
+  let sumCos = 0;
+  for (const value of values) {
+    const normalized = ((value % spacing) + spacing) % spacing;
+    const angle = (normalized / spacing) * Math.PI * 2;
+    sumCos += Math.cos(angle);
+    sumSin += Math.sin(angle);
+  }
+  if (Math.abs(sumSin) < 1e-9 && Math.abs(sumCos) < 1e-9) return null;
+  let angle = Math.atan2(sumSin, sumCos);
+  if (angle < 0) angle += Math.PI * 2;
+  return (angle / (Math.PI * 2)) * spacing;
+}
+
+function dedupeSnapPoints(points, tolerance) {
+  const tolSq = tolerance * tolerance;
+  const kept = [];
+  for (const point of points) {
+    if (!kept.some(existing => dotDistSq(existing, point) <= tolSq)) {
+      kept.push(point);
+    }
+  }
+  return kept;
+}
+
+function dedupePhaseCtOffsets(values, tolerance) {
+  const tol = Math.max(tolerance || 0, 1e-6);
+  const kept = [];
+  const sorted = (values || []).filter(Number.isFinite).sort((a, b) => a - b);
+  for (const value of sorted) {
+    if (!kept.some(existing => Math.abs(existing - value) <= tol)) {
+      kept.push(value);
+    }
+  }
+  return kept;
+}
+
+function normalize2(vector) {
+  if (!vector) return null;
+  const mag = Math.hypot(vector.x, vector.z);
+  if (mag < 1e-9) return null;
+  return { x: vector.x / mag, z: vector.z / mag };
+}
+
+function dot2(a, b) {
+  return a.x * b.x + a.z * b.z;
+}
+
+function dotDistSq(a, b) {
+  const dx = a.x - b.x;
+  const dz = a.z - b.z;
+  return dx * dx + dz * dz;
+}
 
 // === Bresenham line draw ===
 function bres(pixels, w, h, x0, y0, x1, y1, r, g, b) {
@@ -896,6 +1571,27 @@ function drawRoad(pixels, points, cropW, cropH, cs, ox, oz, minGx, minGz, color)
       color[1],
       color[2],
     );
+  }
+}
+
+function drawCrossStreetDebug(pixels, street, cropW, cropH, cs, ox, oz, minGx, minGz, color) {
+  if (street?.points?.length >= 2) {
+    drawRoad(pixels, street.points, cropW, cropH, cs, ox, oz, minGx, minGz, color);
+  } else if (street?.points?.length === 1) {
+    drawMarker(pixels, street.points[0], cropW, cropH, cs, ox, oz, minGx, minGz, color, 1, [0, 0, 0]);
+  }
+}
+
+function crossStreetDebugColor(reason) {
+  switch (reason) {
+    case 'min-separation':
+      return [255, 185, 80];
+    case 'too-few-samples':
+      return [180, 150, 255];
+    case 'too-short':
+      return [150, 110, 255];
+    default:
+      return [210, 140, 255];
   }
 }
 
@@ -1028,6 +1724,10 @@ function writeDebugSvg(filePath, {
   minGz,
   zone,
   allCrossStreets,
+  allRejectedCrossStreets,
+  allPrunedCrossStreets,
+  allMissingCrossStreetScanlines,
+  allCommitRejectedCrossStreets,
   allRibbons,
   allRibbonJunctions,
   allSeedAnchors,
@@ -1071,8 +1771,229 @@ function writeDebugSvg(filePath, {
         'data-tooltip': tooltip,
         'data-sector-idx': street.sectorIdx ?? '',
         'data-road-id': street.roadId ?? '',
+        'data-street-key': streetEventKey(street),
+        'data-ct-off': roundNumber(street.ctOff ?? 0),
       },
     }));
+  }
+
+  if (showFailures) {
+    for (const street of allRejectedCrossStreets) {
+      const tooltip = [
+        'Rejected cross street',
+        `Sector ${street.sectorIdx ?? '?'}`,
+        `Candidate ${street.candidateKey ?? 'n/a'}`,
+        `Reason ${street.reason ?? 'unknown'}`,
+        `ct ${roundNumber(street.ctOff ?? 0)}`,
+        `Length ${roundNumber(street.length ?? 0)}`,
+      ].join('\n');
+      const points = street.points?.length >= 2 ? street.points : (street.points || []);
+      if (points.length >= 2) {
+        parts.push(polylineSvg(points, {
+          cs, ox, oz, minGx, minGz,
+          stroke: rgbCss(crossStreetDebugColor(street.reason)),
+          strokeWidth: 1,
+          opacity: 0.9,
+          dashArray: '3 2',
+          title: tooltip,
+          attrs: {
+            class: 'debug-cross-street-rejected',
+            'data-kind': 'cross-street-rejected',
+            'data-label': 'Rejected cross street',
+            'data-tooltip': tooltip,
+            'data-sector-idx': street.sectorIdx ?? '',
+            'data-candidate-key': street.candidateKey ?? '',
+            'data-ct-off': roundNumber(street.ctOff ?? 0),
+            'data-reason': street.reason ?? '',
+          },
+        }));
+      } else if (points.length === 1) {
+        parts.push(circleSvg(points[0], {
+          cs, ox, oz, minGx, minGz,
+          radius: 1.6,
+          fill: rgbCss(crossStreetDebugColor(street.reason)),
+          stroke: '#000000',
+          strokeWidth: 0.8,
+          title: tooltip,
+          attrs: {
+            class: 'debug-cross-street-rejected',
+            'data-kind': 'cross-street-rejected',
+            'data-label': 'Rejected cross street',
+            'data-tooltip': tooltip,
+            'data-sector-idx': street.sectorIdx ?? '',
+            'data-candidate-key': street.candidateKey ?? '',
+            'data-ct-off': roundNumber(street.ctOff ?? 0),
+            'data-reason': street.reason ?? '',
+          },
+        }));
+      }
+    }
+
+    for (const street of allPrunedCrossStreets) {
+      const tooltip = [
+        'Pruned cross street',
+        `Sector ${street.sectorIdx ?? '?'}`,
+        `Candidate ${street.candidateKey ?? 'n/a'}`,
+        `Reason ${street.reason ?? 'unknown'}`,
+        `Conflict ${street.conflictCandidateKey ?? 'n/a'}`,
+      ].join('\n');
+      if (street.points?.length >= 2) {
+        parts.push(polylineSvg(street.points, {
+          cs, ox, oz, minGx, minGz,
+          stroke: rgbCss(crossStreetDebugColor(street.reason)),
+          strokeWidth: 1.1,
+          opacity: 0.95,
+          dashArray: '4 2',
+          title: tooltip,
+          attrs: {
+            class: 'debug-cross-street-pruned',
+            'data-kind': 'cross-street-pruned',
+            'data-label': 'Pruned cross street',
+            'data-tooltip': tooltip,
+            'data-sector-idx': street.sectorIdx ?? '',
+            'data-candidate-key': street.candidateKey ?? '',
+            'data-conflict-candidate-key': street.conflictCandidateKey ?? '',
+            'data-ct-off': roundNumber(street.ctOff ?? 0),
+            'data-reason': street.reason ?? '',
+          },
+        }));
+      }
+      if (street.conflictPoint) {
+        parts.push(circleSvg(street.conflictPoint, {
+          cs, ox, oz, minGx, minGz,
+          radius: 1.8,
+          fill: '#ffffff',
+          stroke: '#000000',
+          strokeWidth: 0.8,
+          title: `Cross-street conflict point\n${tooltip}`,
+          attrs: {
+            class: 'debug-cross-street-pruned-point',
+            'data-kind': 'cross-street-pruned-point',
+            'data-label': 'Cross-street conflict point',
+            'data-tooltip': `Cross-street conflict point\n${tooltip}`,
+            'data-sector-idx': street.sectorIdx ?? '',
+            'data-candidate-key': street.candidateKey ?? '',
+            'data-conflict-candidate-key': street.conflictCandidateKey ?? '',
+          },
+        }));
+      }
+    }
+
+    for (const street of allCommitRejectedCrossStreets) {
+      const tooltip = [
+        'Commit-rejected cross street',
+        `Sector ${street.sectorIdx ?? '?'}`,
+        `Candidate ${street.candidateKey ?? 'n/a'}`,
+        `Reason ${street.reason ?? 'unknown'}`,
+        `ct ${roundNumber(street.ctOff ?? 0)}`,
+        `Length ${roundNumber(street.length ?? 0)}`,
+        `Conflicts ${street.conflictRoadIds?.join(', ') || 'n/a'}`,
+      ].join('\n');
+      if (street.points?.length >= 2) {
+        parts.push(polylineSvg(street.points, {
+          cs, ox, oz, minGx, minGz,
+          stroke: '#ff4646',
+          strokeWidth: 1.2,
+          opacity: 0.95,
+          dashArray: '5 2',
+          title: tooltip,
+          attrs: {
+            class: 'debug-cross-street-commit-rejected',
+            'data-kind': 'cross-street-commit-rejected',
+            'data-label': 'Commit-rejected cross street',
+            'data-tooltip': tooltip,
+            'data-sector-idx': street.sectorIdx ?? '',
+            'data-candidate-key': street.candidateKey ?? '',
+            'data-ct-off': roundNumber(street.ctOff ?? 0),
+            'data-reason': street.reason ?? '',
+            'data-conflict-road-ids': (street.conflictRoadIds || []).join(','),
+          },
+        }));
+      }
+      for (const road of street.conflictRoads || []) {
+        parts.push(polylineSvg(road.points, {
+          cs, ox, oz, minGx, minGz,
+          stroke: '#ffffff',
+          strokeWidth: 1,
+          opacity: 0.9,
+          dashArray: '1 2',
+          title: `Conflicting road\nRoad ${road.id}\nSource ${road.source ?? 'n/a'}`,
+          attrs: {
+            class: 'debug-cross-street-conflict-road',
+            'data-kind': 'cross-street-conflict-road',
+            'data-label': 'Conflicting road',
+            'data-tooltip': `Conflicting road\nRoad ${road.id}\nSource ${road.source ?? 'n/a'}`,
+            'data-road-id': road.id ?? '',
+            'data-conflict-for': street.candidateKey ?? '',
+          },
+        }));
+      }
+      for (const point of street.conflictPoints || []) {
+        parts.push(circleSvg(point, {
+          cs, ox, oz, minGx, minGz,
+          radius: 1.9,
+          fill: '#ffffff',
+          stroke: '#000000',
+          strokeWidth: 0.8,
+          title: `Transaction conflict point\n${tooltip}`,
+          attrs: {
+            class: 'debug-cross-street-conflict-point',
+            'data-kind': 'cross-street-conflict-point',
+            'data-label': 'Transaction conflict point',
+            'data-tooltip': `Transaction conflict point\n${tooltip}`,
+            'data-conflict-for': street.candidateKey ?? '',
+          },
+        }));
+      }
+    }
+
+    for (const scanline of allMissingCrossStreetScanlines) {
+      const tooltip = [
+        'Missing cross street scanline',
+        `Sector ${scanline.sectorIdx ?? '?'}`,
+        `ct ${roundNumber(scanline.ctOff ?? 0)}`,
+        `Runs ${scanline.runCount ?? 0}`,
+        `Candidates ${scanline.candidateCount ?? 0}`,
+        `Rejected ${scanline.rejectedCount ?? 0}`,
+        `Pruned ${scanline.prunedCount ?? 0}`,
+      ].join('\n');
+      if (scanline.guidePoints?.length >= 2) {
+        parts.push(polylineSvg(scanline.guidePoints, {
+          cs, ox, oz, minGx, minGz,
+          stroke: '#a8a8a8',
+          strokeWidth: 0.8,
+          opacity: 0.8,
+          dashArray: '2 2',
+          title: tooltip,
+          attrs: {
+            class: 'debug-cross-street-missing',
+            'data-kind': 'cross-street-missing',
+            'data-label': 'Missing cross street scanline',
+            'data-tooltip': tooltip,
+            'data-sector-idx': scanline.sectorIdx ?? '',
+            'data-ct-off': roundNumber(scanline.ctOff ?? 0),
+          },
+        }));
+      }
+      if (scanline.seedPoint) {
+        parts.push(circleSvg(scanline.seedPoint, {
+          cs, ox, oz, minGx, minGz,
+          radius: 1.4,
+          fill: '#ffffff',
+          stroke: '#000000',
+          strokeWidth: 0.8,
+          title: tooltip,
+          attrs: {
+            class: 'debug-cross-street-missing-point',
+            'data-kind': 'cross-street-missing-point',
+            'data-label': 'Missing cross street seed',
+            'data-tooltip': tooltip,
+            'data-sector-idx': scanline.sectorIdx ?? '',
+            'data-ct-off': roundNumber(scanline.ctOff ?? 0),
+          },
+        }));
+      }
+    }
   }
 
   for (const ribbon of allRibbons) {
@@ -1124,6 +2045,8 @@ function writeDebugSvg(filePath, {
         'data-to-street-idx': failure.toStreetIdx ?? '',
         'data-anchor-source': failure.anchorSource ?? '',
         'data-anchor-street-idx': failure.anchorStreetIdx ?? '',
+        'data-anchor-t': roundNumber(failure.anchorT ?? 0),
+        'data-anchor-generation': failure.anchorGeneration ?? '',
         'data-anchor-slot-index': failure.anchorSlotIndex ?? '',
       };
       if (failure.guideLine && !samePolyline(failure.guideLine, failure.attemptPath || failure.points)) {
@@ -1285,6 +2208,14 @@ function writeDebugSvg(filePath, {
           'data-sequence': anchor.rowId,
           'data-source': anchor.source ?? '',
           'data-anchor-role': anchorRole,
+          'data-family-key': anchor.familyKey ?? (anchor.familyRootRowId ?? ''),
+          'data-family-root-row-id': anchor.familyRootRowId ?? '',
+          'data-parent-row-id': anchor.parentRowId ?? '',
+          'data-generation': anchor.generation ?? 0,
+          'data-slot-index': anchor.slotIndex ?? '',
+          'data-sector-idx': anchor.sectorIdx ?? '',
+          'data-street-idx': anchor.streetIdx ?? '',
+          'data-t': roundNumber(anchor.t ?? 0),
         },
       }));
     }
@@ -1332,11 +2263,60 @@ function writeDebugJson(filePath, data) {
     zoneIdx: data.zoneIdx,
     crop: data.crop,
     ribbonParams: data.ribbonParams,
+    crossStreetParams: data.crossStreetParams,
     familySummary: summarizeFamilies(data.ribbons),
     crossStreets: data.crossStreets.map(street => ({
       sectorIdx: street.sectorIdx ?? null,
       roadId: street.roadId ?? null,
       points: serializePoints(street.points),
+    })),
+    rejectedCrossStreets: (data.rejectedCrossStreets || []).map(street => ({
+      sectorIdx: street.sectorIdx ?? null,
+      candidateKey: street.candidateKey ?? null,
+      reason: street.reason ?? null,
+      ctOff: roundNullable(street.ctOff),
+      runIdx: street.runIdx ?? null,
+      snapped: !!street.snapped,
+      length: roundNullable(street.length),
+      points: serializePoints(street.points || []),
+    })),
+    prunedCrossStreets: (data.prunedCrossStreets || []).map(street => ({
+      sectorIdx: street.sectorIdx ?? null,
+      candidateKey: street.candidateKey ?? null,
+      reason: street.reason ?? null,
+      ctOff: roundNullable(street.ctOff),
+      runIdx: street.runIdx ?? null,
+      snapped: !!street.snapped,
+      length: roundNullable(street.length),
+      conflictCandidateKey: street.conflictCandidateKey ?? null,
+      conflictCtOff: roundNullable(street.conflictCtOff),
+      conflictPoint: serializeNullablePoint(street.conflictPoint),
+      conflictDistance: roundNullable(street.conflictDistance),
+      points: serializePoints(street.points || []),
+    })),
+    missingCrossStreetScanlines: (data.missingCrossStreetScanlines || []).map(scanline => ({
+      sectorIdx: scanline.sectorIdx ?? null,
+      ctOff: roundNullable(scanline.ctOff),
+      seedPoint: serializeNullablePoint(scanline.seedPoint),
+      runCount: scanline.runCount ?? 0,
+      breakCount: scanline.breakCount ?? 0,
+      breakReasons: scanline.breakReasons || {},
+      candidateCount: scanline.candidateCount ?? 0,
+      rejectedCount: scanline.rejectedCount ?? 0,
+      rejectedReasons: scanline.rejectedReasons || {},
+      prunedCount: scanline.prunedCount ?? 0,
+      prunedReasons: scanline.prunedReasons || {},
+      guidePoints: serializePoints(scanline.guidePoints || []),
+    })),
+    commitRejectedCrossStreets: (data.commitRejectedCrossStreets || []).map(street => ({
+      sectorIdx: street.sectorIdx ?? null,
+      candidateKey: street.candidateKey ?? null,
+      reason: street.reason ?? null,
+      ctOff: roundNullable(street.ctOff),
+      length: roundNullable(street.length),
+      conflictRoadIds: street.conflictRoadIds || [],
+      conflictPoints: (street.conflictPoints || []).map(serializePoint),
+      points: serializePoints(street.points || []),
     })),
     ribbons: data.ribbons.map(ribbon => ({
       rowId: ribbon.rowId,
@@ -1579,6 +2559,38 @@ function roundNumber(value) {
   return Math.round(value * 100) / 100;
 }
 
+function roundEventNumber(value) {
+  return Number.isFinite(value) ? roundNumber(value) : null;
+}
+
+function roundEventPoint(point) {
+  return point ? { x: roundNumber(point.x), z: roundNumber(point.z) } : null;
+}
+
+function streetEventKey(street) {
+  if (!street?.points?.length) return '';
+  const start = street.points[0];
+  const end = street.points[street.points.length - 1];
+  return [
+    roundNumber(street.ctOff ?? 0),
+    roundNumber(start.x),
+    roundNumber(start.z),
+    roundNumber(end.x),
+    roundNumber(end.z),
+  ].join('|');
+}
+
+function emitZoneEvent(sink, stepId, context, type, payload) {
+  if (!sink?.emit || !sink?.next) return;
+  sink.emit({
+    seq: sink.next(),
+    stepId,
+    ...context,
+    type,
+    payload,
+  });
+}
+
 function escapeXml(text) {
   return String(text)
     .replaceAll('&', '&amp;')
@@ -1594,6 +2606,127 @@ function classifyTransactionFailure(violations) {
   if (first.includes('crosses water')) return 'txn-water';
   if (first.includes('parallel to existing road')) return 'txn-parallel';
   return 'txn-other';
+}
+
+function describeTransactionConflict(map, violationDetails = []) {
+  const roadIds = [];
+  const roads = [];
+  const points = [];
+  const seenRoadIds = new Set();
+  const seenPoints = new Set();
+
+  for (const detail of violationDetails || []) {
+    if (Number.isInteger(detail?.roadId) && !seenRoadIds.has(detail.roadId)) {
+      seenRoadIds.add(detail.roadId);
+      roadIds.push(detail.roadId);
+      const road = map?.roadNetwork?.getRoad ? map.roadNetwork.getRoad(detail.roadId) : null;
+      if (road?.polyline?.length >= 2) {
+        roads.push({
+          id: road.id,
+          source: road.source ?? road.attrs?.source ?? null,
+          hierarchy: road.hierarchy ?? road.attrs?.hierarchy ?? null,
+          points: road.polyline,
+        });
+      }
+    }
+    const point = detail?.point || detail?.midpoint || null;
+    if (point) {
+      const key = `${roundNumber(point.x)},${roundNumber(point.z)}`;
+      if (!seenPoints.has(key)) {
+        seenPoints.add(key);
+        points.push({ x: point.x, z: point.z });
+      }
+    }
+  }
+
+  return { roadIds, roads, points };
+}
+
+function connectCrossStreetToBoundarySnapPoint(points, params = {}) {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  if (!Array.isArray(params.boundarySnapPoints) || params.boundarySnapPoints.length === 0) return null;
+  const maxDistance = params.connectBorrowedBoundaryPhasePreJoinMaxDistance ?? 16;
+  const maxDistanceSq = maxDistance * maxDistance;
+
+  let best = null;
+  const candidateEndpoints = [
+    { index: 0, point: points[0] },
+    { index: points.length - 1, point: points[points.length - 1] },
+  ];
+
+  for (const candidate of candidateEndpoints) {
+    for (const snapPoint of params.boundarySnapPoints) {
+      const dSq = dotDistSq(candidate.point, snapPoint);
+      if (dSq > maxDistanceSq) continue;
+      if (!best || dSq < best.distanceSq) {
+        best = {
+          distanceSq: dSq,
+          candidateIndex: candidate.index,
+          snapPoint,
+        };
+      }
+    }
+  }
+
+  if (!best) return null;
+  const adjusted = points.map(point => ({ x: point.x, z: point.z }));
+  adjusted[best.candidateIndex] = { x: best.snapPoint.x, z: best.snapPoint.z };
+  return {
+    points: adjusted,
+    snappedEndpoint: adjusted[best.candidateIndex],
+    snapPoint: best.snapPoint,
+  };
+}
+
+function reconnectCrossStreetToConflictRoad(map, points, violationDetails = [], params = {}) {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  const maxDistance = params.connectBorrowedBoundaryPhaseRetryMaxDistance ?? 18;
+  const maxDistanceSq = maxDistance * maxDistance;
+
+  let best = null;
+  for (const detail of violationDetails || []) {
+    if (detail?.type !== 'parallel' || !Number.isInteger(detail.roadId)) continue;
+    const road = map?.roadNetwork?.getRoad ? map.roadNetwork.getRoad(detail.roadId) : null;
+    if (!road?.polyline?.length) continue;
+    const roadEndpoints = [road.polyline[0], road.polyline[road.polyline.length - 1]];
+    const candidateEndpoints = [
+      { index: 0, point: points[0] },
+      { index: points.length - 1, point: points[points.length - 1] },
+    ];
+    for (const candidate of candidateEndpoints) {
+      for (const endpoint of roadEndpoints) {
+        const dSq = dotDistSq(candidate.point, endpoint);
+        if (dSq > maxDistanceSq) continue;
+        if (!best || dSq < best.distanceSq) {
+          best = {
+            distanceSq: dSq,
+            roadId: road.id,
+            road,
+            endpoint,
+            candidateIndex: candidate.index,
+          };
+        }
+      }
+    }
+  }
+
+  if (!best) return null;
+  const adjusted = points.map(point => ({ x: point.x, z: point.z }));
+  adjusted[best.candidateIndex] = { x: best.endpoint.x, z: best.endpoint.z };
+  return {
+    points: adjusted,
+    conflictRoadIds: [best.roadId],
+    conflictPoints: [{ x: best.endpoint.x, z: best.endpoint.z }],
+    snappedEndpoint: { x: best.endpoint.x, z: best.endpoint.z },
+  };
+}
+
+function arcLength(points) {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    total += Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z);
+  }
+  return total;
 }
 
 function failureColor(reason) {

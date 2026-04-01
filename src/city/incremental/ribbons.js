@@ -15,20 +15,22 @@
 
 import { buildStreetIndexBitmap, lookupStreetIds } from './streetIndexBitmap.js';
 import { buildGradientField } from './constructionLines.js';
+import { EventSink } from '../../core/EventSink.js';
 
 export function layRibbons(crossStreets, zone, map, params = {}) {
+  const {
+    eventSink = null,
+    eventStepId = 'ribbons',
+    eventContext = {},
+    ...algoParams
+  } = params;
   const p = {
     targetDepth: 35,
     minRibbonLength: 15,
     maxRibbonLength: 200,
     minParcelDepth: 15,
-    preferredMaxAngleOff: Math.PI / 6,
     fallbackMaxAngleOff: Math.PI / 3,
-    maxGuideAngleOff: Math.PI / 4,
-    guideLineTolerance: 18,
     searchStep: 5,
-    neighborSearchBand: 42,
-    maxSearchPerNeighbor: 14,
     maxRowsTotal: 1,
     initialSeedCount: 1,
     edgeMargin: 10,
@@ -92,7 +94,7 @@ export function layRibbons(crossStreets, zone, map, params = {}) {
     fillRemainingStreetGaps: false,
     fillUnusedStreetSeedsOnly: false,
     fillGapThreshold: 0,
-    ...params,
+    ...algoParams,
   };
 
   const cs = map.cellSize;
@@ -119,18 +121,33 @@ export function layRibbons(crossStreets, zone, map, params = {}) {
   });
   const seedPlan = chooseSeedStreetAndAnchor(paramsByStreet, zone, ox, oz, cs, p);
   const zoneContourDir = contourDirectionFromZone(zone);
-  const rows = [];
+  const ctx = createRibbonLayoutContext({
+    paramsByStreet,
+    streetSampleProfiles,
+    zoneSet,
+    waterMask,
+    streetIndex,
+    cs,
+    W,
+    H,
+    ox,
+    oz,
+    gradField,
+    zoneContourDir,
+    p,
+    eventSink,
+    eventStepId,
+    eventContext,
+  });
+  const state = createRibbonLayoutState(paramsByStreet);
+  const { rows, rowsById, pendingAnchors, queuedAnchorKeys, usedTsByStreet } = state;
   const failedRibbons = [];
   const failureCounts = {};
   const seedAnchors = [];
-  const usedTsByStreet = paramsByStreet.map(() => []);
-  const queuedAnchorKeys = new Set();
-  const rowsById = new Map();
   let angleRejects = 0;
   let nextRowId = 0;
-  const pendingAnchors = [];
   for (const anchorT of buildAnchorSequence(paramsByStreet[seedPlan.streetIdx].totalLength, p, seedPlan.t)) {
-    enqueuePendingAnchor(
+    const enqueued = enqueuePendingAnchor(
       pendingAnchors,
       queuedAnchorKeys,
       seedPlan.streetIdx,
@@ -142,6 +159,11 @@ export function layRibbons(crossStreets, zone, map, params = {}) {
         parentRowId: null,
       },
     );
+    if (enqueued) {
+      emitRibbonEvent(ctx, 'anchor-enqueued', buildAnchorEventContext(enqueued), {
+        action: 'seed-centroid',
+      });
+    }
   }
 
   while (nextRowId < p.maxRowsTotal) {
@@ -151,7 +173,7 @@ export function layRibbons(crossStreets, zone, map, params = {}) {
         const guideRowId = p.gapSeedBorrowNearestRow
           ? findNearestGuideRowOnStreet(rows, fillAnchor.streetIdx, fillAnchor.t)
           : null;
-        enqueuePendingAnchor(
+        const enqueued = enqueuePendingAnchor(
           pendingAnchors,
           queuedAnchorKeys,
           fillAnchor.streetIdx,
@@ -164,6 +186,16 @@ export function layRibbons(crossStreets, zone, map, params = {}) {
             guideRowId,
           },
         );
+        if (enqueued) {
+          emitRibbonEvent(ctx, 'gap-seed-created', buildAnchorEventContext(enqueued), {
+            gap: fillAnchor.gap,
+            unusedStreet: fillAnchor.unused,
+            guideRowId,
+          });
+          emitRibbonEvent(ctx, 'anchor-enqueued', buildAnchorEventContext(enqueued), {
+            action: 'gap-seed',
+          });
+        }
       }
     }
 
@@ -183,26 +215,31 @@ export function layRibbons(crossStreets, zone, map, params = {}) {
     const familyRootRowId = anchor.parentRowId === null
       ? nextRowId
       : (parentRow?.familyRootRowId ?? parentRow?.rowId ?? anchor.parentRowId);
+    emitRibbonEvent(
+      ctx,
+      'anchor-dequeued',
+      buildAnchorEventContext(anchor, nextRowId, familyRootRowId),
+      {
+        guideRowId: anchor.guideRowId ?? null,
+      },
+    );
+    emitRibbonEvent(
+      ctx,
+      'row-build-start',
+      buildAnchorEventContext(anchor, nextRowId, familyRootRowId),
+      {
+        parentRowId: constructionParentRow?.rowId ?? null,
+        parentSource: constructionParentRow?.source ?? null,
+      },
+    );
 
     const result = buildAreaRow(
       anchor.streetIdx,
       anchor.t,
       nextRowId,
       constructionParentRow,
-      paramsByStreet,
-      streetSampleProfiles,
-      usedTsByStreet,
-      zoneSet,
-      waterMask,
-      streetIndex,
-      cs,
-      W,
-      H,
-      ox,
-      oz,
-      gradField,
-      zoneContourDir,
-      p,
+      state,
+      ctx,
     );
     annotateTraceFailures(result.trace, {
       rowIdAttempt: nextRowId,
@@ -261,6 +298,19 @@ export function layRibbons(crossStreets, zone, map, params = {}) {
       }
       if (relationCheck) {
         addReasonCount(failureCounts, relationCheck.reason);
+        emitRibbonEvent(
+          ctx,
+          'relation-check-failed',
+          buildAnchorEventContext(anchor, nextRowId, familyRootRowId),
+          {
+            rowIdAttempt: nextRowId,
+            reason: relationCheck.reason,
+            conflictRowId: relationCheck.conflictRowId ?? constructionParentRow?.rowId ?? null,
+            streetIdx: relationCheck.streetIdx ?? null,
+            estimatedGap: relationCheck.gap ?? null,
+            stopPoint: relationCheck.stopPoint || relationCheck.childPoint?.pt || anchorPoint,
+          },
+        );
         failedRibbons.push(buildIndexedFailure(
           relationCheck.reason,
           anchorPoint,
@@ -301,18 +351,40 @@ export function layRibbons(crossStreets, zone, map, params = {}) {
       slotIndex: anchor.slotIndex ?? null,
     });
 
-    if (!ribbon) continue;
+    if (!ribbon) {
+      emitRibbonEvent(
+        ctx,
+        'row-rejected',
+        buildAnchorEventContext(anchor, nextRowId, familyRootRowId),
+        {
+          reason: primaryTraceReason(result.trace),
+          failureCount: result.trace.failedRibbons.length,
+        },
+      );
+      continue;
+    }
+
+    emitRibbonEvent(
+      ctx,
+      'row-accepted',
+      buildAnchorEventContext(anchor, nextRowId, familyRootRowId),
+      {
+        streetCount: ribbon.streetPoints.length,
+        length: ribbon.length,
+        endpoints: [ribbon.points[0], ribbon.points[ribbon.points.length - 1]],
+      },
+    );
 
     rows.push(ribbon);
     rowsById.set(ribbon.rowId, ribbon);
     nextRowId++;
     for (const pointInfo of result.streetPoints) {
-      usedTsByStreet[pointInfo.streetIdx].push(pointInfo.t);
+      state.usedTsByStreet[pointInfo.streetIdx].push(pointInfo.t);
     }
 
     if (p.parallelSlotFamilies && anchor.parentRowId === null && nextRowId < p.maxRowsTotal) {
-      for (const slotAnchor of deriveFamilySlotAnchors(ribbon, paramsByStreet, usedTsByStreet, p)) {
-        enqueuePendingAnchor(
+      for (const slotAnchor of deriveFamilySlotAnchors(ribbon, paramsByStreet, state.usedTsByStreet, p)) {
+        const enqueued = enqueuePendingAnchor(
           pendingAnchors,
           queuedAnchorKeys,
           slotAnchor.streetIdx,
@@ -325,10 +397,19 @@ export function layRibbons(crossStreets, zone, map, params = {}) {
             slotIndex: slotAnchor.slotIndex,
           },
         );
+        if (enqueued) {
+          emitRibbonEvent(ctx, 'family-slot-derived', buildAnchorEventContext(enqueued, null, ribbon.familyRootRowId ?? ribbon.rowId), {
+            parentRowId: ribbon.rowId,
+            slotIndex: slotAnchor.slotIndex,
+          });
+          emitRibbonEvent(ctx, 'anchor-enqueued', buildAnchorEventContext(enqueued, null, ribbon.familyRootRowId ?? ribbon.rowId), {
+            action: 'parallel-slot',
+          });
+        }
       }
     } else if (p.parallelReseedRows && anchor.generation < p.parallelReseedMaxGeneration && nextRowId < p.maxRowsTotal) {
       for (const reseed of deriveParallelReseedAnchors(ribbon.streetPoints, paramsByStreet, p)) {
-        enqueuePendingAnchor(
+        const enqueued = enqueuePendingAnchor(
           pendingAnchors,
           queuedAnchorKeys,
           reseed.streetIdx,
@@ -340,6 +421,11 @@ export function layRibbons(crossStreets, zone, map, params = {}) {
             parentRowId: ribbon.rowId,
           },
         );
+        if (enqueued) {
+          emitRibbonEvent(ctx, 'anchor-enqueued', buildAnchorEventContext(enqueued, null, ribbon.familyRootRowId ?? ribbon.rowId), {
+            action: 'parallel-reseed',
+          });
+        }
       }
     }
   }
@@ -372,14 +458,9 @@ function emptyRibbonResult() {
   };
 }
 
-function buildAreaRow(
-  anchorStreetIdx,
-  anchorT,
-  rowId,
-  parentRow,
+function createRibbonLayoutContext({
   paramsByStreet,
   streetSampleProfiles,
-  usedTsByStreet,
   zoneSet,
   waterMask,
   streetIndex,
@@ -391,27 +472,89 @@ function buildAreaRow(
   gradField,
   zoneContourDir,
   p,
+  eventSink = null,
+  eventStepId = 'ribbons',
+  eventContext = {},
+}) {
+  return {
+    paramsByStreet,
+    streetSampleProfiles,
+    zoneSet,
+    waterMask,
+    streetIndex,
+    cs,
+    W,
+    H,
+    ox,
+    oz,
+    gradField,
+    zoneContourDir,
+    p,
+    eventSink: eventSink instanceof EventSink ? eventSink : eventSink || null,
+    eventStepId,
+    eventContext,
+  };
+}
+
+function createRibbonLayoutState(paramsByStreet) {
+  return {
+    rows: [],
+    rowsById: new Map(),
+    pendingAnchors: [],
+    queuedAnchorKeys: new Set(),
+    usedTsByStreet: paramsByStreet.map(() => []),
+  };
+}
+
+function buildAnchorEventContext(anchor, rowIdAttempt = null, familyRootRowId = null) {
+  const context = {
+    rowIdAttempt,
+    familyRootRowId,
+    parentRowId: anchor?.parentRowId ?? null,
+    anchorStreetIdx: anchor?.streetIdx ?? null,
+    anchorT: anchor?.t ?? null,
+    anchorSource: anchor?.source ?? null,
+    anchorGeneration: anchor?.generation ?? null,
+    anchorGuideRowId: anchor?.guideRowId ?? null,
+    anchorSlotIndex: anchor?.slotIndex ?? null,
+  };
+  const sectorIdx = anchor?.sectorIdx ?? null;
+  if (sectorIdx !== null && familyRootRowId !== null) {
+    context.familyKey = `${sectorIdx}:${familyRootRowId}`;
+  }
+  return compactObject(context);
+}
+
+function emitRibbonEvent(ctx, type, context = {}, payload = {}) {
+  const sink = ctx?.eventSink;
+  if (!sink || typeof sink.emit !== 'function' || typeof sink.next !== 'function') return;
+  sink.emit({
+    seq: sink.next(),
+    stepId: ctx.eventStepId,
+    type,
+    ...compactObject(ctx.eventContext || {}),
+    ...compactObject(context),
+    payload: compactObject(payload),
+  });
+}
+
+function buildAreaRow(
+  anchorStreetIdx,
+  anchorT,
+  rowId,
+  parentRow,
+  state,
+  ctx,
 ) {
+  const { paramsByStreet, p } = ctx;
   if (parentRow && p.parallelInheritParentJunctions) {
     return buildInheritedParallelRow(
       anchorStreetIdx,
       anchorT,
       rowId,
       parentRow,
-      paramsByStreet,
-      streetSampleProfiles,
-      usedTsByStreet,
-      zoneSet,
-      waterMask,
-      streetIndex,
-      cs,
-      W,
-      H,
-      ox,
-      oz,
-      gradField,
-      zoneContourDir,
-      p,
+      state,
+      ctx,
     );
   }
 
@@ -424,38 +567,14 @@ function buildAreaRow(
   const left = extendStreetDirection(
     -1,
     anchorPoint,
-    paramsByStreet,
-    streetSampleProfiles,
-    usedTsByStreet,
-    zoneSet,
-    waterMask,
-    streetIndex,
-    cs,
-    W,
-    H,
-    ox,
-    oz,
-    gradField,
-    zoneContourDir,
-    p,
+    state,
+    ctx,
   );
   const right = extendStreetDirection(
     1,
     anchorPoint,
-    paramsByStreet,
-    streetSampleProfiles,
-    usedTsByStreet,
-    zoneSet,
-    waterMask,
-    streetIndex,
-    cs,
-    W,
-    H,
-    ox,
-    oz,
-    gradField,
-    zoneContourDir,
-    p,
+    state,
+    ctx,
   );
   mergeTraceInto(trace, left.trace);
   mergeTraceInto(trace, right.trace);
@@ -503,21 +622,10 @@ function buildAreaRow(
 function extendStreetDirection(
   direction,
   anchorPoint,
-  paramsByStreet,
-  streetSampleProfiles,
-  usedTsByStreet,
-  zoneSet,
-  waterMask,
-  streetIndex,
-  cs,
-  W,
-  H,
-  ox,
-  oz,
-  gradField,
-  zoneContourDir,
-  p,
+  state,
+  ctx,
 ) {
+  const { paramsByStreet, p } = ctx;
   const anchorParam = paramsByStreet[anchorPoint.streetIdx];
   const anchorTan = ribbonTangentAtArcLength(anchorParam, anchorPoint.t, p);
   const anchorNormal = normalize({
@@ -530,46 +638,23 @@ function extendStreetDirection(
       t: anchorPoint.t,
       pt: anchorPoint.pt,
     },
-    paramsByStreet,
-    streetSampleProfiles,
-    usedTsByStreet,
     new Set([anchorPoint.streetIdx]),
-    zoneSet,
-    waterMask,
-    streetIndex,
-    cs,
-    W,
-    H,
-    ox,
-    oz,
-    gradField,
     anchorNormal,
     null,
-    zoneContourDir,
-    p,
+    state,
+    ctx,
   );
 }
 
 function extendStreetWalk(
   initialPoint,
-  paramsByStreet,
-  streetSampleProfiles,
-  usedTsByStreet,
   visitedStreetIdx,
-  zoneSet,
-  waterMask,
-  streetIndex,
-  cs,
-  W,
-  H,
-  ox,
-  oz,
-  gradField,
   preferredGuideDir,
   rowDir,
-  zoneContourDir,
-  p,
+  state,
+  ctx,
 ) {
+  const { paramsByStreet } = ctx;
   const trace = createTrace();
   let current = {
     streetIdx: initialPoint.streetIdx,
@@ -587,27 +672,13 @@ function extendStreetWalk(
     const currentParam = paramsByStreet[current.streetIdx];
 
     const attempt = placeNextStreetPoint(
-      current.streetIdx,
-      current.t,
-      current.pt,
+      current,
       currentParam,
-      paramsByStreet,
-      streetSampleProfiles,
-      usedTsByStreet,
       seenStreetIdx,
-      zoneSet,
-      waterMask,
-      streetIndex,
-      cs,
-      W,
-      H,
-      ox,
-      oz,
-      gradField,
       currentGuideDir,
       currentRowDir,
-      zoneContourDir,
-      p,
+      state,
+      ctx,
     );
     mergeTraceInto(trace, attempt.trace);
     if (!attempt.point || !attempt.polyline || attempt.polyline.length < 2) break;
@@ -641,21 +712,10 @@ function buildInheritedParallelRow(
   anchorT,
   rowId,
   parentRow,
-  paramsByStreet,
-  streetSampleProfiles,
-  usedTsByStreet,
-  zoneSet,
-  waterMask,
-  streetIndex,
-  cs,
-  W,
-  H,
-  ox,
-  oz,
-  gradField,
-  zoneContourDir,
-  p,
+  state,
+  ctx,
 ) {
+  const { paramsByStreet, p } = ctx;
   const trace = createTrace();
   const parentAnchor = findParentAnchorStreetPoint(parentRow, anchorStreetIdx, anchorT);
   if (!parentAnchor) {
@@ -664,20 +724,8 @@ function buildInheritedParallelRow(
       anchorT,
       rowId,
       null,
-      paramsByStreet,
-      streetSampleProfiles,
-      usedTsByStreet,
-      zoneSet,
-      waterMask,
-      streetIndex,
-      cs,
-      W,
-      H,
-      ox,
-      oz,
-      gradField,
-      zoneContourDir,
-      p,
+      state,
+      ctx,
     );
   }
 
@@ -694,17 +742,8 @@ function buildInheritedParallelRow(
     parentRow,
     parentAnchor.index,
     deltaT,
-    paramsByStreet,
-    streetSampleProfiles,
-    usedTsByStreet,
-    zoneSet,
-    waterMask,
-    cs,
-    W,
-    H,
-    ox,
-    oz,
-    p,
+    state,
+    ctx,
   );
   const right = extendInheritedParallelBranch(
     1,
@@ -712,17 +751,8 @@ function buildInheritedParallelRow(
     parentRow,
     parentAnchor.index,
     deltaT,
-    paramsByStreet,
-    streetSampleProfiles,
-    usedTsByStreet,
-    zoneSet,
-    waterMask,
-    cs,
-    W,
-    H,
-    ox,
-    oz,
-    p,
+    state,
+    ctx,
   );
   mergeTraceInto(trace, left.trace);
   mergeTraceInto(trace, right.trace);
@@ -736,23 +766,11 @@ function buildInheritedParallelRow(
     if (left.reachedParentEnd) {
       const extension = extendStreetWalk(
         left.streetPoints[left.streetPoints.length - 1],
-        paramsByStreet,
-        streetSampleProfiles,
-        usedTsByStreet,
         inheritedVisited,
-        zoneSet,
-        waterMask,
-        streetIndex,
-        cs,
-        W,
-        H,
-        ox,
-        oz,
-        gradField,
         left.outwardDir,
         left.outwardDir,
-        zoneContourDir,
-        p,
+        state,
+        ctx,
       );
       mergeTraceInto(trace, extension.trace);
       appendPolylineSegment(left.polyline, extension.polyline);
@@ -762,23 +780,11 @@ function buildInheritedParallelRow(
     if (right.reachedParentEnd) {
       const extension = extendStreetWalk(
         right.streetPoints[right.streetPoints.length - 1],
-        paramsByStreet,
-        streetSampleProfiles,
-        usedTsByStreet,
         inheritedVisited,
-        zoneSet,
-        waterMask,
-        streetIndex,
-        cs,
-        W,
-        H,
-        ox,
-        oz,
-        gradField,
         right.outwardDir,
         right.outwardDir,
-        zoneContourDir,
-        p,
+        state,
+        ctx,
       );
       mergeTraceInto(trace, extension.trace);
       appendPolylineSegment(right.polyline, extension.polyline);
@@ -845,18 +851,10 @@ function extendInheritedParallelBranch(
   parentRow,
   parentIndex,
   deltaT,
-  paramsByStreet,
-  streetSampleProfiles,
-  usedTsByStreet,
-  zoneSet,
-  waterMask,
-  cs,
-  W,
-  H,
-  ox,
-  oz,
-  p,
+  state,
+  ctx,
 ) {
+  const { paramsByStreet, p } = ctx;
   const trace = createTrace();
   const polyline = [anchorPoint.pt];
   const streetPoints = [anchorPoint];
@@ -884,10 +882,8 @@ function extendInheritedParallelBranch(
         parentTarget,
         targetT,
         polyline,
-        paramsByStreet,
-        streetSampleProfiles,
-        usedTsByStreet,
-        p,
+        state,
+        ctx,
       )
       : resolveInheritedParallelTarget(
         current,
@@ -895,25 +891,14 @@ function extendInheritedParallelBranch(
         parentTarget,
         targetT,
         polyline,
-        paramsByStreet,
-        usedTsByStreet,
-        p,
+        state,
+        ctx,
       );
     const attempt = connectDirectToTargetStreet(
-      current.streetIdx,
-      current.t,
-      current.pt,
+      current,
       target,
-      paramsByStreet,
-      usedTsByStreet,
-      zoneSet,
-      waterMask,
-      cs,
-      W,
-      H,
-      ox,
-      oz,
-      p,
+      state,
+      ctx,
     );
     mergeTraceInto(trace, attempt.trace);
     if (!attempt.point || !attempt.polyline || attempt.polyline.length < 2) break;
@@ -938,21 +923,16 @@ function extendInheritedParallelBranch(
 }
 
 function connectDirectToTargetStreet(
-  currentIdx,
-  currentT,
-  currentPt,
+  current,
   target,
-  paramsByStreet,
-  usedTsByStreet,
-  zoneSet,
-  waterMask,
-  cs,
-  W,
-  H,
-  ox,
-  oz,
-  p,
+  state,
+  ctx,
 ) {
+  const { paramsByStreet, zoneSet, waterMask, cs, W, H, ox, oz, p } = ctx;
+  const { usedTsByStreet } = state;
+  const currentIdx = current.streetIdx;
+  const currentT = current.t;
+  const currentPt = current.pt;
   const trace = createTrace();
 
   if (isTooClose(target.t, usedTsByStreet[target.streetIdx], p.minParcelDepth * p.nearDuplicateFactor)) {
@@ -1061,10 +1041,11 @@ function resolveInheritedParallelTarget(
   parentTarget,
   baseTargetT,
   polyline,
-  paramsByStreet,
-  usedTsByStreet,
-  p,
+  state,
+  ctx,
 ) {
+  const { paramsByStreet, p } = ctx;
+  const { usedTsByStreet } = state;
   const nextParam = paramsByStreet[parentTarget.streetIdx];
   const edgeMin = p.edgeMargin;
   const edgeMax = nextParam.totalLength - p.edgeMargin;
@@ -1126,11 +1107,11 @@ function resolveInheritedMidpointGuideTarget(
   parentTarget,
   baseTargetT,
   polyline,
-  paramsByStreet,
-  streetSampleProfiles,
-  usedTsByStreet,
-  p,
+  state,
+  ctx,
 ) {
+  const { paramsByStreet, streetSampleProfiles, p } = ctx;
+  const { usedTsByStreet } = state;
   const nextParam = paramsByStreet[parentTarget.streetIdx];
   const parentStepDir = normalize({
     x: parentTarget.pt.x - parentCurrent.pt.x,
@@ -1143,9 +1124,8 @@ function resolveInheritedMidpointGuideTarget(
       parentTarget,
       baseTargetT,
       polyline,
-      paramsByStreet,
-      usedTsByStreet,
-      p,
+      state,
+      ctx,
     );
   }
 
@@ -1172,9 +1152,8 @@ function resolveInheritedMidpointGuideTarget(
       parentTarget,
       baseTargetT,
       polyline,
-      paramsByStreet,
-      usedTsByStreet,
-      p,
+      state,
+      ctx,
     );
   }
 
@@ -1186,24 +1165,19 @@ function resolveInheritedMidpointGuideTarget(
       parentTarget,
       baseTargetT,
       polyline,
-      paramsByStreet,
-      usedTsByStreet,
-      p,
+      state,
+      ctx,
     );
   }
 
   const landing = chooseLandingSampleOnStreet(
-    current.streetIdx,
-    current.t,
-    current.pt,
+    current,
     spacerPoint,
     guideDir,
     parentTarget.streetIdx,
     rayHit,
-    paramsByStreet,
-    streetSampleProfiles,
-    usedTsByStreet,
-    p,
+    state,
+    ctx,
   );
 
   return {
@@ -1221,67 +1195,28 @@ function segmentDirectionFromPolyline(polyline) {
   });
 }
 
-function placeNextStreetPoint(
-  currentIdx,
-  currentT,
-  currentPt,
-  currentParam,
-  paramsByStreet,
-  streetSampleProfiles,
-  usedTsByStreet,
-  visitedStreetIdx,
-  zoneSet,
-  waterMask,
-  streetIndex,
-  cs,
-  W,
-  H,
-  ox,
-  oz,
-  gradField,
-  preferredGuideDir,
-  rowDir,
-  zoneContourDir,
-  p,
-) {
+function placeNextStreetPoint(current, currentParam, visitedStreetIdx, preferredGuideDir, rowDir, state, ctx) {
+  const { paramsByStreet, streetSampleProfiles, gradField, zoneContourDir, p } = ctx;
   const trace = createTrace();
   const baseGuideDir = preferredGuideDir
     ? normalize(preferredGuideDir)
-    : normalize(tangentNormalAtArcLength(currentParam, currentT, p));
-  const localContourDir = contourDirectionAtPoint(currentPt, gradField, zoneContourDir);
+    : normalize(tangentNormalAtArcLength(currentParam, current.t, p));
+  const localContourDir = contourDirectionAtPoint(current.pt, gradField, zoneContourDir);
   const guideDir = buildGuideDirection(baseGuideDir, rowDir, localContourDir, p);
   const marched = marchGuideToAnyStreet(
-    currentIdx,
-    currentT,
-    currentPt,
-    paramsByStreet,
-    streetSampleProfiles,
-    usedTsByStreet,
+    current,
     visitedStreetIdx,
     guideDir,
-    gradField,
-    zoneContourDir,
-    zoneSet,
-    waterMask,
-    streetIndex,
-    cs,
-    W,
-    H,
-    ox,
-    oz,
-    p,
+    state,
+    ctx,
     ({ candidate, approachPoint }) => chooseLandingSampleOnStreet(
-      currentIdx,
-      currentT,
-      currentPt,
+      current,
       approachPoint,
       baseGuideDir,
       candidate.streetIdx,
       candidate.projected,
-      paramsByStreet,
-      streetSampleProfiles,
-      usedTsByStreet,
-      p,
+      state,
+      ctx,
     ),
   );
   mergeTraceInto(trace, marched.trace);
@@ -1293,25 +1228,11 @@ function placeNextStreetPoint(
   };
 }
 
-function marchGuideToTargetStreet(
-  currentIdx,
-  currentPt,
-  target,
-  paramsByStreet,
-  usedTsByStreet,
-  guideDir,
-  gradField,
-  zoneContourDir,
-  zoneSet,
-  waterMask,
-  streetIndex,
-  cs,
-  W,
-  H,
-  ox,
-  oz,
-  p,
-) {
+function marchGuideToTargetStreet(current, target, guideDir, state, ctx) {
+  const { paramsByStreet, zoneSet, waterMask, streetIndex, cs, W, H, ox, oz, gradField, zoneContourDir, p } = ctx;
+  const { usedTsByStreet } = state;
+  const currentIdx = current.streetIdx;
+  const currentPt = current.pt;
   const trace = createTrace();
   const path = [{ x: currentPt.x, z: currentPt.z }];
   const directDistance = dist(currentPt, target.point);
@@ -1324,14 +1245,14 @@ function marchGuideToTargetStreet(
   const maxSteps = Math.max(1, Math.ceil(maxDistance / stepSize));
 
   let marchDir = normalize(guideDir);
-  let current = currentPt;
+  let cursor = currentPt;
   let travelled = 0;
 
   for (let step = 0; step < maxSteps; step++) {
-    const localContourDir = contourDirectionAtPoint(current, gradField, zoneContourDir);
+    const localContourDir = contourDirectionAtPoint(cursor, gradField, zoneContourDir);
     const targetDir = normalize({
-      x: target.point.x - current.x,
-      z: target.point.z - current.z,
+      x: target.point.x - cursor.x,
+      z: target.point.z - cursor.z,
     });
     const contourStepDir = localContourDir ? orientLike(localContourDir, targetDir) : null;
     marchDir = blendUnitVectors([
@@ -1342,8 +1263,8 @@ function marchGuideToTargetStreet(
     ]);
 
     const nextPt = {
-      x: current.x + marchDir.x * stepSize,
-      z: current.z + marchDir.z * stepSize,
+      x: cursor.x + marchDir.x * stepSize,
+      z: cursor.z + marchDir.z * stepSize,
     };
     path.push(nextPt);
     travelled += stepSize;
@@ -1511,7 +1432,7 @@ function marchGuideToTargetStreet(
       };
     }
 
-    current = nextPt;
+    cursor = nextPt;
   }
 
   addReasonCount(trace.counts, 'ray-miss');
@@ -1530,28 +1451,12 @@ function marchGuideToTargetStreet(
   return { streetIdx: null, point: null, polyline: null, trace };
 }
 
-function marchGuideToAnyStreet(
-  currentIdx,
-  currentT,
-  currentPt,
-  paramsByStreet,
-  streetSampleProfiles,
-  usedTsByStreet,
-  visitedStreetIdx,
-  guideDir,
-  gradField,
-  zoneContourDir,
-  zoneSet,
-  waterMask,
-  streetIndex,
-  cs,
-  W,
-  H,
-  ox,
-  oz,
-  p,
-  chooseLandingPoint = null,
-) {
+function marchGuideToAnyStreet(current, visitedStreetIdx, guideDir, state, ctx, chooseLandingPoint = null) {
+  const { paramsByStreet, streetSampleProfiles, zoneSet, waterMask, streetIndex, cs, W, H, ox, oz, gradField, zoneContourDir, p } = ctx;
+  const { usedTsByStreet } = state;
+  const currentIdx = current.streetIdx;
+  const currentT = current.t;
+  const currentPt = current.pt;
   const trace = createTrace();
   const path = [{ x: currentPt.x, z: currentPt.z }];
   const maxDistance = p.guideMarchMaxDistance;
@@ -1560,11 +1465,11 @@ function marchGuideToAnyStreet(
   const maxSteps = Math.max(1, Math.ceil(maxDistance / stepSize));
 
   let marchDir = normalize(guideDir);
-  let current = currentPt;
+  let cursor = currentPt;
   let travelled = 0;
 
   for (let step = 0; step < maxSteps; step++) {
-    const localContourDir = contourDirectionAtPoint(current, gradField, zoneContourDir);
+    const localContourDir = contourDirectionAtPoint(cursor, gradField, zoneContourDir);
     const contourStepDir = localContourDir ? orientLike(localContourDir, marchDir) : null;
     marchDir = blendUnitVectors([
       { dir: normalize(guideDir), weight: p.guideMarchPerpBlend },
@@ -1573,8 +1478,8 @@ function marchGuideToAnyStreet(
     ]);
 
     const nextPt = {
-      x: current.x + marchDir.x * stepSize,
-      z: current.z + marchDir.z * stepSize,
+      x: cursor.x + marchDir.x * stepSize,
+      z: cursor.z + marchDir.z * stepSize,
     };
     path.push(nextPt);
     travelled += stepSize;
@@ -1628,7 +1533,7 @@ function marchGuideToAnyStreet(
     if (candidate) {
       const { streetIdx: nextIdx, projected } = candidate;
       const landing = chooseLandingPoint
-        ? chooseLandingPoint({ candidate, samplePoint: nextPt, approachPoint: current })
+        ? chooseLandingPoint({ candidate, samplePoint: nextPt, approachPoint: cursor })
         : null;
       const resolvedLanding = landing && landing.streetIdx === nextIdx
         ? landing
@@ -1720,25 +1625,14 @@ function marchGuideToAnyStreet(
       let approachAngle = perpendicularAngleError(finalStep, finalLanding.point, nextTan);
       if (approachAngle > p.fallbackMaxAngleOff) {
         const repaired = repairLandingOnStreet(
-          currentIdx,
-          currentT,
-          currentPt,
+          current,
           nextIdx,
           projected,
           finalLanding,
           pathPrefix,
-          paramsByStreet,
-          streetSampleProfiles,
-          usedTsByStreet,
           guideDir,
-          zoneSet,
-          waterMask,
-          cs,
-          W,
-          H,
-          ox,
-          oz,
-          p,
+          state,
+          ctx,
         );
         if (repaired) {
           finalLanding = repaired.landing;
@@ -1776,7 +1670,7 @@ function marchGuideToAnyStreet(
       };
     }
 
-    current = nextPt;
+    cursor = nextPt;
   }
 
   addReasonCount(trace.counts, 'ray-miss');
@@ -1833,19 +1727,12 @@ function chooseFirstHitStreet(
   return best;
 }
 
-function chooseLandingSampleOnStreet(
-  currentIdx,
-  currentT,
-  currentPt,
-  approachPoint,
-  guideDir,
-  targetStreetIdx,
-  referenceHit,
-  paramsByStreet,
-  streetSampleProfiles,
-  usedTsByStreet,
-  p,
-) {
+function chooseLandingSampleOnStreet(current, approachPoint, guideDir, targetStreetIdx, referenceHit, state, ctx) {
+  const { paramsByStreet, streetSampleProfiles, p } = ctx;
+  const { usedTsByStreet } = state;
+  const currentIdx = current.streetIdx;
+  const currentT = current.t;
+  const currentPt = current.pt;
   const currentElevation = sampleStreetElevationAtT(streetSampleProfiles[currentIdx], currentT);
   const nextParam = paramsByStreet[targetStreetIdx];
   const samples = streetSampleProfiles[targetStreetIdx] || [];
@@ -1914,27 +1801,12 @@ function chooseLandingSampleOnStreet(
   };
 }
 
-function repairLandingOnStreet(
-  currentIdx,
-  currentT,
-  currentPt,
-  targetStreetIdx,
-  referenceHit,
-  initialLanding,
-  pathPrefix,
-  paramsByStreet,
-  streetSampleProfiles,
-  usedTsByStreet,
-  guideDir,
-  zoneSet,
-  waterMask,
-  cs,
-  W,
-  H,
-  ox,
-  oz,
-  p,
-) {
+function repairLandingOnStreet(current, targetStreetIdx, referenceHit, initialLanding, pathPrefix, guideDir, state, ctx) {
+  const { paramsByStreet, streetSampleProfiles, zoneSet, waterMask, cs, W, H, ox, oz, p } = ctx;
+  const { usedTsByStreet } = state;
+  const currentIdx = current.streetIdx;
+  const currentT = current.t;
+  const currentPt = current.pt;
   const currentElevation = sampleStreetElevationAtT(streetSampleProfiles[currentIdx], currentT);
   const nextParam = paramsByStreet[targetStreetIdx];
   const samples = streetSampleProfiles[targetStreetIdx] || [];
@@ -2066,124 +1938,6 @@ function sampleElevationAtWorld(elevation, map, point) {
   return null;
 }
 
-function chooseAdjacentCandidate(
-  currentPt,
-  currentT,
-  currentTan,
-  nextParam,
-  candidateTs,
-  pairWidth,
-  maxAngleOff,
-  guidePoint,
-  guideNormal,
-  targetPoint,
-  usedTs,
-  zoneSet,
-  waterMask,
-  cs,
-  W,
-  H,
-  ox,
-  oz,
-  p,
-) {
-  const trace = createTrace();
-  let best = null;
-  let bestScore = Infinity;
-  let bestFailed = null;
-
-  for (const t of candidateTs) {
-    const pt = pointAtArcLength(nextParam, t);
-    const nextTan = smoothedTangentAtArcLength(nextParam, t, p.tangentSampleWindow);
-    const guideAngle = guideAngleError(currentPt, pt, guideNormal);
-    const guideOffset = pointLineDistance(pt, guidePoint, guideNormal);
-    const alongGuide = dot2(
-      { x: pt.x - currentPt.x, z: pt.z - currentPt.z },
-      guideNormal,
-    );
-    const widthError = Math.abs(alongGuide - pairWidth);
-    const sample = {
-      points: [currentPt, pt],
-      guideLine: [currentPt, targetPoint],
-      source: 'adjacent-search',
-    };
-
-    let rejection = null;
-    let score = 0;
-
-    if (isTooClose(t, usedTs, p.minParcelDepth * p.nearDuplicateFactor)) {
-      rejection = 'too-close';
-      score = 2000 + closestDistanceTo(t, usedTs);
-    } else if (alongGuide < p.minRibbonLength * 0.5) {
-      rejection = 'guide-side';
-      score = 1500 + Math.abs(alongGuide);
-    } else if (guideAngle > p.maxGuideAngleOff) {
-      rejection = 'guide-direction';
-      score = guideAngle * 1000 + widthError * 5;
-    } else if (guideOffset > p.guideLineTolerance) {
-      rejection = 'guide-offset';
-      score = guideOffset * 100 + widthError * 2;
-    } else {
-      const len = dist(currentPt, pt);
-      const maxLen = Math.min(p.maxRibbonLength, Math.max(pairWidth * 2.2, p.minRibbonLength * 2));
-      const minLen = p.minRibbonLength;
-
-      if (len < minLen) {
-        rejection = 'too-short';
-        score = minLen - len;
-      } else if (len > maxLen) {
-        rejection = 'too-long';
-        score = len - maxLen;
-      } else {
-        const angleA = perpendicularAngleError(currentPt, pt, currentTan);
-        const angleB = perpendicularAngleError(pt, currentPt, nextTan);
-        if (angleA > maxAngleOff || angleB > maxAngleOff) {
-          rejection = 'angle';
-          trace.angleRejects++;
-          score = (angleA + angleB) * 500;
-        } else {
-          const validity = validateRibbon(currentPt, pt, zoneSet, waterMask, cs, W, H, ox, oz);
-          if (!validity.ok) {
-            rejection = validity.reason;
-            score = 500 + guideOffset * 10 + widthError;
-          } else {
-            score =
-              guideAngle * 320 +
-              guideOffset * 14 +
-              widthError * 1.8 +
-              Math.abs(t - currentT) * 0.15;
-
-            if (score < bestScore) {
-              bestScore = score;
-              best = { t, pt };
-            }
-          }
-        }
-      }
-    }
-
-    if (rejection) {
-      if (!bestFailed || score < bestFailed.score) {
-        bestFailed = {
-          reason: rejection,
-          score,
-          sample,
-        };
-      }
-    }
-  }
-
-  if (!best && bestFailed) {
-    addReasonCount(trace.counts, bestFailed.reason);
-    trace.failedRibbons.push({
-      ...bestFailed.sample,
-      reason: bestFailed.reason,
-    });
-  }
-
-  return { point: best, trace };
-}
-
 function buildAnchorSequence(totalLength, p, centerT = totalLength * 0.5) {
   const anchors = [];
   const mid = clamp(centerT, p.edgeMargin, totalLength - p.edgeMargin);
@@ -2204,16 +1958,18 @@ function buildAnchorSequence(totalLength, p, centerT = totalLength * 0.5) {
 }
 
 function enqueuePendingAnchor(queue, queuedAnchorKeys, streetIdx, t, p, meta = {}) {
-  if (!Number.isFinite(t)) return;
+  if (!Number.isFinite(t)) return null;
   const quant = Math.max(1, p.streetSampleStep || p.searchStep || 1);
   const key = `${streetIdx}:${Math.round(t / quant)}`;
-  if (queuedAnchorKeys.has(key)) return;
+  if (queuedAnchorKeys.has(key)) return null;
   queuedAnchorKeys.add(key);
-  queue.push({
+  const anchor = {
     streetIdx,
     t,
     ...meta,
-  });
+  };
+  queue.push(anchor);
+  return anchor;
 }
 
 function findRemainingGapSeedAnchor(paramsByStreet, usedTsByStreet, p) {
@@ -2781,70 +2537,6 @@ function chooseSeedStreetAndAnchor(paramsByStreet, zone, ox, oz, cs, p) {
   };
 }
 
-function buildNeighborCandidates(param, range, guessedT, usedTs, guidePoint, guideNormal, targetPoint, pairWidth, p) {
-  return sampleRange(range.start, range.end, p.searchStep, guessedT)
-    .filter(t => !isTooClose(t, usedTs, p.minParcelDepth * p.nearDuplicateFactor))
-    .map(t => {
-      const pt = pointAtArcLength(param, t);
-      const alongGuide = dot2(
-        { x: pt.x - guidePoint.x, z: pt.z - guidePoint.z },
-        guideNormal,
-      );
-      const widthError = Math.abs(alongGuide - pairWidth);
-      const sidePenalty = alongGuide < 0 ? 400 : 0;
-      return {
-        t,
-        score:
-          pointLineDistance(pt, guidePoint, guideNormal) * 4 +
-          widthError * 1.5 +
-          dist(pt, targetPoint) * 0.15 +
-          Math.abs(t - guessedT) * 0.2 +
-          sidePenalty,
-      };
-    })
-    .sort((a, b) => a.score - b.score)
-    .slice(0, p.maxSearchPerNeighbor)
-    .map(entry => entry.t);
-}
-
-function findGuideTargetArcLength(
-  param,
-  range,
-  fallbackT,
-  guidePoint,
-  guideNormal,
-  targetPoint,
-  pairWidth,
-  currentT,
-  currentTotalLength,
-  p,
-) {
-  let bestT = fallbackT;
-  let bestScore = Infinity;
-  for (const t of sampleRange(range.start, range.end, p.searchStep, fallbackT)) {
-    const pt = pointAtArcLength(param, t);
-    const alongGuide = dot2(
-      { x: pt.x - guidePoint.x, z: pt.z - guidePoint.z },
-      guideNormal,
-    );
-    const widthError = Math.abs(alongGuide - pairWidth);
-    const currentProgress = currentTotalLength > 0 ? currentT / currentTotalLength : 0.5;
-    const nextProgress = param.totalLength > 0 ? t / param.totalLength : 0.5;
-    const sidePenalty = alongGuide < 0 ? 600 : 0;
-    const score =
-      pointLineDistance(pt, guidePoint, guideNormal) * 6 +
-      widthError * 2.5 +
-      dist(pt, targetPoint) * 0.2 +
-      Math.abs(nextProgress - currentProgress) * 30 +
-      sidePenalty;
-    if (score < bestScore) {
-      bestScore = score;
-      bestT = t;
-    }
-  }
-  return bestT;
-}
-
 function buildGuideDirection(baseGuideDir, rowDir, contourDir, p) {
   const dirs = [{ dir: normalize(baseGuideDir), weight: p.perpendicularGuideBlend }];
   if (rowDir) dirs.push({
@@ -2888,15 +2580,6 @@ function orientLike(dir, referenceDir) {
   return dot2(nDir, nRef) >= 0
     ? nDir
     : { x: -nDir.x, z: -nDir.z };
-}
-
-function rotateUnitVector(dir, angle) {
-  const c = Math.cos(angle);
-  const s = Math.sin(angle);
-  return normalize({
-    x: dir.x * c - dir.z * s,
-    z: dir.x * s + dir.z * c,
-  });
 }
 
 function blendUnitVectors(weightedDirs) {
@@ -2957,6 +2640,22 @@ function buildIndexedFailure(reason, startPoint, points, extras = {}) {
   };
 }
 
+function primaryTraceReason(trace) {
+  if (!trace) return 'build-failed';
+  if (trace.failedRibbons?.length) {
+    return trace.failedRibbons[trace.failedRibbons.length - 1].reason;
+  }
+  let bestReason = 'build-failed';
+  let bestCount = 0;
+  for (const [reason, count] of Object.entries(trace.counts || {})) {
+    if (count > bestCount) {
+      bestReason = reason;
+      bestCount = count;
+    }
+  }
+  return bestReason;
+}
+
 function mergeTraceInto(target, source) {
   mergeCounts(target.counts, source.counts);
   target.failedRibbons.push(...source.failedRibbons);
@@ -2973,6 +2672,12 @@ function addReasonCount(target, reason) {
   target[reason] = (target[reason] || 0) + 1;
 }
 
+function compactObject(obj) {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, value]) => value !== undefined),
+  );
+}
+
 function guideAngleError(ptA, ptB, guideNormal) {
   const dir = normalize({ x: ptB.x - ptA.x, z: ptB.z - ptA.z });
   const dot = clamp(Math.abs(dir.x * guideNormal.x + dir.z * guideNormal.z), 0, 1);
@@ -2983,13 +2688,6 @@ function directionAngleError(a, b) {
   if (!a || !b) return 0;
   const dot = clamp(a.x * b.x + a.z * b.z, -1, 1);
   return Math.acos(dot);
-}
-
-function guideOffsetError(ptA, ptB, guidePoint, guideNormal) {
-  return (
-    pointLineDistance(ptA, guidePoint, guideNormal) +
-    pointLineDistance(ptB, guidePoint, guideNormal)
-  ) * 0.5;
 }
 
 function pointLineDistance(pt, linePoint, lineDir) {

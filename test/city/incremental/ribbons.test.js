@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { layRibbons, truncateRibbonAtRelationFailure } from '../../../src/city/incremental/ribbons.js';
+import { ArrayEventSink } from '../../../src/core/EventSink.js';
 
 function makeStreet(points, ctOff) {
   let length = 0;
@@ -502,5 +503,46 @@ describe('layRibbons', () => {
 
     expect(trimmed).toBeTruthy();
     expect(trimmed.streetPoints.map(point => point.streetIdx)).toEqual([0, 1, 2]);
+  });
+
+  it('emits ordered coarse ribbon events to an event sink', () => {
+    const crossStreets = [
+      makeStreet([{ x: 0, z: 0 }, { x: 0, z: 300 }], -90),
+      makeStreet([{ x: 90, z: 0 }, { x: 90, z: 300 }], 0),
+      makeStreet([{ x: 180, z: 0 }, { x: 180, z: 300 }], 90),
+    ];
+    const { map, zone } = makeMockMap(crossStreets);
+    const sink = new ArrayEventSink();
+
+    const result = layRibbons(crossStreets, zone, map, {
+      eventSink: sink,
+      eventStepId: 'ribbons',
+      eventContext: {
+        zoneIdx: 0,
+        sectorIdx: 0,
+        seed: 123,
+      },
+    });
+
+    expect(result.ribbons).toHaveLength(1);
+    expect(sink.events.length).toBeGreaterThanOrEqual(4);
+    expect(sink.events.map(event => event.seq)).toEqual(
+      sink.events.map((_, index) => index + 1),
+    );
+    expect(sink.events.map(event => event.type)).toEqual(
+      expect.arrayContaining([
+        'anchor-enqueued',
+        'anchor-dequeued',
+        'row-build-start',
+        'row-accepted',
+      ]),
+    );
+    for (const event of sink.events) {
+      expect(event.stepId).toBe('ribbons');
+      expect(event.zoneIdx).toBe(0);
+      expect(event.sectorIdx).toBe(0);
+      expect(event.seed).toBe(123);
+      expect(typeof event.payload).toBe('object');
+    }
   });
 });

@@ -40,6 +40,7 @@
     "fillUnusedStreetSeedsOnly": false,
     "fillGapThreshold": 48
   },
+  "crossStreetParams": {},
   "familySummary": [
     {
       "familyKey": "0:0",
@@ -4505,6 +4506,141 @@
       ]
     }
   ],
+  "rejectedCrossStreets": [
+    {
+      "sectorIdx": 0,
+      "candidateKey": "ct:-411.50:run:0",
+      "reason": "too-short",
+      "ctOff": -411.5,
+      "runIdx": 0,
+      "snapped": false,
+      "length": 5,
+      "points": [
+        {
+          "x": 4281.3,
+          "z": 19752.21
+        },
+        {
+          "x": 4280.03,
+          "z": 19750.05
+        },
+        {
+          "x": 4278.76,
+          "z": 19747.9
+        }
+      ]
+    },
+    {
+      "sectorIdx": 0,
+      "candidateKey": "ct:-360.00:run:1",
+      "reason": "too-short",
+      "ctOff": -360,
+      "runIdx": 1,
+      "snapped": false,
+      "length": 2.5,
+      "points": [
+        {
+          "x": 4263.4,
+          "z": 19620.53
+        },
+        {
+          "x": 4262.13,
+          "z": 19618.38
+        }
+      ]
+    },
+    {
+      "sectorIdx": 1,
+      "candidateKey": "ct:253.03:run:0",
+      "reason": "too-short",
+      "ctOff": 253.03,
+      "runIdx": 0,
+      "snapped": false,
+      "length": 7.5,
+      "points": [
+        {
+          "x": 4601.97,
+          "z": 19161.74
+        },
+        {
+          "x": 4600.1,
+          "z": 19160.09
+        },
+        {
+          "x": 4598.22,
+          "z": 19158.43
+        },
+        {
+          "x": 4596.35,
+          "z": 19156.78
+        }
+      ]
+    }
+  ],
+  "prunedCrossStreets": [],
+  "missingCrossStreetScanlines": [
+    {
+      "sectorIdx": 0,
+      "ctOff": -411.5,
+      "seedPoint": {
+        "x": 4192.37,
+        "z": 19601.49
+      },
+      "runCount": 1,
+      "breakCount": 1,
+      "breakReasons": {
+        "out-of-sector": 1
+      },
+      "candidateCount": 1,
+      "rejectedCount": 1,
+      "rejectedReasons": {
+        "too-short": 1
+      },
+      "prunedCount": 0,
+      "prunedReasons": {},
+      "guidePoints": [
+        {
+          "x": 4212.95,
+          "z": 19636.37
+        },
+        {
+          "x": 4171.79,
+          "z": 19566.61
+        }
+      ]
+    },
+    {
+      "sectorIdx": 1,
+      "ctOff": 253.03,
+      "seedPoint": {
+        "x": 4526.98,
+        "z": 19095.59
+      },
+      "runCount": 1,
+      "breakCount": 1,
+      "breakReasons": {
+        "road": 1
+      },
+      "candidateCount": 1,
+      "rejectedCount": 1,
+      "rejectedReasons": {
+        "too-short": 1
+      },
+      "prunedCount": 0,
+      "prunedReasons": {},
+      "guidePoints": [
+        {
+          "x": 4557.36,
+          "z": 19122.38
+        },
+        {
+          "x": 4496.61,
+          "z": 19068.8
+        }
+      ]
+    }
+  ],
+  "commitRejectedCrossStreets": [],
   "ribbons": [
     {
       "rowId": 0,

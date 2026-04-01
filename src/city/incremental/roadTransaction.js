@@ -23,7 +23,7 @@
  * @param {number} [opts.minSeparation=5] - Min distance from parallel roads (metres)
  * @param {number} [opts.junctionRadius=3] - Endpoint snap tolerance for junctions (metres)
  * @param {number} [opts.angleTolerance=15] - Max angle diff (degrees) to count as parallel
- * @returns {{ accepted: boolean, road: Road|null, violations: string[] }}
+ * @returns {{ accepted: boolean, road: Road|null, violations: string[], violationDetails: object[] }}
  */
 export function tryAddRoad(map, polyline, attrs = {}, opts = {}) {
   const {
@@ -33,7 +33,7 @@ export function tryAddRoad(map, polyline, attrs = {}, opts = {}) {
   } = opts;
 
   if (!polyline || polyline.length < 2) {
-    return { accepted: false, road: null, violations: ['polyline too short'] };
+    return { accepted: false, road: null, violations: ['polyline too short'], violationDetails: [{ type: 'polyline-too-short' }] };
   }
 
   // 1. Add tentatively
@@ -50,17 +50,24 @@ export function tryAddRoad(map, polyline, attrs = {}, opts = {}) {
     const otherSegs = polylineToSegments(other.polyline);
     for (const seg of otherSegs) {
       if (segInBBox(seg, bbox)) {
-        existingSegs.push(seg);
+        existingSegs.push({
+          seg,
+          roadId: other.id,
+          source: other.source ?? other.attrs?.source ?? null,
+          hierarchy: other.hierarchy ?? other.attrs?.hierarchy ?? null,
+        });
       }
     }
   }
 
   // 4. Run checks
   const violations = [];
+  const violationDetails = [];
 
   // 4a. Unresolved crossings
   for (const ns of newSegs) {
-    for (const es of existingSegs) {
+    for (const existing of existingSegs) {
+      const es = existing.seg;
       const pt = segmentIntersection(ns, es);
       if (!pt) continue;
       // Check if any endpoint is near the intersection (= junction)
@@ -70,6 +77,15 @@ export function tryAddRoad(map, polyline, attrs = {}, opts = {}) {
       );
       if (!hasJunction) {
         violations.push(`crosses existing road at (${pt.x.toFixed(0)},${pt.z.toFixed(0)})`);
+        violationDetails.push({
+          type: 'crossing',
+          roadId: existing.roadId,
+          roadSource: existing.source,
+          roadHierarchy: existing.hierarchy,
+          point: { x: pt.x, z: pt.z },
+          newSegment: cloneSeg(ns),
+          existingSegment: cloneSeg(es),
+        });
       }
     }
   }
@@ -93,6 +109,12 @@ export function tryAddRoad(map, polyline, attrs = {}, opts = {}) {
         const gz = Math.round((wz - oz) / cs);
         if (gx >= 0 && gx < W && gz >= 0 && gz < H && waterMask.get(gx, gz) > 0) {
           violations.push(`crosses water at (${gx},${gz})`);
+          violationDetails.push({
+            type: 'water',
+            cell: { gx, gz },
+            point: { x: wx, z: wz },
+            newSegment: cloneSeg(seg),
+          });
           break; // one water violation per segment is enough
         }
       }
@@ -103,7 +125,8 @@ export function tryAddRoad(map, polyline, attrs = {}, opts = {}) {
   for (const ns of newSegs) {
     const nsAngle = segAngle(ns);
     const nsMid = { x: (ns[0].x + ns[1].x) / 2, z: (ns[0].z + ns[1].z) / 2 };
-    for (const es of existingSegs) {
+    for (const existing of existingSegs) {
+      const es = existing.seg;
       const esAngle = segAngle(es);
       let angleDiff = Math.abs(nsAngle - esAngle);
       if (angleDiff > 90) angleDiff = 180 - angleDiff;
@@ -115,6 +138,17 @@ export function tryAddRoad(map, polyline, attrs = {}, opts = {}) {
       );
       if (d < minSeparation) {
         violations.push(`parallel to existing road, ${d.toFixed(1)}m apart`);
+        violationDetails.push({
+          type: 'parallel',
+          roadId: existing.roadId,
+          roadSource: existing.source,
+          roadHierarchy: existing.hierarchy,
+          distance: d,
+          angleDiff,
+          midpoint: nsMid,
+          newSegment: cloneSeg(ns),
+          existingSegment: cloneSeg(es),
+        });
         break; // one separation violation is enough to reject
       }
     }
@@ -123,10 +157,10 @@ export function tryAddRoad(map, polyline, attrs = {}, opts = {}) {
   // 5. Accept or roll back
   if (violations.length > 0) {
     map.roadNetwork.remove(road.id);
-    return { accepted: false, road: null, violations };
+    return { accepted: false, road: null, violations, violationDetails };
   }
 
-  return { accepted: true, road, violations: [] };
+  return { accepted: true, road, violations: [], violationDetails: [] };
 }
 
 // === Geometry helpers ===
@@ -197,4 +231,11 @@ function pointToSegDist(px, pz, ax, az, bx, bz) {
   let t = ((px - ax) * dx + (pz - az) * dz) / lenSq;
   t = Math.max(0, Math.min(1, t));
   return Math.hypot(px - (ax + t * dx), pz - (az + t * dz));
+}
+
+function cloneSeg(seg) {
+  return [
+    { x: seg[0].x, z: seg[0].z },
+    { x: seg[1].x, z: seg[1].z },
+  ];
 }
