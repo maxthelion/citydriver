@@ -18,8 +18,10 @@
  *   experiments/NNN-output/*.(png|svg)
  */
 
-import { existsSync, mkdirSync, writeFileSync, readdirSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync } from 'fs';
 import { execSync } from 'child_process';
+import { join, resolve } from 'path';
+import { describeFixture, getHeadCommit } from './provenance.js';
 
 const args = process.argv.slice(2);
 const getArg = (name, def) => {
@@ -45,12 +47,28 @@ const layersStr = getArg('layers', 'reservations');
 const archetype = getArg('archetype', 'marketTown');
 const customScript = getArg('script', null);
 const stopStep = getArg('step', null);
+const fixturePath = getArg('fixture', null);
+const fixtureDir = getArg('fixture-dir', null);
+const fixtureStep = getArg('fixture-step', 'spatial');
+const compareAgainst = getArg('compare-against', null);
+
+if (fixturePath && fixtureDir) {
+  console.error('Use either --fixture or --fixture-dir, not both.');
+  process.exit(1);
+}
 
 if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
 console.log(`Experiment ${num}`);
 console.log(`Output: ${outDir}/`);
-console.log(`Seeds: ${seeds.map(s => s.seed).join(', ')}`);
+if (fixturePath) {
+  console.log(`Fixture: ${fixturePath}`);
+} else if (fixtureDir) {
+  console.log(`Fixture dir: ${fixtureDir} (step ${fixtureStep})`);
+  console.log(`Seeds: ${seeds.map(s => s.seed).join(', ')}`);
+} else {
+  console.log(`Seeds: ${seeds.map(s => s.seed).join(', ')}`);
+}
 if (customScript) {
   console.log(`Script: ${customScript}`);
 } else {
@@ -61,11 +79,32 @@ console.log('');
 
 // Run renders
 const totalStart = performance.now();
-for (const { seed, gx, gz } of seeds) {
+const runTargets = buildRunTargets({ fixturePath, fixtureDir, fixtureStep, seeds });
+for (const target of runTargets) {
+  const { seed, gx, gz, fixture } = target;
   console.log(`--- seed ${seed} ---`);
   const seedStart = performance.now();
   if (customScript) {
-    const cmd = `bun scripts/${customScript} ${seed} ${gx} ${gz} ${outDir} ${num}`;
+    const cmd = fixture
+      ? [
+          'bun',
+          `scripts/${customScript}`,
+          '--fixture',
+          fixture,
+          '--out',
+          outDir,
+          '--experiment',
+          num,
+        ].map(shellEscape).join(' ')
+      : [
+          'bun',
+          `scripts/${customScript}`,
+          seed,
+          gx,
+          gz,
+          outDir,
+          num,
+        ].map(shellEscape).join(' ');
     try {
       const output = execSync(cmd, { encoding: 'utf-8', timeout: 300000 });
       console.log(output);
@@ -73,8 +112,22 @@ for (const { seed, gx, gz } of seeds) {
       console.error(`Failed: ${e.message}`);
     }
   } else {
-    const stepFlag = stopStep ? ` --step ${stopStep}` : '';
-    const cmd = `bun scripts/render-pipeline.js --seed ${seed} --gx ${gx} --gz ${gz} --layers ${layersStr} --archetype ${archetype}${stepFlag} --out ${outDir}`;
+    const stepFlag = stopStep ? ` --step ${shellEscape(stopStep)}` : '';
+    const cmd = fixture
+      ? [
+          'bun',
+          'scripts/render-pipeline.js',
+          '--fixture',
+          fixture,
+          '--layers',
+          layersStr,
+          '--archetype',
+          archetype,
+          ...(stopStep ? ['--step', stopStep] : []),
+          '--out',
+          outDir,
+        ].map(shellEscape).join(' ')
+      : `bun scripts/render-pipeline.js --seed ${seed} --gx ${gx} --gz ${gz} --layers ${layersStr} --archetype ${archetype}${stepFlag} --out ${outDir}`;
     try {
       const output = execSync(cmd, { encoding: 'utf-8', timeout: 300000 });
       console.log(output);
@@ -117,16 +170,38 @@ const images = files.map(f => {
 const manifest = {
   experiment: num,
   generated: new Date().toISOString(),
-  seeds: seeds.map(s => s.seed),
+  commitSha: getHeadCommit(),
+  seeds: runTargets.map(target => target.seed),
   layers: customScript ? null : layersStr.split(','),
   archetype: customScript ? null : archetype,
-  ticks: customScript ? null : parseInt(ticks),
+  ticks: null,
   script: customScript || 'render-pipeline.js',
+  fixture: fixturePath ? describeFixture(fixturePath) : null,
+  fixtureDir: fixtureDir ? resolve(fixtureDir) : null,
+  fixtureStep: fixtureDir ? fixtureStep : null,
   images,
 };
 
 writeFileSync(`${outDir}/manifest.json`, JSON.stringify(manifest, null, 2));
 console.log(`\nManifest written: ${outDir}/manifest.json (${images.length} images)`);
+
+if (compareAgainst) {
+  const compareCmd = [
+    'bun',
+    'scripts/compare-experiment-output.js',
+    '--left',
+    outDir,
+    '--right',
+    compareAgainst,
+  ].map(shellEscape).join(' ');
+  try {
+    const output = execSync(compareCmd, { encoding: 'utf-8', timeout: 300000 });
+    console.log(output.trim());
+  } catch (error) {
+    console.error(`Comparison failed: ${error.message}`);
+    process.exitCode = 1;
+  }
+}
 
 // Update root experiments/manifest.json
 const rootManifestPath = 'experiments/manifest.json';
@@ -154,3 +229,32 @@ if (existingIdx >= 0) {
 
 writeFileSync(rootManifestPath, JSON.stringify(rootManifest, null, 2));
 console.log(`Root manifest updated: ${rootManifest.length} experiments`);
+
+function buildRunTargets({ fixturePath, fixtureDir, fixtureStep, seeds }) {
+  if (fixturePath) {
+    const info = describeFixture(fixturePath);
+    return [{
+      seed: String(info.meta.seed ?? 'fixture'),
+      gx: String(info.meta.gx ?? ''),
+      gz: String(info.meta.gz ?? ''),
+      fixture: info.path,
+    }];
+  }
+
+  if (fixtureDir) {
+    return seeds.map(({ seed, gx, gz }) => {
+      const fixture = resolve(join(fixtureDir, `seed-${seed}-after-${fixtureStep}.json`));
+      if (!existsSync(fixture)) {
+        throw new Error(`Fixture not found for seed ${seed}: ${fixture}`);
+      }
+      return { seed, gx, gz, fixture };
+    });
+  }
+
+  return seeds.map(seed => ({ ...seed, fixture: null }));
+}
+
+function shellEscape(value) {
+  const stringValue = String(value);
+  return `'${stringValue.replace(/'/g, `'\\''`)}'`;
+}

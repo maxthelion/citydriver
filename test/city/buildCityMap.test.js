@@ -12,7 +12,7 @@ beforeAll(() => {
 
 describe('buildCityMap', { timeout: 120000 }, () => {
   it('returns a map with roads when run to completion', async () => {
-    const { map, archetype } = await buildCityMap({
+    const { map, archetype, stepCount, lastStepId } = await buildCityMap({
       seed: 42,
       layers: sharedLayers,
       settlement: sharedSettlement,
@@ -22,6 +22,8 @@ describe('buildCityMap', { timeout: 120000 }, () => {
     expect(map.ways.length).toBeGreaterThan(0);
     expect(archetype).toBeDefined();
     expect(archetype.name).toBeTruthy();
+    expect(stepCount).toBeGreaterThan(0);
+    expect(lastStepId).toBeTruthy();
   });
 
   it('auto-selects an archetype by default', async () => {

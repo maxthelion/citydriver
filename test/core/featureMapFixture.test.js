@@ -66,13 +66,26 @@ describe('FeatureMap fixture save/load', () => {
     const path = join(dir, 'seed-42-after-spatial');
 
     await saveMapFixture(map, path, {
-      meta: { seed: 42, gx: 27, gz: 95, afterStep: 'spatial' },
+      meta: {
+        seed: 42,
+        gx: 27,
+        gz: 95,
+        afterStep: 'spatial',
+        lastStepId: 'spatial',
+        stepCount: 6,
+        archetypeId: 'marketTown',
+        commitSha: 'abc123',
+      },
     });
 
     const loaded = await loadMapFixture(path);
 
     expect(loaded.fixtureMeta.seed).toBe(42);
     expect(loaded.fixtureMeta.afterStep).toBe('spatial');
+    expect(loaded.fixtureMeta.lastStepId).toBe('spatial');
+    expect(loaded.fixtureMeta.stepCount).toBe(6);
+    expect(loaded.fixtureMeta.archetypeId).toBe('marketTown');
+    expect(loaded.fixtureMeta.commitSha).toBe('abc123');
     expect(loaded.elevation.get(3, 4)).toBeCloseTo(123.5);
     expect(loaded.slope.get(3, 4)).toBeCloseTo(0.27);
     expect(loaded.waterMask.get(8, 9)).toBe(1);
@@ -97,5 +110,139 @@ describe('FeatureMap fixture save/load', () => {
     expect([...loaded.growthState.activeSeeds.entries()]).toEqual([['commercial', [{ gx: 2, gz: 2 }]]]);
     expect(loaded.settlement).toEqual(map.settlement);
     expect(loaded.regionalSettlements).toEqual(map.regionalSettlements);
+  });
+
+  it('crops grids, roads, zones, and nuclei when requested', async () => {
+    const map = new FeatureMap(16, 16, 10, { originX: 1000, originZ: 2000 });
+    map.elevation = new Grid2D(16, 16, { type: 'float32', cellSize: 10, originX: 1000, originZ: 2000 });
+    map.slope = new Grid2D(16, 16, { type: 'float32', cellSize: 10, originX: 1000, originZ: 2000 });
+    map.waterMask = new Grid2D(16, 16, { type: 'uint8', cellSize: 10, originX: 1000, originZ: 2000 });
+
+    for (let gz = 0; gz < 16; gz++) {
+      for (let gx = 0; gx < 16; gx++) {
+        map.elevation.set(gx, gz, gx + gz * 100);
+      }
+    }
+
+    map.setLayer('elevation', map.elevation);
+    map.setLayer('slope', map.slope);
+    map.setLayer('waterMask', map.waterMask);
+
+    map.roadNetwork.add(
+      [{ x: 980, z: 2060 }, { x: 1160, z: 2060 }],
+      { hierarchy: 'residential', source: 'fixture-test' },
+    );
+    map.roadNetwork.add(
+      [{ x: 1060, z: 1980 }, { x: 1060, z: 2160 }],
+      { hierarchy: 'residential', source: 'fixture-test' },
+    );
+    map.setLayer('roadGrid', map.roadNetwork.roadGrid);
+    map.setLayer('bridgeGrid', map.roadNetwork.bridgeGrid);
+
+    map.rivers = [{
+      id: 'river-a',
+      polyline: [
+        { x: 960, z: 2080, width: 8 },
+        { x: 1180, z: 2080, width: 8 },
+      ],
+    }];
+    map.nuclei = [
+      { gx: 6, gz: 6, type: 'market' },
+      { gx: 13, gz: 13, type: 'edge' },
+    ];
+    map.developmentZones = [
+      {
+        id: 7,
+        cells: [{ gx: 5, gz: 5 }, { gx: 6, gz: 5 }, { gx: 7, gz: 5 }, { gx: 7, gz: 6 }],
+        boundary: [{ x: 1050, z: 2050 }, { x: 1080, z: 2060 }],
+        centroidGx: 6.25,
+        centroidGz: 5.25,
+        boundingNodeIds: [1, 2],
+        boundingEdgeIds: [3],
+      },
+      {
+        id: 8,
+        cells: [{ gx: 13, gz: 13 }, { gx: 14, gz: 13 }],
+        centroidGx: 13.5,
+        centroidGz: 13,
+      },
+    ];
+    map.reservationZones = [
+      { zoneId: 7, type: 'commercial', cells: [{ gx: 6, gz: 5 }] },
+      { zoneId: 8, type: 'industrial', cells: [{ gx: 14, gz: 13 }] },
+    ];
+    map.growthState = {
+      tick: 3,
+      totalZoneCells: 6,
+      nucleusRadii: new Map([[0, 10]]),
+      claimedCounts: new Map([[7, 4]]),
+      activeSeeds: new Map([
+        ['commercial', [{ gx: 6, gz: 5 }, { gx: 14, gz: 13 }]],
+      ]),
+    };
+
+    const dir = mkdtempSync(join(tmpdir(), 'feature-map-fixture-crop-'));
+    tempDirs.push(dir);
+    const path = join(dir, 'seed-42-after-spatial-crop');
+
+    await saveMapFixture(map, path, {
+      crop: {
+        source: 'zone',
+        zoneId: 7,
+        zoneIndex: 0,
+        margin: 1,
+        minGx: 4,
+        minGz: 4,
+        maxGx: 8,
+        maxGz: 8,
+      },
+      meta: { seed: 42, gx: 27, gz: 95, afterStep: 'spatial' },
+    });
+
+    const loaded = await loadMapFixture(path);
+
+    expect(loaded.width).toBe(5);
+    expect(loaded.height).toBe(5);
+    expect(loaded.originX).toBe(1040);
+    expect(loaded.originZ).toBe(2040);
+    expect(loaded.fixtureMeta.crop).toMatchObject({
+      minGx: 4,
+      minGz: 4,
+      maxGx: 8,
+      maxGz: 8,
+      source: 'zone',
+      zoneId: 7,
+    });
+
+    expect(loaded.elevation.get(0, 0)).toBe(404);
+    expect(loaded.elevation.get(2, 1)).toBe(506);
+
+    expect(loaded.roadNetwork.wayCount).toBe(2);
+    expect(loaded.roadNetwork.ways[0].polyline[0].z).toBeCloseTo(2060);
+    expect(loaded.roadNetwork.ways[1].polyline[0].x).toBeCloseTo(1060);
+
+    expect(loaded.rivers).toHaveLength(1);
+    expect(loaded.rivers[0].polyline[0].x).toBeCloseTo(1035);
+    expect(loaded.rivers[0].polyline.at(-1).x).toBeCloseTo(1085);
+
+    expect(loaded.nuclei).toEqual([{ gx: 2, gz: 2, type: 'market' }]);
+    expect(loaded.developmentZones).toHaveLength(1);
+    expect(loaded.developmentZones[0].id).toBe(7);
+    expect(loaded.developmentZones[0].cells).toEqual([
+      { gx: 1, gz: 1 },
+      { gx: 2, gz: 1 },
+      { gx: 3, gz: 1 },
+      { gx: 3, gz: 2 },
+    ]);
+    expect(loaded.developmentZones[0].centroidGx).toBeCloseTo(2.25);
+    expect(loaded.developmentZones[0].centroidGz).toBeCloseTo(1.25);
+    expect(loaded.developmentZones[0].boundingNodeIds).toBeUndefined();
+    expect(loaded.reservationZones).toEqual([
+      { zoneId: 7, type: 'commercial', cells: [{ gx: 2, gz: 1 }] },
+    ]);
+    expect([...loaded.growthState.activeSeeds.entries()]).toEqual([
+      ['commercial', [{ gx: 2, gz: 1 }]],
+    ]);
+    expect(loaded.growthState.totalZoneCells).toBe(4);
   });
 });

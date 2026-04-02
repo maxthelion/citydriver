@@ -13,19 +13,16 @@
  *   --seed N          City seed (default: 884469)
  *   --gx N            Settlement grid X (default: 27)
  *   --gz N            Settlement grid Z (default: 95)
+ *   --fixture PATH    Load a saved fixture instead of rebuilding from scratch
  *   --step NAME       Named pipeline step to stop after (default: run to completion)
  *   --layers a,b,c    Comma-separated layer names to render (default: reservations)
  *   --out DIR         Output directory (default: output)
+ *   --output-prefix P Prefix written in front of output filenames
  *   --list-layers     Print available layers and exit
  *   --archetype NAME  Archetype name (default: marketTown)
  */
-
-import { generateRegionFromSeed } from '../src/ui/regionHelper.js';
-import { setupCity } from '../src/city/setup.js';
-import { LandFirstDevelopment } from '../src/city/strategies/landFirstDevelopment.js';
-import { ARCHETYPES } from '../src/city/archetypes.js';
-import { SeededRandom } from '../src/core/rng.js';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { loadOrResumePipelineMap } from './fixture-bootstrap.js';
 
 // ── Layer manifest ──────────────────────────────────────────────────
 // Each entry: { name, availableAfterTick, source, palette, description }
@@ -131,52 +128,42 @@ if (hasFlag('list-layers')) {
 const seed = parseInt(getArg('seed', '884469'));
 const gxArg = parseInt(getArg('gx', '27'));
 const gzArg = parseInt(getArg('gz', '95'));
+const fixturePath = getArg('fixture', null);
 // --step: named pipeline step to stop after (e.g. 'spatial', 'growth-3:roads', 'connect')
 // Without --step, runs to completion (no raw tick counting)
 const stopStep = getArg('step', null);
 const outDir = getArg('out', 'output');
+const outputPrefix = getArg('output-prefix', '');
 const archetypeName = getArg('archetype', 'marketTown');
 const layerNames = (getArg('layers', 'reservations')).split(',').map(s => s.trim());
 
 if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
-console.log(`Pipeline: seed=${seed} gx=${gxArg} gz=${gzArg} stop=${stopStep ?? 'completion'} archetype=${archetypeName}`);
+console.log(`Pipeline: ${fixturePath ? `fixture=${fixturePath}` : `seed=${seed} gx=${gxArg} gz=${gzArg}`} stop=${stopStep ?? 'completion'} archetype=${archetypeName}`);
 console.log(`Layers: ${layerNames.join(', ')}`);
 console.log(`Output: ${outDir}/`);
 
 // ── Run pipeline ────────────────────────────────────────────────────
-const { layers, settlement } = generateRegionFromSeed(seed, gxArg, gzArg);
-if (!settlement) { console.error('No settlement found'); process.exit(1); }
-
-const rng = new SeededRandom(seed);
-const map = setupCity(layers, settlement, rng.fork('city'));
-const archetype = ARCHETYPES[archetypeName];
+const {
+  map,
+  archetype,
+  runSeed,
+  stepCount,
+  lastStepId,
+} = await loadOrResumePipelineMap({
+  fixturePath,
+  seed,
+  gx: gxArg,
+  gz: gzArg,
+  archetype: archetypeName,
+  step: stopStep,
+});
 if (!archetype) { console.error(`Unknown archetype: ${archetypeName}`); process.exit(1); }
-const strategy = new LandFirstDevelopment(map, { archetype });
 
 // Snapshot skeleton roads (taken right after the skeleton step)
 let skeletonRoadSnapshot = null;
-
-let tick = 0;
-while (!strategy.done) {
-  const t0 = performance.now();
-  const more = strategy.tick();
-  tick++;
-  const stepId = strategy.runner.currentStep;
-  console.log(`  ${stepId} (${tick}): ${(performance.now() - t0).toFixed(0)}ms${more ? '' : ' (done)'}`);
-
-  if (stepId === 'skeleton' && !skeletonRoadSnapshot) {
-    const rg = map.hasLayer('roadGrid') ? map.getLayer('roadGrid') : null;
-    if (rg) {
-      skeletonRoadSnapshot = new Uint8Array(rg.data.length);
-      skeletonRoadSnapshot.set(rg.data);
-    }
-  }
-
-  if (stopStep && stepId === stopStep) break;
-  if (!more) break;
-}
-console.log(`Completed at: ${strategy.runner.currentStep ?? 'done'}\n`);
+const tick = stepCount ?? 0;
+console.log(`Completed at: ${lastStepId ?? 'done'}\n`);
 
 // ── Render requested layers ─────────────────────────────────────────
 const w = map.width, h = map.height;
@@ -257,7 +244,7 @@ function renderGridLayer(name, grid, palette) {
       pixels[idx] = r; pixels[idx + 1] = g; pixels[idx + 2] = b;
     }
   }
-  writePPM(`${name}-seed${seed}-tick${tick}`, pixels);
+  writePPM(`${outputPrefix}${name}-seed${runSeed}-tick${tick}`, pixels);
 }
 
 function renderFloat32Layer(name, arr, palette) {
@@ -278,7 +265,7 @@ function renderFloat32Layer(name, arr, palette) {
       pixels[idx] = r; pixels[idx + 1] = g; pixels[idx + 2] = b;
     }
   }
-  writePPM(`${name}-seed${seed}-tick${tick}`, pixels);
+  writePPM(`${outputPrefix}${name}-seed${runSeed}-tick${tick}`, pixels);
 }
 
 function renderReservationsWithRoads() {
@@ -306,7 +293,7 @@ function renderReservationsWithRoads() {
       pixels[idx] = r; pixels[idx + 1] = g; pixels[idx + 2] = b;
     }
   }
-  writePPM(`reservations-seed${seed}-tick${tick}`, pixels);
+  writePPM(`${outputPrefix}reservations-seed${runSeed}-tick${tick}`, pixels);
 }
 
 function renderZones() {
@@ -385,7 +372,7 @@ function renderZones() {
         }
   }
 
-  writePPM(`zones-seed${seed}-tick${tick}`, pixels);
+  writePPM(`${outputPrefix}zones-seed${runSeed}-tick${tick}`, pixels);
 }
 
 function bresenham(pixels, w, h, x0, y0, x1, y1, r, g, b) {

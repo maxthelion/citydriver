@@ -1,0 +1,337 @@
+{
+  "experiment": "039",
+  "generated": "2026-04-02T17:55:03.762Z",
+  "commitSha": "d5bccefe4c31cfd706ba8b797cee816bfe984ef0",
+  "seeds": [
+    "884469"
+  ],
+  "layers": null,
+  "archetype": null,
+  "ticks": null,
+  "script": "render-sector-ribbons.js",
+  "fixture": {
+    "path": "/tmp/seed-884469-zone0-crop-new.json",
+    "meta": {
+      "version": 1,
+      "width": 216,
+      "height": 705,
+      "cellSize": 5,
+      "originX": 6910,
+      "originZ": 16815,
+      "savedAt": "2026-04-02T17:16:23.642Z",
+      "crop": {
+        "minGx": 982,
+        "minGz": 3,
+        "maxGx": 1197,
+        "maxGz": 707,
+        "source": "zone",
+        "zoneId": 1,
+        "zoneIndex": 0,
+        "margin": 10
+      },
+      "seed": 884469,
+      "gx": 27,
+      "gz": 95,
+      "settlementGx": 25,
+      "settlementGz": 99,
+      "afterStep": "spatial",
+      "lastStepId": "spatial",
+      "stepCount": 7,
+      "archetypeId": "industrialTown",
+      "archetype": "Industrial Town",
+      "commitSha": "d5bccefe4c31cfd706ba8b797cee816bfe984ef0"
+    }
+  },
+  "fixtureDir": null,
+  "fixtureStep": null,
+  "images": [
+    {
+      "file": "cross-failures-zone0-seed884469.png",
+      "path": "039-output/cross-failures-zone0-seed884469.png",
+      "layer": "cross-failures-zone0",
+      "seed": "884469",
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "cross-failures-zone2-seed884469.svg",
+      "path": "039-output/cross-failures-zone2-seed884469.svg",
+      "layer": "cross-failures-zone2",
+      "seed": "884469",
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbon-failures-zone1-seedNaN.svg",
+      "path": "039-output/ribbon-failures-zone1-seedNaN.svg",
+      "layer": "ribbon-failures-zone1-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbon-failures-zone2-seedNaN.png",
+      "path": "039-output/ribbon-failures-zone2-seedNaN.png",
+      "layer": "ribbon-failures-zone2-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "cross-failures-zone2-seedNaN.png",
+      "path": "039-output/cross-failures-zone2-seedNaN.png",
+      "layer": "cross-failures-zone2-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "cross-failures-zone1-seedNaN.svg",
+      "path": "039-output/cross-failures-zone1-seedNaN.svg",
+      "layer": "cross-failures-zone1-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbons-zone0-seedNaN.png",
+      "path": "039-output/ribbons-zone0-seedNaN.png",
+      "layer": "ribbons-zone0-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "cross-failures-zone1-seed884469.png",
+      "path": "039-output/cross-failures-zone1-seed884469.png",
+      "layer": "cross-failures-zone1",
+      "seed": "884469",
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "cross-failures-zone1-seed884469.svg",
+      "path": "039-output/cross-failures-zone1-seed884469.svg",
+      "layer": "cross-failures-zone1",
+      "seed": "884469",
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbons-zone0-seedNaN.svg",
+      "path": "039-output/ribbons-zone0-seedNaN.svg",
+      "layer": "ribbons-zone0-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "cross-failures-zone1-seedNaN.png",
+      "path": "039-output/cross-failures-zone1-seedNaN.png",
+      "layer": "cross-failures-zone1-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "cross-failures-zone2-seedNaN.svg",
+      "path": "039-output/cross-failures-zone2-seedNaN.svg",
+      "layer": "cross-failures-zone2-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbon-failures-zone2-seedNaN.svg",
+      "path": "039-output/ribbon-failures-zone2-seedNaN.svg",
+      "layer": "ribbon-failures-zone2-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbon-failures-zone1-seedNaN.png",
+      "path": "039-output/ribbon-failures-zone1-seedNaN.png",
+      "layer": "ribbon-failures-zone1-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "cross-failures-zone2-seed884469.png",
+      "path": "039-output/cross-failures-zone2-seed884469.png",
+      "layer": "cross-failures-zone2",
+      "seed": "884469",
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "cross-failures-zone0-seed884469.svg",
+      "path": "039-output/cross-failures-zone0-seed884469.svg",
+      "layer": "cross-failures-zone0",
+      "seed": "884469",
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbons-zone0-seed884469.svg",
+      "path": "039-output/ribbons-zone0-seed884469.svg",
+      "layer": "ribbons-zone0",
+      "seed": "884469",
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbons-zone2-seed884469.png",
+      "path": "039-output/ribbons-zone2-seed884469.png",
+      "layer": "ribbons-zone2",
+      "seed": "884469",
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "ribbons-zone1-seedNaN.png",
+      "path": "039-output/ribbons-zone1-seedNaN.png",
+      "layer": "ribbons-zone1-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "ribbons-zone2-seedNaN.svg",
+      "path": "039-output/ribbons-zone2-seedNaN.svg",
+      "layer": "ribbons-zone2-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbon-failures-zone1-seed884469.png",
+      "path": "039-output/ribbon-failures-zone1-seed884469.png",
+      "layer": "ribbon-failures-zone1",
+      "seed": "884469",
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "cross-failures-zone0-seedNaN.svg",
+      "path": "039-output/cross-failures-zone0-seedNaN.svg",
+      "layer": "cross-failures-zone0-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbon-failures-zone2-seed884469.svg",
+      "path": "039-output/ribbon-failures-zone2-seed884469.svg",
+      "layer": "ribbon-failures-zone2",
+      "seed": "884469",
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbon-failures-zone0-seedNaN.svg",
+      "path": "039-output/ribbon-failures-zone0-seedNaN.svg",
+      "layer": "ribbon-failures-zone0-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbon-failures-zone0-seed884469.png",
+      "path": "039-output/ribbon-failures-zone0-seed884469.png",
+      "layer": "ribbon-failures-zone0",
+      "seed": "884469",
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "ribbons-zone1-seed884469.svg",
+      "path": "039-output/ribbons-zone1-seed884469.svg",
+      "layer": "ribbons-zone1",
+      "seed": "884469",
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbons-zone1-seed884469.png",
+      "path": "039-output/ribbons-zone1-seed884469.png",
+      "layer": "ribbons-zone1",
+      "seed": "884469",
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "ribbon-failures-zone0-seed884469.svg",
+      "path": "039-output/ribbon-failures-zone0-seed884469.svg",
+      "layer": "ribbon-failures-zone0",
+      "seed": "884469",
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbon-failures-zone0-seedNaN.png",
+      "path": "039-output/ribbon-failures-zone0-seedNaN.png",
+      "layer": "ribbon-failures-zone0-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "ribbon-failures-zone2-seed884469.png",
+      "path": "039-output/ribbon-failures-zone2-seed884469.png",
+      "layer": "ribbon-failures-zone2",
+      "seed": "884469",
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "cross-failures-zone0-seedNaN.png",
+      "path": "039-output/cross-failures-zone0-seedNaN.png",
+      "layer": "cross-failures-zone0-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "ribbons-zone2-seedNaN.png",
+      "path": "039-output/ribbons-zone2-seedNaN.png",
+      "layer": "ribbons-zone2-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "png"
+    },
+    {
+      "file": "ribbon-failures-zone1-seed884469.svg",
+      "path": "039-output/ribbon-failures-zone1-seed884469.svg",
+      "layer": "ribbon-failures-zone1",
+      "seed": "884469",
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbons-zone1-seedNaN.svg",
+      "path": "039-output/ribbons-zone1-seedNaN.svg",
+      "layer": "ribbons-zone1-seedNaN",
+      "seed": null,
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbons-zone2-seed884469.svg",
+      "path": "039-output/ribbons-zone2-seed884469.svg",
+      "layer": "ribbons-zone2",
+      "seed": "884469",
+      "tick": null,
+      "format": "svg"
+    },
+    {
+      "file": "ribbons-zone0-seed884469.png",
+      "path": "039-output/ribbons-zone0-seed884469.png",
+      "layer": "ribbons-zone0",
+      "seed": "884469",
+      "tick": null,
+      "format": "png"
+    }
+  ]
+}

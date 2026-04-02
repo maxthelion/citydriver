@@ -41,7 +41,7 @@ const STEP_TARGETS = {
  * @param {string|object} [options.archetype='auto'] — archetype key, 'auto', or archetype object
  * @param {string|null}   [options.step=null]  — pipeline step to stop after (null = complete)
  * @param {number}        [options.growth=0]   — growth tick count (when step === 'growth')
- * @returns {Promise<{ map: FeatureMap, archetype: object }>}
+ * @returns {Promise<{ map: FeatureMap, archetype: object, stepCount: number, lastStepId: string | null }>}
  */
 export async function buildCityMap({
   seed, layers, settlement, archetype = 'auto', step = null, growth = 0,
@@ -99,5 +99,10 @@ export async function buildCityMap({
     await strategy.runToCompletion();
   }
 
-  return { map, archetype: resolvedArchetype };
+  return {
+    map,
+    archetype: resolvedArchetype,
+    stepCount: strategy._tick,
+    lastStepId: strategy.runner.currentStep ?? null,
+  };
 }

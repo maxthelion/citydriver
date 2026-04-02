@@ -8,33 +8,40 @@
  * Usage: bun scripts/render-sector-cross-streets.js <seed> <gx> <gz> [outDir]
  */
 
-import { generateRegionFromSeed } from '../src/ui/regionHelper.js';
-import { setupCity } from '../src/city/setup.js';
-import { LandFirstDevelopment } from '../src/city/strategies/landFirstDevelopment.js';
-import { ARCHETYPES } from '../src/city/archetypes.js';
-import { SeededRandom } from '../src/core/rng.js';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { execSync } from 'child_process';
-import { runToStep } from './pipeline-utils.js';
 import { layCrossStreets } from '../src/city/incremental/crossStreets.js';
 import { segmentTerrainV2 } from '../src/city/incremental/ridgeSegmentationV2.js';
+import { loadMapForStep } from './fixture-bootstrap.js';
 
 // === CLI ===
-const seed = parseInt(process.argv[2]) || 42;
-const gx = parseInt(process.argv[3]) || 27;
-const gz = parseInt(process.argv[4]) || 95;
-const outDir = process.argv[5] || 'experiments/021-output';
+const cliArgs = process.argv.slice(2);
+const getArg = (name, def = null) => {
+  const idx = cliArgs.indexOf(`--${name}`);
+  return idx >= 0 && idx + 1 < cliArgs.length ? cliArgs[idx + 1] : def;
+};
+const fixturePath = getArg('fixture', null);
+const seed = fixturePath ? NaN : (parseInt(process.argv[2]) || 42);
+const gx = fixturePath ? NaN : (parseInt(process.argv[3]) || 27);
+const gz = fixturePath ? NaN : (parseInt(process.argv[4]) || 95);
+const outDir = fixturePath ? (getArg('out', 'experiments/021-output')) : (process.argv[5] || 'experiments/021-output');
+const outputPrefix = getArg('output-prefix', '');
 if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
 // === Pipeline setup ===
 const t0 = performance.now();
-const { layers, settlement } = generateRegionFromSeed(seed, gx, gz);
-if (!settlement) { console.error('No settlement'); process.exit(1); }
-
-const rng = new SeededRandom(seed);
-const map = setupCity(layers, settlement, rng.fork('city'));
-const strategy = new LandFirstDevelopment(map, { archetype: ARCHETYPES.marketTown });
-runToStep(strategy, 'spatial');
+const { map, runSeed, fixtureMeta } = await loadMapForStep({
+  fixturePath,
+  seed,
+  gx,
+  gz,
+  step: 'spatial',
+  archetype: 'marketTown',
+});
+if (fixturePath) {
+  console.log(`Loaded fixture: ${fixturePath}`);
+  console.log(`Fixture step: ${fixtureMeta?.afterStep ?? 'unknown'}`);
+}
 
 const zones = map.developmentZones;
 const W = map.width, H = map.height;
@@ -310,7 +317,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
 
   // === Write output ===
   const header = `P6\n${cropW} ${cropH}\n255\n`;
-  const basePath = `${outDir}/cross-streets-zone${zi}-seed${seed}`;
+  const basePath = `${outDir}/${outputPrefix}cross-streets-zone${zi}-seed${runSeed}`;
   writeFileSync(`${basePath}.ppm`, Buffer.concat([Buffer.from(header), Buffer.from(pixels)]));
   try { execSync(`convert "${basePath}.ppm" "${basePath}.png" 2>/dev/null`); } catch {}
   console.log(`  Written to ${basePath}.png (${cropW}x${cropH})`);
