@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { FeatureMap } from '../../../src/core/FeatureMap.js';
 import { Grid2D } from '../../../src/core/Grid2D.js';
 import { tryAddRoad } from '../../../src/city/incremental/roadTransaction.js';
@@ -48,5 +48,39 @@ describe('tryAddRoad', () => {
 
     expect(result.accepted).toBe(false);
     expect(result.violations.some(msg => msg.includes('parallel to existing road'))).toBe(true);
+  });
+
+  it('does not rebuild derived state for a rejected tentative road', () => {
+    const map = makeMap();
+    map.roadNetwork.add(
+      [{ x: 100, z: 50 }, { x: 110, z: 50 }],
+      { hierarchy: 'residential', source: 'cross-street' },
+    );
+    const spy = vi.spyOn(map.roadNetwork, 'rebuildDerived');
+
+    const result = tryAddRoad(
+      map,
+      [{ x: 100, z: 50 }, { x: 104, z: 50 }],
+      { hierarchy: 'residential', source: 'cross-street' },
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
+    expect(map.roadNetwork.wayCount).toBe(1);
+  });
+
+  it('rebuilds derived state once for an accepted road', () => {
+    const map = makeMap();
+    const spy = vi.spyOn(map.roadNetwork, 'rebuildDerived');
+
+    const result = tryAddRoad(
+      map,
+      [{ x: 60, z: 60 }, { x: 90, z: 60 }],
+      { hierarchy: 'residential', source: 'cross-street' },
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(map.roadNetwork.wayCount).toBe(1);
   });
 });

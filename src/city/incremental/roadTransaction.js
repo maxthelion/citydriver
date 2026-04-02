@@ -36,132 +36,135 @@ export function tryAddRoad(map, polyline, attrs = {}, opts = {}) {
     return { accepted: false, way: null, violations: ['polyline too short'], violationDetails: [{ type: 'polyline-too-short' }] };
   }
 
-  // 1. Add tentatively
-  const way = map.roadNetwork.add(polyline, attrs);
+  return map.roadNetwork.tentative(({ discardDerivedRefresh }) => {
+    // 1. Add tentatively
+    const way = map.roadNetwork.add(polyline, attrs);
 
-  // 2. Collect segments of the new road
-  const newSegs = polylineToSegments(way.polyline);
+    // 2. Collect segments of the new road
+    const newSegs = polylineToSegments(way.polyline);
 
-  // 3. Collect segments of all OTHER existing roads (with bounding box filter)
-  const bbox = segmentsBBox(newSegs, Math.max(minSeparation, junctionRadius) + 10);
-  const existingSegs = [];
-  for (const other of map.roadNetwork.ways) {
-    if (other.id === way.id) continue;
-    const otherSegs = polylineToSegments(other.polyline);
-    for (const seg of otherSegs) {
-      if (segInBBox(seg, bbox)) {
-        existingSegs.push({
-          seg,
-          wayId: other.id,
-          source: other.source ?? other.attrs?.source ?? null,
-          hierarchy: other.hierarchy ?? other.attrs?.hierarchy ?? null,
-        });
-      }
-    }
-  }
-
-  // 4. Run checks
-  const violations = [];
-  const violationDetails = [];
-
-  // 4a. Unresolved crossings
-  for (const ns of newSegs) {
-    for (const existing of existingSegs) {
-      const es = existing.seg;
-      const pt = segmentIntersection(ns, es);
-      if (!pt) continue;
-      // Check if any endpoint is near the intersection (= junction)
-      const ends = [ns[0], ns[1], es[0], es[1]];
-      const hasJunction = ends.some(e =>
-        Math.hypot(e.x - pt.x, e.z - pt.z) < junctionRadius
-      );
-      if (!hasJunction) {
-        violations.push(`crosses existing road at (${pt.x.toFixed(0)},${pt.z.toFixed(0)})`);
-        violationDetails.push({
-          type: 'crossing',
-          wayId: existing.wayId,
-          waySource: existing.source,
-          wayHierarchy: existing.hierarchy,
-          point: { x: pt.x, z: pt.z },
-          newSegment: cloneSeg(ns),
-          existingSegment: cloneSeg(es),
-        });
-      }
-    }
-  }
-
-  // 4b. Water crossings
-  const waterMask = map.hasLayer('waterMask') ? map.getLayer('waterMask') : null;
-  if (waterMask) {
-    const cs = map.cellSize;
-    const ox = map.originX;
-    const oz = map.originZ;
-    const W = map.width;
-    const H = map.height;
-    for (const seg of newSegs) {
-      const len = Math.hypot(seg[1].x - seg[0].x, seg[1].z - seg[0].z);
-      const steps = Math.ceil(len / (cs * 0.5));
-      for (let s = 0; s <= steps; s++) {
-        const t = s / steps;
-        const wx = seg[0].x + (seg[1].x - seg[0].x) * t;
-        const wz = seg[0].z + (seg[1].z - seg[0].z) * t;
-        const gx = Math.round((wx - ox) / cs);
-        const gz = Math.round((wz - oz) / cs);
-        if (gx >= 0 && gx < W && gz >= 0 && gz < H && waterMask.get(gx, gz) > 0) {
-          violations.push(`crosses water at (${gx},${gz})`);
-          violationDetails.push({
-            type: 'water',
-            cell: { gx, gz },
-            point: { x: wx, z: wz },
-            newSegment: cloneSeg(seg),
+    // 3. Collect segments of all OTHER existing roads (with bounding box filter)
+    const bbox = segmentsBBox(newSegs, Math.max(minSeparation, junctionRadius) + 10);
+    const existingSegs = [];
+    for (const other of map.roadNetwork.ways) {
+      if (other.id === way.id) continue;
+      const otherSegs = polylineToSegments(other.polyline);
+      for (const seg of otherSegs) {
+        if (segInBBox(seg, bbox)) {
+          existingSegs.push({
+            seg,
+            wayId: other.id,
+            source: other.source ?? other.attrs?.source ?? null,
+            hierarchy: other.hierarchy ?? other.attrs?.hierarchy ?? null,
           });
-          break; // one water violation per segment is enough
         }
       }
     }
-  }
 
-  // 4c. Minimum separation from parallel existing roads
-  for (const ns of newSegs) {
-    const nsAngle = segAngle(ns);
-    const nsMid = { x: (ns[0].x + ns[1].x) / 2, z: (ns[0].z + ns[1].z) / 2 };
-    for (const existing of existingSegs) {
-      const es = existing.seg;
-      const esAngle = segAngle(es);
-      let angleDiff = Math.abs(nsAngle - esAngle);
-      if (angleDiff > 90) angleDiff = 180 - angleDiff;
-      if (angleDiff > angleTolerance) continue;
+    // 4. Run checks
+    const violations = [];
+    const violationDetails = [];
 
-      const d = pointToSegDist(
-        nsMid.x, nsMid.z,
-        es[0].x, es[0].z, es[1].x, es[1].z
-      );
-      if (d < minSeparation) {
-        if (isSharedEndpointThroughConnection(ns, es, junctionRadius)) continue;
-        violations.push(`parallel to existing road, ${d.toFixed(1)}m apart`);
-        violationDetails.push({
-          type: 'parallel',
-          wayId: existing.wayId,
-          waySource: existing.source,
-          wayHierarchy: existing.hierarchy,
-          distance: d,
-          angleDiff,
-          midpoint: nsMid,
-          newSegment: cloneSeg(ns),
-          existingSegment: cloneSeg(es),
-        });
-        break; // one separation violation is enough to reject
+    // 4a. Unresolved crossings
+    for (const ns of newSegs) {
+      for (const existing of existingSegs) {
+        const es = existing.seg;
+        const pt = segmentIntersection(ns, es);
+        if (!pt) continue;
+        // Check if any endpoint is near the intersection (= junction)
+        const ends = [ns[0], ns[1], es[0], es[1]];
+        const hasJunction = ends.some(e =>
+          Math.hypot(e.x - pt.x, e.z - pt.z) < junctionRadius
+        );
+        if (!hasJunction) {
+          violations.push(`crosses existing road at (${pt.x.toFixed(0)},${pt.z.toFixed(0)})`);
+          violationDetails.push({
+            type: 'crossing',
+            wayId: existing.wayId,
+            waySource: existing.source,
+            wayHierarchy: existing.hierarchy,
+            point: { x: pt.x, z: pt.z },
+            newSegment: cloneSeg(ns),
+            existingSegment: cloneSeg(es),
+          });
+        }
       }
     }
-  }
 
-  // 5. Accept or roll back
-  if (violations.length > 0) {
-    map.roadNetwork.remove(way.id);
-    return { accepted: false, way: null, violations, violationDetails };
-  }
+    // 4b. Water crossings
+    const waterMask = map.hasLayer('waterMask') ? map.getLayer('waterMask') : null;
+    if (waterMask) {
+      const cs = map.cellSize;
+      const ox = map.originX;
+      const oz = map.originZ;
+      const W = map.width;
+      const H = map.height;
+      for (const seg of newSegs) {
+        const len = Math.hypot(seg[1].x - seg[0].x, seg[1].z - seg[0].z);
+        const steps = Math.ceil(len / (cs * 0.5));
+        for (let s = 0; s <= steps; s++) {
+          const t = s / steps;
+          const wx = seg[0].x + (seg[1].x - seg[0].x) * t;
+          const wz = seg[0].z + (seg[1].z - seg[0].z) * t;
+          const gx = Math.round((wx - ox) / cs);
+          const gz = Math.round((wz - oz) / cs);
+          if (gx >= 0 && gx < W && gz >= 0 && gz < H && waterMask.get(gx, gz) > 0) {
+            violations.push(`crosses water at (${gx},${gz})`);
+            violationDetails.push({
+              type: 'water',
+              cell: { gx, gz },
+              point: { x: wx, z: wz },
+              newSegment: cloneSeg(seg),
+            });
+            break; // one water violation per segment is enough
+          }
+        }
+      }
+    }
 
-  return { accepted: true, way, violations: [], violationDetails: [] };
+    // 4c. Minimum separation from parallel existing roads
+    for (const ns of newSegs) {
+      const nsAngle = segAngle(ns);
+      const nsMid = { x: (ns[0].x + ns[1].x) / 2, z: (ns[0].z + ns[1].z) / 2 };
+      for (const existing of existingSegs) {
+        const es = existing.seg;
+        const esAngle = segAngle(es);
+        let angleDiff = Math.abs(nsAngle - esAngle);
+        if (angleDiff > 90) angleDiff = 180 - angleDiff;
+        if (angleDiff > angleTolerance) continue;
+
+        const d = pointToSegDist(
+          nsMid.x, nsMid.z,
+          es[0].x, es[0].z, es[1].x, es[1].z
+        );
+        if (d < minSeparation) {
+          if (isSharedEndpointThroughConnection(ns, es, junctionRadius)) continue;
+          violations.push(`parallel to existing road, ${d.toFixed(1)}m apart`);
+          violationDetails.push({
+            type: 'parallel',
+            wayId: existing.wayId,
+            waySource: existing.source,
+            wayHierarchy: existing.hierarchy,
+            distance: d,
+            angleDiff,
+            midpoint: nsMid,
+            newSegment: cloneSeg(ns),
+            existingSegment: cloneSeg(es),
+          });
+          break; // one separation violation is enough to reject
+        }
+      }
+    }
+
+    // 5. Accept or roll back
+    if (violations.length > 0) {
+      map.roadNetwork.remove(way.id);
+      discardDerivedRefresh();
+      return { accepted: false, way: null, violations, violationDetails };
+    }
+
+    return { accepted: true, way, violations: [], violationDetails: [] };
+  });
 }
 
 // === Geometry helpers ===

@@ -283,6 +283,39 @@ export class RoadNetwork {
     }
   }
 
+  /**
+   * Run a tentative mutation that may fully roll back before exit.
+   *
+   * This is for validation flows like tryAddRoad(): we want shared-node
+   * snapping and canonical way geometry, but if the tentative change is
+   * rejected and removed before leaving the scope, we should not pay to
+   * rebuild the derived graph/grid for a net-no-op mutation.
+   *
+   * @template T
+   * @param {(ctx: { discardDerivedRefresh: () => void }) => T} mutator
+   * @returns {T}
+   */
+  tentative(mutator) {
+    const dirtyBefore = this._derivedDirty;
+    let discardDerivedRefresh = false;
+    this._mutationDepth++;
+    try {
+      return mutator({
+        discardDerivedRefresh: () => {
+          discardDerivedRefresh = true;
+        },
+      });
+    } finally {
+      this._mutationDepth--;
+      if (discardDerivedRefresh && !dirtyBefore) {
+        this._derivedDirty = false;
+      }
+      if (this._mutationDepth === 0 && this._derivedDirty) {
+        this.rebuildDerived();
+      }
+    }
+  }
+
   rebuildDerived() {
     this._derivedDirty = false;
     this._graph = new PlanarGraph();

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RoadNetwork } from '../../src/core/RoadNetwork.js';
 import { RoadWay, _resetRoadWayIds } from '../../src/core/RoadWay.js';
 import { _resetRoadNodeIds } from '../../src/core/RoadNode.js';
@@ -73,6 +73,27 @@ describe('RoadNetwork remove()', () => {
 
     net.remove(a.id);
     expect(net.roadGrid.get(0, 0)).toBe(1);
+  });
+});
+
+describe('RoadNetwork tentative()', () => {
+  it('skips derived rebuild when a tentative mutation rolls back completely', () => {
+    const net = makeNetwork();
+    net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
+
+    const spy = vi.spyOn(net, 'rebuildDerived');
+    const beforeWayCount = net.wayCount;
+    const beforeNodeCount = net.nodes.length;
+
+    net.tentative(({ discardDerivedRefresh }) => {
+      const way = net.add([{ x: 0, z: 20 }, { x: 50, z: 20 }]);
+      net.remove(way.id);
+      discardDerivedRefresh();
+    });
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(net.wayCount).toBe(beforeWayCount);
+    expect(net.nodes.length).toBe(beforeNodeCount);
   });
 });
 
