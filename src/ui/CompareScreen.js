@@ -369,7 +369,7 @@ export class CompareScreen {
     // Draw roads in detail
     ctx.strokeStyle = 'rgba(255,255,255,0.6)';
     ctx.lineWidth = 1.5;
-    for (const road of map.roads) {
+    for (const road of map.ways) {
       if (!road.polyline || road.polyline.length < 2) continue;
       ctx.beginPath();
       let started = false;
@@ -392,7 +392,7 @@ export class CompareScreen {
         const faces = m.graph.faces();
         const simpleFaces = faces.filter(f => f.length === new Set(f).size);
         let totalLength = 0;
-        for (const road of m.roads) {
+        for (const road of m.ways) {
           if (!road.polyline) continue;
           for (let j = 0; j < road.polyline.length - 1; j++) {
             const dx = road.polyline[j + 1].x - road.polyline[j].x;
@@ -404,7 +404,7 @@ export class CompareScreen {
         const crossings = m.graph.detectCrossingEdges();
         const shallow = m.graph.detectShallowAngles(5);
         lines.push(`<b>${STRATEGY_NAMES[i]}</b>`);
-        lines.push(`  ${m.roads.length} roads, ${Math.round(totalLength)}m`);
+        lines.push(`  ${m.ways.length} roads, ${Math.round(totalLength)}m`);
         lines.push(`  ${simpleFaces.length} faces`);
         const bad = slivers.length + crossings.length + shallow.length;
         lines.push(`  <span style="color:${bad > 0 ? '#ff6666' : '#66ff66'}">${slivers.length} sliver, ${crossings.length} cross, ${shallow.length} shallow</span>`);

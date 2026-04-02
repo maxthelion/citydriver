@@ -1,23 +1,26 @@
 /**
- * RoadNetwork — single mutation point for roads, graph, and grid.
+ * RoadNetwork — single mutation point for ways, graph, and grid.
  *
- * Wraps:
- *  - A Map<id, Road> as the canonical road collection
- *  - A PlanarGraph for topology
- *  - Two Grid2D instances: roadGrid (stamped presence) and bridgeGrid
+ * Canonical source of truth:
+ *  - shared RoadNode instances
+ *  - ordered RoadWay instances
  *
- * All mutations go through add() / remove() / updatePolyline() / addBridge().
+ * Derived on every mutation:
+ *  - PlanarGraph topology
+ *  - roadGrid occupancy
+ *  - bridgeGrid occupancy
  */
 
-import { Road } from './Road.js';
+import { RoadNode } from './RoadNode.js';
+import { RoadWay } from './RoadWay.js';
 import { PlanarGraph } from './PlanarGraph.js';
 import { Grid2D } from './Grid2D.js';
 
 export class RoadNetwork {
   /**
-   * @param {number} width    - Grid width in cells
-   * @param {number} height   - Grid height in cells
-   * @param {number} cellSize - World units per cell
+   * @param {number} width
+   * @param {number} height
+   * @param {number} cellSize
    * @param {number} [originX=0]
    * @param {number} [originZ=0]
    */
@@ -28,36 +31,36 @@ export class RoadNetwork {
     this._originX = originX;
     this._originZ = originZ;
 
-    /** @type {Map<number, Road>} */
-    this._roads = new Map();
+    /** @type {Map<number, RoadNode>} */
+    this._nodes = new Map();
+
+    /** @type {Map<number, RoadWay>} */
+    this._ways = new Map();
 
     /** @type {PlanarGraph} */
     this._graph = new PlanarGraph();
 
     const gridOpts = { type: 'uint8', cellSize, originX, originZ };
-    /** @type {Grid2D} */
     this._roadGrid = new Grid2D(width, height, gridOpts);
-    /** @type {Grid2D} */
     this._bridgeGrid = new Grid2D(width, height, { ...gridOpts });
 
-    /**
-     * Ref counts per grid cell index: how many roads stamp each cell.
-     * Used so overlapping roads don't clear each other on remove.
-     * @type {Int32Array}
-     */
-    this._cellRefCounts = new Int32Array(width * height);
+    this._mutationDepth = 0;
+    this._derivedDirty = false;
   }
 
-  // ── Public read-only accessors ──────────────────────────────────────────────
+  /** @returns {RoadWay[]} */
+  get ways() {
+    return [...this._ways.values()];
+  }
 
-  /** @returns {Road[]} */
-  get roads() {
-    return [...this._roads.values()];
+  /** @returns {RoadNode[]} */
+  get nodes() {
+    return [...this._nodes.values()];
   }
 
   /** @returns {number} */
-  get roadCount() {
-    return this._roads.size;
+  get wayCount() {
+    return this._ways.size;
   }
 
   /** @returns {PlanarGraph} */
@@ -77,37 +80,34 @@ export class RoadNetwork {
 
   /**
    * @param {number} id
-   * @returns {Road | undefined}
+   * @returns {RoadWay | undefined}
    */
-  getRoad(id) {
-    return this._roads.get(id);
+  getWay(id) {
+    return this._ways.get(id);
   }
 
-  // ── Public mutation API ─────────────────────────────────────────────────────
-
   /**
-   * Add a road from a world-coordinate polyline.
    * @param {Array<{x: number, z: number}>} polyline
    * @param {object} [attrs]
    * @param {number} [attrs.width=6]
    * @param {string} [attrs.hierarchy='local']
    * @param {number} [attrs.importance=0.45]
    * @param {*}      [attrs.source]
-   * @returns {Road}
+   * @returns {RoadWay}
    */
   add(polyline, attrs = {}) {
-    const road = new Road(polyline, attrs);
-    this._roads.set(road.id, road);
-    this.#stampRoad(road, /* add= */ true);
-    this.#addToGraph(road);
-    return road;
+    const nodes = this.#buildWayNodesFromPolyline(polyline);
+    const way = new RoadWay(nodes, attrs);
+    this._ways.set(way.id, way);
+    this.#pruneDegenerateWays();
+    this.#scheduleDerivedRefresh();
+    return way;
   }
 
   /**
-   * Convert grid cells to world polyline and add.
    * @param {Array<{gx: number, gz: number}>} cells
    * @param {object} [attrs]
-   * @returns {Road | null} null if fewer than 2 cells
+   * @returns {RoadWay | null}
    */
   addFromCells(cells, attrs = {}) {
     if (!cells || cells.length < 2) return null;
@@ -119,66 +119,47 @@ export class RoadNetwork {
   }
 
   /**
-   * Remove a road by id (ref-counted unstamping).
-   * No-op for unknown ids.
    * @param {number} id
    */
   remove(id) {
-    const road = this._roads.get(id);
-    if (!road) return;
-
-    this._roads.delete(id);
-    this.#stampRoad(road, /* add= */ false);
-    this.#removeFromGraph(road);
+    if (!this._ways.has(id)) return;
+    this._ways.delete(id);
+    this.#pruneOrphanNodes();
+    this.#scheduleDerivedRefresh();
   }
 
   /**
-   * Add a parametric bridge to a road and stamp bridgeGrid.
-   * No-op for unknown roadId.
-   * @param {number} roadId
+   * @param {number} wayId
    * @param {{x: number, z: number}} bankA
    * @param {{x: number, z: number}} bankB
    * @param {number} entryT
    * @param {number} exitT
    */
-  addBridge(roadId, bankA, bankB, entryT, exitT) {
-    const road = this._roads.get(roadId);
-    if (!road) return;
-
-    road.addBridge(bankA, bankB, entryT, exitT);
-    this.#stampBridge(bankA, bankB);
+  addBridge(wayId, bankA, bankB, entryT, exitT) {
+    const way = this._ways.get(wayId);
+    if (!way) return;
+    way.addBridge(bankA, bankB, entryT, exitT);
+    this.#scheduleDerivedRefresh();
   }
 
   /**
-   * Replace a road's polyline, re-stamping grids and the graph.
-   * @param {number} id
+   * @param {number} wayId
    * @param {Array<{x: number, z: number}>} newPolyline
    */
-  updatePolyline(id, newPolyline) {
-    const road = this._roads.get(id);
-    if (!road) return;
-
-    // Unstamp old geometry
-    this.#stampRoad(road, /* add= */ false);
-    this.#removeFromGraph(road);
-
-    // Update polyline
-    road._replacePolyline(newPolyline);
-
-    // Re-stamp new geometry
-    this.#stampRoad(road, /* add= */ true);
-    this.#addToGraph(road);
+  replaceWayPolyline(wayId, newPolyline) {
+    const way = this._ways.get(wayId);
+    if (!way) return;
+    const newNodes = this.#buildWayNodesFromPolyline(newPolyline, wayId);
+    way.replaceNodes(newNodes);
+    this.#pruneDegenerateWays();
+    this.#pruneOrphanNodes();
+    this.#scheduleDerivedRefresh();
   }
 
   /**
-   * Ensure there is a graph node on the given road at (x, z).
-   * Returns an existing endpoint node when the point is already near one;
-   * otherwise splits the road's graph edge at the closest projection point.
+   * Ensure there is a real shared-node-model node on a way at (x, z).
    *
-   * This updates graph topology only. It does not split the Road polyline into
-   * multiple Road objects.
-   *
-   * @param {number} roadId
+   * @param {number} wayId
    * @param {number} x
    * @param {number} z
    * @param {object} [opts]
@@ -186,66 +167,59 @@ export class RoadNetwork {
    * @param {object} [opts.nodeAttrs={}]
    * @returns {number|null}
    */
-  ensureGraphNodeOnRoad(roadId, x, z, opts = {}) {
-    const road = this._roads.get(roadId);
-    if (!road) return null;
+  ensureNodeOnWay(wayId, x, z, opts = {}) {
+    const way = this._ways.get(wayId);
+    if (!way || way.nodes.length < 2) return null;
 
     const {
       snapDist = this._cellSize * 3,
       nodeAttrs = {},
     } = opts;
 
-    const edgeCandidates = [];
-    for (const [edgeId, edge] of this._graph.edges) {
-      if (edge?.attrs?.roadId === roadId) {
-        edgeCandidates.push({ edgeId, edge });
+    let bestExisting = null;
+    for (const node of way.nodes) {
+      const dist = Math.hypot(node.x - x, node.z - z);
+      if (dist <= snapDist && (!bestExisting || dist < bestExisting.dist)) {
+        bestExisting = { node, dist };
       }
     }
-    if (edgeCandidates.length === 0) return null;
+    if (bestExisting) {
+      return bestExisting.node.id;
+    }
 
     let best = null;
-    for (const { edgeId, edge } of edgeCandidates) {
-      const poly = this._graph.edgePolyline(edgeId);
-      const fromNode = this._graph.getNode(edge.from);
-      const toNode = this._graph.getNode(edge.to);
-      if (!fromNode || !toNode || poly.length < 2) continue;
-
-      const startDist = Math.hypot(fromNode.x - x, fromNode.z - z);
-      if (startDist <= snapDist) {
-        return edge.from;
-      }
-      const endDist = Math.hypot(toNode.x - x, toNode.z - z);
-      if (endDist <= snapDist) {
-        return edge.to;
-      }
-
-      for (let i = 0; i < poly.length - 1; i++) {
-        const proj = projectPointOntoSegment(x, z, poly[i], poly[i + 1]);
-        if (!best || proj.distSq < best.distSq) {
-          best = {
-            edgeId,
-            projX: proj.x,
-            projZ: proj.z,
-            distSq: proj.distSq,
-          };
-        }
+    for (let i = 0; i < way.nodes.length - 1; i++) {
+      const a = way.nodes[i];
+      const b = way.nodes[i + 1];
+      const proj = projectPointOntoSegment(x, z, a, b);
+      if (!best || proj.distSq < best.distSq) {
+        best = {
+          index: i,
+          x: proj.x,
+          z: proj.z,
+          distSq: proj.distSq,
+          t: proj.t,
+        };
       }
     }
-
     if (!best) return null;
 
-    return this._graph.splitEdge(best.edgeId, best.projX, best.projZ, nodeAttrs);
+    if (best.t <= 1e-4) return way.nodes[best.index].id;
+    if (best.t >= 1 - 1e-4) return way.nodes[best.index + 1].id;
+
+    const newNode = this.#createNode(best.x, best.z, nodeAttrs);
+    const nextNodes = [...way.nodes];
+    nextNodes.splice(best.index + 1, 0, newNode);
+    way.replaceNodes(this.#dedupeAdjacentNodes(nextNodes));
+    this.#scheduleDerivedRefresh();
+    return newNode.id;
   }
 
   /**
-   * Ensure both roads have a graph node at (x, z), then merge those nodes into
-   * a single junction when necessary.
+   * Split both ways if needed and merge them onto a single shared node.
    *
-   * This is the safe road-level way to form a T-junction or crossing junction
-   * at a specific point without bypassing RoadNetwork.
-   *
-   * @param {number} roadIdA
-   * @param {number} roadIdB
+   * @param {number} wayIdA
+   * @param {number} wayIdB
    * @param {number} x
    * @param {number} z
    * @param {object} [opts]
@@ -253,36 +227,215 @@ export class RoadNetwork {
    * @param {object} [opts.nodeAttrs={}]
    * @returns {number|null}
    */
-  connectRoadsAtPoint(roadIdA, roadIdB, x, z, opts = {}) {
-    const {
-      snapDist = this._cellSize * 3,
-      nodeAttrs = {},
-    } = opts;
+  connectWaysAtPoint(wayIdA, wayIdB, x, z, opts = {}) {
+    return this.mutate(() => {
+      const {
+        snapDist = this._cellSize * 3,
+        nodeAttrs = {},
+      } = opts;
 
-    const nodeA = this.ensureGraphNodeOnRoad(roadIdA, x, z, { snapDist, nodeAttrs });
-    const nodeB = this.ensureGraphNodeOnRoad(roadIdB, x, z, { snapDist, nodeAttrs });
+      const nodeA = this.ensureNodeOnWay(wayIdA, x, z, { snapDist, nodeAttrs });
+      const nodeB = this.ensureNodeOnWay(wayIdB, x, z, { snapDist, nodeAttrs });
 
-    if (nodeA === null) return nodeB;
-    if (nodeB === null) return nodeA;
-    if (nodeA === nodeB) return nodeA;
+      if (nodeA === null) return nodeB;
+      if (nodeB === null) return nodeA;
+      if (nodeA === nodeB) return nodeA;
 
-    this._graph.mergeNodes(nodeB, nodeA);
-    return nodeA;
+      this.#mergeNodeRefs(nodeA, nodeB);
+      this.#scheduleDerivedRefresh();
+      return nodeA;
+    });
   }
 
-  // ── Private: stamping ───────────────────────────────────────────────────────
+  /**
+   * Merge one existing node into another shared node.
+   * The kept node retains its position; all way references to dropId
+   * are rewritten to keepId.
+   *
+   * @param {number} keepId
+   * @param {number} dropId
+   * @returns {number|null}
+   */
+  mergeNodes(keepId, dropId) {
+    if (keepId === dropId) return keepId;
+    if (!this._nodes.has(keepId) || !this._nodes.has(dropId)) return null;
+    this.#mergeNodeRefs(keepId, dropId);
+    this.#scheduleDerivedRefresh();
+    return keepId;
+  }
 
   /**
-   * Walk the road's polyline and stamp (or unstamp) roadGrid cells.
-   * @param {Road} road
-   * @param {boolean} add - true to stamp, false to unstamp
+   * Defer derived graph/grid rebuilds until a group of mutations completes.
+   *
+   * @template T
+   * @param {() => T} mutator
+   * @returns {T}
    */
-  #stampRoad(road, add) {
-    const polyline = road.polyline;
+  mutate(mutator) {
+    this._mutationDepth++;
+    try {
+      return mutator();
+    } finally {
+      this._mutationDepth--;
+      if (this._mutationDepth === 0 && this._derivedDirty) {
+        this.rebuildDerived();
+      }
+    }
+  }
+
+  rebuildDerived() {
+    this._derivedDirty = false;
+    this._graph = new PlanarGraph();
+    this._roadGrid.fill(0);
+    this._bridgeGrid.fill(0);
+
+    for (const node of this._nodes.values()) {
+      this._graph.nodes.set(node.id, { id: node.id, x: node.x, z: node.z, attrs: { ...node.attrs } });
+      this._graph._adjacency.set(node.id, []);
+      if (node.id >= this._graph._nextNodeId) {
+        this._graph._nextNodeId = node.id + 1;
+      }
+    }
+
+    for (const way of this._ways.values()) {
+      this.#stampWay(way);
+      for (const bridge of way.bridges) {
+        this.#stampBridge(bridge.bankA, bridge.bankB);
+      }
+      for (let i = 0; i < way.nodes.length - 1; i++) {
+        const from = way.nodes[i];
+        const to = way.nodes[i + 1];
+        if (!from || !to || from.id === to.id) continue;
+        this._graph.addEdge(from.id, to.id, {
+          points: [],
+          width: way.width,
+          hierarchy: way.hierarchy,
+          wayId: way.id,
+          source: way.source,
+        });
+      }
+    }
+  }
+
+  #buildWayNodesFromPolyline(polyline, replacingWayId = null) {
+    const pts = (polyline || []).map(p => ({ x: p.x, z: p.z }));
+    if (pts.length < 2) return [];
+
+    const nextNodes = [];
+    const snapDist = this._cellSize * 3;
+    const replacementNodeIds = replacingWayId !== null
+      ? new Set((this._ways.get(replacingWayId)?.nodes || []).map(node => node.id))
+      : null;
+
+    for (let i = 0; i < pts.length; i++) {
+      const pt = pts[i];
+      let node;
+      const isEndpoint = i === 0 || i === pts.length - 1;
+      if (isEndpoint) {
+        node = this.#findNearbyNode(pt.x, pt.z, snapDist, replacementNodeIds);
+      }
+      if (!node) {
+        node = this.#createNode(pt.x, pt.z);
+      }
+      nextNodes.push(node);
+    }
+
+    const deduped = this.#dedupeAdjacentNodes(nextNodes);
+    if (deduped.length < 2) {
+      const start = pts[0];
+      const end = pts[pts.length - 1];
+      const inputLen = Math.hypot(end.x - start.x, end.z - start.z);
+      if (inputLen > 1e-6) {
+        deduped.push(this.#createNode(end.x, end.z));
+      }
+    }
+    if (deduped.length >= 2 && deduped[0].id === deduped[deduped.length - 1].id) {
+      deduped[deduped.length - 1] = this.#createNode(pts[pts.length - 1].x, pts[pts.length - 1].z);
+    }
+    return this.#dedupeAdjacentNodes(deduped);
+  }
+
+  #createNode(x, z, attrs = {}) {
+    const node = new RoadNode(x, z, attrs);
+    this._nodes.set(node.id, node);
+    return node;
+  }
+
+  #findNearbyNode(x, z, snapDist, excludedIds = null) {
+    let best = null;
+    for (const node of this._nodes.values()) {
+      if (excludedIds && excludedIds.has(node.id)) continue;
+      const dist = Math.hypot(node.x - x, node.z - z);
+      if (dist <= snapDist && (!best || dist < best.dist)) {
+        best = { node, dist };
+      }
+    }
+    return best?.node ?? null;
+  }
+
+  #mergeNodeRefs(keepId, dropId) {
+    const keep = this._nodes.get(keepId);
+    const drop = this._nodes.get(dropId);
+    if (!keep || !drop) return;
+
+    for (const way of this._ways.values()) {
+      const merged = way.nodes.map(node => (node.id === dropId ? keep : node));
+      way.replaceNodes(this.#dedupeAdjacentNodes(merged));
+    }
+
+    this._nodes.delete(dropId);
+    this.#pruneDegenerateWays();
+    this.#pruneOrphanNodes();
+  }
+
+  #dedupeAdjacentNodes(nodes) {
+    const deduped = [];
+    for (const node of nodes) {
+      if (!node) continue;
+      const prev = deduped[deduped.length - 1];
+      if (!prev || prev.id !== node.id) {
+        deduped.push(node);
+      }
+    }
+    return deduped;
+  }
+
+  #pruneDegenerateWays() {
+    for (const [wayId, way] of this._ways) {
+      if (!way.nodes || way.nodes.length < 2) {
+        this._ways.delete(wayId);
+      }
+    }
+  }
+
+  #pruneOrphanNodes() {
+    const referenced = new Set();
+    for (const way of this._ways.values()) {
+      for (const node of way.nodes) {
+        referenced.add(node.id);
+      }
+    }
+    for (const [nodeId] of this._nodes) {
+      if (!referenced.has(nodeId)) {
+        this._nodes.delete(nodeId);
+      }
+    }
+  }
+
+  #scheduleDerivedRefresh() {
+    if (this._mutationDepth > 0) {
+      this._derivedDirty = true;
+      return;
+    }
+    this.rebuildDerived();
+  }
+
+  #stampWay(way) {
+    const polyline = way.polyline;
     if (!polyline || polyline.length < 2) return;
 
     const cs = this._cellSize;
-    const halfWidth = road.width / 2;
+    const halfWidth = way.width / 2;
     const effectiveRadius = Math.max(halfWidth, cs * 0.75);
     const cellRadius = Math.ceil(effectiveRadius / cs);
     const stepSize = cs * 0.5;
@@ -292,14 +445,16 @@ export class RoadNetwork {
     const H = this._height;
 
     for (let i = 0; i < polyline.length - 1; i++) {
-      const ax = polyline[i].x, az = polyline[i].z;
-      const bx = polyline[i + 1].x, bz = polyline[i + 1].z;
-      const dx = bx - ax, dz = bz - az;
+      const ax = polyline[i].x;
+      const az = polyline[i].z;
+      const bx = polyline[i + 1].x;
+      const bz = polyline[i + 1].z;
+      const dx = bx - ax;
+      const dz = bz - az;
       const segLen = Math.sqrt(dx * dx + dz * dz);
       if (segLen < 0.01) continue;
 
       const steps = Math.ceil(segLen / stepSize);
-
       for (let s = 0; s <= steps; s++) {
         const t = s / steps;
         const px = ax + dx * t;
@@ -319,28 +474,13 @@ export class RoadNetwork {
             const distSq = (cellX - px) ** 2 + (cellZ - pz) ** 2;
             if (distSq > effectiveRadius * effectiveRadius) continue;
 
-            const idx = gz * W + gx;
-            if (add) {
-              this._cellRefCounts[idx]++;
-              this._roadGrid.set(gx, gz, 1);
-            } else {
-              const count = Math.max(0, this._cellRefCounts[idx] - 1);
-              this._cellRefCounts[idx] = count;
-              if (count === 0) {
-                this._roadGrid.set(gx, gz, 0);
-              }
-            }
+            this._roadGrid.set(gx, gz, 1);
           }
         }
       }
     }
   }
 
-  /**
-   * Stamp bridgeGrid between bankA and bankB at cellSize steps.
-   * @param {{x: number, z: number}} bankA
-   * @param {{x: number, z: number}} bankB
-   */
   #stampBridge(bankA, bankB) {
     const cs = this._cellSize;
     const ox = this._originX;
@@ -352,7 +492,6 @@ export class RoadNetwork {
     const dz = bankB.z - bankA.z;
     const len = Math.sqrt(dx * dx + dz * dz);
     if (len < 0.01) {
-      // Stamp single cell
       const gx = Math.round((bankA.x - ox) / cs);
       const gz = Math.round((bankA.z - oz) / cs);
       if (gx >= 0 && gx < W && gz >= 0 && gz < H) {
@@ -372,108 +511,6 @@ export class RoadNetwork {
       this._bridgeGrid.set(gx, gz, 1);
     }
   }
-
-  // ── Private: graph management ───────────────────────────────────────────────
-
-  /**
-   * Find or create graph nodes for the road's start/end, then add the edge.
-   * Skips if start === end (degenerate road).
-   * Logs a warning if an edge between these nodes already exists.
-   * @param {Road} road
-   */
-  #addToGraph(road) {
-    const snapDist = this._cellSize * 3;
-    const startPt = road.start;
-    const endPt = road.end;
-
-    const startNode = this.#findOrCreateNode(startPt.x, startPt.z, snapDist);
-    const endNode = this.#findOrCreateNode(endPt.x, endPt.z, snapDist);
-
-    if (startNode === endNode) {
-      // Degenerate road: both endpoints snapped to the same node.
-      // If startNode was newly created (degree 0), remove it to avoid orphan.
-      if (this._graph.degree(startNode) === 0) {
-        this._graph.removeNode(startNode);
-      }
-      return;
-    }
-
-    // Skip if already connected — duplicate edges break face extraction
-    const neighbors = this._graph.neighbors(startNode);
-    if (neighbors.includes(endNode)) {
-      return;
-    }
-
-    // Intermediate points (all polyline points except first and last)
-    const poly = road.polyline;
-    const points = poly.slice(1, poly.length - 1);
-
-    this._graph.addEdge(startNode, endNode, {
-      points,
-      width: road.width,
-      hierarchy: road.hierarchy,
-      roadId: road.id,
-    });
-  }
-
-  /**
-   * Find the edge between a road's start/end and remove it.
-   * Removes orphaned nodes (degree 0) after edge removal.
-   * @param {Road} road
-   */
-  #removeFromGraph(road) {
-    const snapDist = this._cellSize * 3;
-    const startPt = road.start;
-    const endPt = road.end;
-
-    const nearStart = this._graph.nearestNode(startPt.x, startPt.z);
-    const nearEnd = this._graph.nearestNode(endPt.x, endPt.z);
-
-    if (!nearStart || !nearEnd) return;
-    if (nearStart.dist > snapDist || nearEnd.dist > snapDist) return;
-    if (nearStart.id === nearEnd.id) return;
-
-    const startId = nearStart.id;
-    const endId = nearEnd.id;
-
-    // Find the edge connecting these two nodes
-    const adj = this._graph._adjacency.get(startId);
-    if (!adj) return;
-
-    let edgeId = null;
-    for (const entry of adj) {
-      if (entry.neighborId === endId) {
-        edgeId = entry.edgeId;
-        break;
-      }
-    }
-    if (edgeId === null) return;
-
-    this._graph._removeEdge(edgeId);
-
-    // Clean up orphaned nodes
-    if (this._graph.degree(startId) === 0) {
-      this._graph.removeNode(startId);
-    }
-    if (this._graph.nodes.has(endId) && this._graph.degree(endId) === 0) {
-      this._graph.removeNode(endId);
-    }
-  }
-
-  /**
-   * Find an existing node within snapDist, or create a new one.
-   * @param {number} x
-   * @param {number} z
-   * @param {number} snapDist
-   * @returns {number} node id
-   */
-  #findOrCreateNode(x, z, snapDist) {
-    const nearest = this._graph.nearestNode(x, z);
-    if (nearest && nearest.dist <= snapDist) {
-      return nearest.id;
-    }
-    return this._graph.addNode(x, z);
-  }
 }
 
 function projectPointOntoSegment(px, pz, a, b) {
@@ -484,6 +521,7 @@ function projectPointOntoSegment(px, pz, a, b) {
     return {
       x: a.x,
       z: a.z,
+      t: 0,
       distSq: (px - a.x) * (px - a.x) + (pz - a.z) * (pz - a.z),
     };
   }
@@ -495,6 +533,7 @@ function projectPointOntoSegment(px, pz, a, b) {
   return {
     x,
     z,
+    t,
     distSq: (px - x) * (px - x) + (pz - z) * (pz - z),
   };
 }

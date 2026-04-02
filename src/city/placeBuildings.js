@@ -52,7 +52,7 @@ export function placeBuildings(map, seed) {
 
   let houseCount = 0;
 
-  for (const road of map.roads) {
+  for (const road of map.ways) {
     if (houseCount >= MAX_HOUSES) break;
     const pts = road.polyline;
     if (!pts || pts.length < 2) continue;
@@ -633,7 +633,7 @@ function _stampRoadsOntoOccupancy(map, occupancy) {
   const ox = map.originX, oz = map.originZ;
   const w = map.width, h = map.height;
 
-  for (const road of map.roads) {
+  for (const road of map.ways) {
     // Skip local ribbon roads — plots are designed to line them
     if (road.source === 'land-first' && road.hierarchy === 'local') continue;
 

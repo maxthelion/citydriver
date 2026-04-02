@@ -110,15 +110,15 @@ describe('bridges', () => {
   describe('placeBridges', () => {
     it('splices a perpendicular bridge into the triggering road', () => {
       const map = makeTestMap();
-      const roadsBefore = map.roads.length;
-      const road = map.roads.find(r => r.source === 'skeleton');
+      const roadsBefore = map.ways.length;
+      const road = map.ways.find(r => r.source === 'skeleton');
       const originalPolylineLength = road.polyline.length;
 
       const result = placeBridges(map);
 
       expect(result.placed).toBe(1);
       // No new road features created — bridge is spliced into existing road
-      expect(map.roads.length).toBe(roadsBefore);
+      expect(map.ways.length).toBe(roadsBefore);
       // The road's polyline should now have more points than the original 2
       expect(road.polyline.length).toBeGreaterThan(originalPolylineLength);
       // Some mid-polyline points should be near the river crossing zone (z ~ 500)
@@ -184,7 +184,7 @@ describe('bridges', () => {
       // Both rivers should get a bridge
       expect(result.placed).toBe(2);
       // Still only 1 skeleton road (both bridges spliced into it)
-      const skeletonRoads = map.roads.filter(r => r.source === 'skeleton');
+      const skeletonRoads = map.ways.filter(r => r.source === 'skeleton');
       expect(skeletonRoads.length).toBe(1);
       // Road polyline should have grown from the original 2 points
       expect(skeletonRoads[0].polyline.length).toBeGreaterThan(2);

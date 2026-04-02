@@ -52,6 +52,7 @@ function countParallel(roads, snapDist) {
 // is within `corridorDist` of the longer road's polyline.
 function findGeometricParallels(roads, corridorDist) {
   const pairs = [];
+  const maxAngleDeltaDeg = 20;
 
   function ptToPolylineDist(px, pz, polyline) {
     let minD = Infinity;
@@ -77,9 +78,27 @@ function findGeometricParallels(roads, corridorDist) {
     return len;
   }
 
+  function polylineDirection(polyline) {
+    const start = polyline[0];
+    const end = polyline[polyline.length - 1];
+    const dx = end.x - start.x;
+    const dz = end.z - start.z;
+    const len = Math.hypot(dx, dz);
+    if (len < 1e-6) return null;
+    return { x: dx / len, z: dz / len };
+  }
+
   for (let i = 0; i < roads.length; i++) {
     for (let j = i + 1; j < roads.length; j++) {
       const pi = roads[i].polyline, pj = roads[j].polyline;
+      const dirI = polylineDirection(pi);
+      const dirJ = polylineDirection(pj);
+      if (!dirI || !dirJ) continue;
+      let dot = dirI.x * dirJ.x + dirI.z * dirJ.z;
+      dot = Math.max(-1, Math.min(1, dot));
+      const angleDelta = Math.acos(Math.abs(dot)) * 180 / Math.PI;
+      if (angleDelta > maxAngleDeltaDeg) continue;
+
       // Check shorter road against longer
       const [shorter, longer] = polylineLength(pi) <= polylineLength(pj) ? [pi, pj] : [pj, pi];
 
@@ -106,7 +125,7 @@ describe('compactRoads integration', { timeout: 30000 }, () => {
 
     buildSkeleton(map);
 
-    const skeletonRoads = map.roads.filter(r => r.source === 'skeleton');
+    const skeletonRoads = map.ways.filter(r => r.source === 'skeleton');
     const snapDist = map.cellSize * 1.5;
     const parallelAfter = countParallel(skeletonRoads, snapDist);
 

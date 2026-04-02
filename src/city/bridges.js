@@ -88,7 +88,7 @@ export function placeBridges(map) {
     // already-mutated polyline — the entry/exit world coords from
     // findRoadWaterCrossings are still valid because _closestPointIndex
     // re-searches the current polyline.
-    _spliceBridge(crossing.road, crossing.entryX, crossing.entryZ,
+    _spliceBridge(map, crossing.road, crossing.entryX, crossing.entryZ,
                   crossing.exitX, crossing.exitZ, banks.bankA, banks.bankB);
 
     // Stamp bridgeGrid for water cells between banks
@@ -110,7 +110,7 @@ export function placeBridges(map) {
  */
 export function findRoadWaterCrossings(map) {
   const crossings = [];
-  const skeletonRoads = map.roads.filter(r => r.source === 'skeleton');
+  const skeletonRoads = map.ways.filter(r => r.source === 'skeleton');
 
   for (const road of skeletonRoads) {
     const polyline = road.polyline;
@@ -328,7 +328,8 @@ function _closestPointIndex(polyline, wx, wz) {
  * Replaces the water-crossing portion of the road with a two-point bridge
  * segment (nearBank → farBank) that is perpendicular to the river.
  *
- * @param {object} road - Road feature object (polyline modified in place)
+ * @param {import('../core/FeatureMap.js').FeatureMap} map
+ * @param {object} road - Way feature object
  * @param {number} entryX - World X where road enters water
  * @param {number} entryZ - World Z where road enters water
  * @param {number} exitX - World X where road exits water
@@ -336,7 +337,7 @@ function _closestPointIndex(polyline, wx, wz) {
  * @param {{ x: number, z: number }} bankA - One bank position
  * @param {{ x: number, z: number }} bankB - Other bank position
  */
-function _spliceBridge(road, entryX, entryZ, exitX, exitZ, bankA, bankB) {
+function _spliceBridge(map, road, entryX, entryZ, exitX, exitZ, bankA, bankB) {
   const polyline = road.polyline;
 
   // Find polyline point indices closest to water entry and exit
@@ -374,11 +375,7 @@ function _spliceBridge(road, entryX, entryZ, exitX, exitZ, bankA, bankB) {
   const after = polyline.slice(exitIdx);
 
   const newPolyline = [...before, nearBank, farBank, ...after];
-  if (typeof road._replacePolyline === 'function') {
-    road._replacePolyline(newPolyline);
-  } else {
-    road.polyline = newPolyline;
-  }
+  map.roadNetwork.replaceWayPolyline(road.id, newPolyline);
 }
 
 /**

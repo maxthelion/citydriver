@@ -155,7 +155,7 @@ describe('pipeline property tests (20 seeds)', { timeout: 300000 }, () => {
 
           if (stepId === 'skeleton') {
             snapshots.afterSkeleton = {
-              roadCount: map.roads.length,
+              wayCount: map.ways.length,
               nucleiCount: map.nuclei ? map.nuclei.length : 0,
               components: countGraphComponents(map.graph),
             };
@@ -197,7 +197,7 @@ describe('pipeline property tests (20 seeds)', { timeout: 300000 }, () => {
       }
 
       snapshots.final = {
-        roadCount: map.roads.length,
+        wayCount: map.ways.length,
         zoneCount: (map.developmentZones || []).length,
       };
 
@@ -212,8 +212,8 @@ describe('pipeline property tests (20 seeds)', { timeout: 300000 }, () => {
       // After 'skeleton': road network has >= 1 road
       const skSnap = snapshots.afterSkeleton;
       if (skSnap) {
-        if (skSnap.roadCount < 1) {
-          failures.push(`road count = ${skSnap.roadCount} after skeleton (need >= 1)`);
+        if (skSnap.wayCount < 1) {
+          failures.push(`road count = ${skSnap.wayCount} after skeleton (need >= 1)`);
         }
         // Graph is connected (or has at most as many components as nuclei)
         if (skSnap.components > skSnap.nucleiCount) {
@@ -278,7 +278,7 @@ describe('pipeline property tests (20 seeds)', { timeout: 300000 }, () => {
       // Final state: road count > 0, zone count > 0
       const fSnap = snapshots.final;
       if (fSnap) {
-        if (fSnap.roadCount === 0) {
+        if (fSnap.wayCount === 0) {
           failures.push('road count = 0 at completion');
         }
         if (fSnap.zoneCount === 0) {

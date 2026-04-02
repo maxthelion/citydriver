@@ -4,7 +4,7 @@
  * Checks road network structural consistency:
  *   - Every road has ≥ 2 polyline points
  *   - Every polyline point is within map bounds
- *   - graph.edges.size matches roadNetwork.roads.length
+ *   - graph.edges.size matches the total number of way segments
  *   - Every graph node has degree ≥ 1 (no orphaned nodes)
  *   - Bridge bank points are on dry land
  *
@@ -41,15 +41,19 @@ export function checkAllPolylineInvariants(map) {
   const ox = map.originX ?? 0;
   const oz = map.originZ ?? 0;
 
-  // Check every road
-  for (const road of network.roads) {
-    const pts = road.polyline ?? road.points ?? [];
+  let expectedEdgeCount = 0;
+
+  // Check every way
+  for (const way of network.ways) {
+    const pts = way.polyline ?? way.points ?? [];
 
     // Must have at least 2 points
     if (pts.length < 2) {
       result.degenerateRoads++;
       continue;
     }
+
+    expectedEdgeCount += Math.max(0, pts.length - 1);
 
     // Every point must be within world bounds (allow 1-cell tolerance for
     // sub-cell floating-point drift from ribbon layout near map edges)
@@ -65,11 +69,8 @@ export function checkAllPolylineInvariants(map) {
     }
   }
 
-  // graph.edges.size must match number of roads
-  if (graph.edges && network.count !== undefined) {
-    if (graph.edges.size !== network.count) {
-      result.graphEdgeMismatch = true;
-    }
+  if (graph.edges && graph.edges.size !== expectedEdgeCount) {
+    result.graphEdgeMismatch = true;
   }
 
   // Every graph node must have degree ≥ 1
@@ -84,8 +85,8 @@ export function checkAllPolylineInvariants(map) {
   // Bridge bank points must be on dry land
   const waterMask = map.hasLayer('waterMask') ? map.getLayer('waterMask') : null;
   if (waterMask) {
-    for (const road of network.roads) {
-      const bridges = road.bridges ?? [];
+    for (const way of network.ways) {
+      const bridges = way.bridges ?? [];
       for (const bridge of bridges) {
         for (const bank of [bridge.bankA, bridge.bankB]) {
           if (!bank) continue;

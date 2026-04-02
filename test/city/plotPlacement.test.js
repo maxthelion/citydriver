@@ -63,7 +63,7 @@ function stampQuad(corners, bitmap, cs, ox, oz) {
 function buildFilteredRoadBitmap(map, filterFn) {
   const { width, height, cellSize: cs, originX: ox, originZ: oz } = map;
   const bitmap = new Grid2D(width, height, { type: 'uint8' });
-  for (const road of map.roads) {
+  for (const road of map.ways) {
     if (!filterFn(road)) continue;
     const polyline = road.polyline;
     if (!polyline || polyline.length < 2) continue;
@@ -139,7 +139,7 @@ describe('plot placement bitmap verification', { timeout: 120000 }, () => {
     // Check that zone cells don't overlap with skeleton-source roads
     // by rebuilding just the skeleton road bitmap.
     const { map } = getShared();
-    const skeletonRoads = map.roads.filter(r => r.source === 'skeleton' || r.source === 'bridge');
+    const skeletonRoads = map.ways.filter(r => r.source === 'skeleton' || r.source === 'bridge');
     const skeletonBitmap = new Grid2D(map.width, map.height, { type: 'uint8', cellSize: map.cellSize });
     for (const road of skeletonRoads) {
       if (!road.polyline || road.polyline.length < 2) continue;

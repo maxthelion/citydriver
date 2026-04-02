@@ -47,7 +47,7 @@ export function prepareCityScene(map) {
  * Polylines are already Chaikin-smoothed by the pipeline.
  */
 function prepareRoads(map, ox, oz, cs) {
-  return map.roads.map(road => {
+  return map.ways.map(road => {
     const pts = road.polyline;
     if (!pts || pts.length < 2) return null;
 

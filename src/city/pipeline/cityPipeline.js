@@ -76,11 +76,11 @@ export function* cityPipeline(map, archetype) {
   yield step('edge-lookups', () => buildEdgeLookups(map));
   yield step('connect', () => connectToNetwork(map));
   yield step('smooth-roads', () => {
-    for (const road of map.roads) {
-      if (!road.polyline || road.polyline.length < 3) continue;
-      let poly = road.polyline;
+    for (const way of map.ways) {
+      if (!way.polyline || way.polyline.length < 3) continue;
+      let poly = way.polyline;
       for (let i = 0; i < 2; i++) poly = chaikinSmooth(poly);
-      road._replacePolyline(poly);
+      map.roadNetwork.replaceWayPolyline(way.id, poly);
     }
   });
 }

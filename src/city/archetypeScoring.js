@@ -19,8 +19,8 @@ export function scoreSettlement(map) {
   const waterDist = map.hasLayer('waterDist') ? map.getLayer('waterDist') : null;
   const { width, height } = map;
   const tier = map.settlement?.tier || 3;
-  const roadCount = map.roads
-    ? map.roads.filter(r => r.hierarchy === 'arterial' || r.importance > 0.5).length
+  const wayCount = map.ways
+    ? map.ways.filter(r => r.hierarchy === 'arterial' || r.importance > 0.5).length
     : 0;
   const hasRivers = map.rivers && map.rivers.length > 0;
 
@@ -51,8 +51,8 @@ export function scoreSettlement(map) {
       return { archetype: arch, score: Math.min(1, waterfrontFraction * 3), factors };
     },
     marketTown(arch) {
-      const base = Math.min(1, roadCount / 4);
-      const factors = [`${roadCount} road connections`];
+      const base = Math.min(1, wayCount / 4);
+      const factors = [`${wayCount} road connections`];
       const hasMarket = map.nuclei.some(n => n.type === 'market');
       const score = hasMarket ? Math.min(1, base + 0.2) : base;
       if (hasMarket) factors.push('Has market nucleus');
@@ -78,8 +78,8 @@ export function scoreSettlement(map) {
     },
     civicCentre(arch) {
       const tierScore = tier <= 2 ? 0.8 : 0.3;
-      const connScore = Math.min(0.4, roadCount / 8);
-      const factors = [`Settlement tier ${tier}`, `${roadCount} road connections`];
+      const connScore = Math.min(0.4, wayCount / 8);
+      const factors = [`Settlement tier ${tier}`, `${wayCount} road connections`];
       if (tier > 2) factors.push('Settlement tier too low for regional capital');
       return { archetype: arch, score: tierScore + connScore, factors };
     },

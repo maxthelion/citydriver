@@ -29,18 +29,18 @@ describe('LandFirstDevelopment', { timeout: 120000 }, () => {
     const more = strategy.tick();
 
     expect(more).toBe(true);
-    expect(map.roads.length).toBeGreaterThan(0);
+    expect(map.ways.length).toBeGreaterThan(0);
   });
 
   it('completes all ticks without error', () => {
-    expect(sharedMap.roads.length).toBeGreaterThan(0);
+    expect(sharedMap.ways.length).toBeGreaterThan(0);
   });
 
   it('smooths road polylines via smooth-roads step', () => {
-    const longerRoads = sharedMap.roads.filter(r => r.polyline.length >= 3);
+    const longerRoads = sharedMap.ways.filter(r => r.polyline.length >= 3);
     expect(longerRoads.length).toBeGreaterThan(0);
 
-    const smoothedRoads = sharedMap.roads.filter(r => r.polyline.length >= 9);
+    const smoothedRoads = sharedMap.ways.filter(r => r.polyline.length >= 9);
     expect(smoothedRoads.length).toBeGreaterThan(0);
   });
 
@@ -50,7 +50,7 @@ describe('LandFirstDevelopment', { timeout: 120000 }, () => {
   });
 
   it('adds local roads from ribbon layout', () => {
-    const localRoads = sharedMap.roads.filter(r => r.hierarchy === 'local');
+    const localRoads = sharedMap.ways.filter(r => r.hierarchy === 'local');
     expect(localRoads.length).toBeGreaterThan(0);
   });
 });
@@ -75,7 +75,7 @@ describe('LandFirstDevelopment with archetype', { timeout: 120000 }, () => {
         if (grid.get(gx, gz) > 0) reserved++;
 
     expect(reserved).toBeGreaterThan(0);
-    const localRoads = map.roads.filter(r => r.hierarchy === 'local');
+    const localRoads = map.ways.filter(r => r.hierarchy === 'local');
     expect(localRoads.length).toBeGreaterThan(0);
   });
 });

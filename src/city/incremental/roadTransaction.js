@@ -23,7 +23,7 @@
  * @param {number} [opts.minSeparation=5] - Min distance from parallel roads (metres)
  * @param {number} [opts.junctionRadius=3] - Endpoint snap tolerance for junctions (metres)
  * @param {number} [opts.angleTolerance=15] - Max angle diff (degrees) to count as parallel
- * @returns {{ accepted: boolean, road: Road|null, violations: string[], violationDetails: object[] }}
+ * @returns {{ accepted: boolean, way: import('../../core/RoadWay.js').RoadWay|null, violations: string[], violationDetails: object[] }}
  */
 export function tryAddRoad(map, polyline, attrs = {}, opts = {}) {
   const {
@@ -33,26 +33,26 @@ export function tryAddRoad(map, polyline, attrs = {}, opts = {}) {
   } = opts;
 
   if (!polyline || polyline.length < 2) {
-    return { accepted: false, road: null, violations: ['polyline too short'], violationDetails: [{ type: 'polyline-too-short' }] };
+    return { accepted: false, way: null, violations: ['polyline too short'], violationDetails: [{ type: 'polyline-too-short' }] };
   }
 
   // 1. Add tentatively
-  const road = map.roadNetwork.add(polyline, attrs);
+  const way = map.roadNetwork.add(polyline, attrs);
 
   // 2. Collect segments of the new road
-  const newSegs = polylineToSegments(road.polyline);
+  const newSegs = polylineToSegments(way.polyline);
 
   // 3. Collect segments of all OTHER existing roads (with bounding box filter)
   const bbox = segmentsBBox(newSegs, Math.max(minSeparation, junctionRadius) + 10);
   const existingSegs = [];
-  for (const other of map.roadNetwork.roads) {
-    if (other.id === road.id) continue;
+  for (const other of map.roadNetwork.ways) {
+    if (other.id === way.id) continue;
     const otherSegs = polylineToSegments(other.polyline);
     for (const seg of otherSegs) {
       if (segInBBox(seg, bbox)) {
         existingSegs.push({
           seg,
-          roadId: other.id,
+          wayId: other.id,
           source: other.source ?? other.attrs?.source ?? null,
           hierarchy: other.hierarchy ?? other.attrs?.hierarchy ?? null,
         });
@@ -79,9 +79,9 @@ export function tryAddRoad(map, polyline, attrs = {}, opts = {}) {
         violations.push(`crosses existing road at (${pt.x.toFixed(0)},${pt.z.toFixed(0)})`);
         violationDetails.push({
           type: 'crossing',
-          roadId: existing.roadId,
-          roadSource: existing.source,
-          roadHierarchy: existing.hierarchy,
+          wayId: existing.wayId,
+          waySource: existing.source,
+          wayHierarchy: existing.hierarchy,
           point: { x: pt.x, z: pt.z },
           newSegment: cloneSeg(ns),
           existingSegment: cloneSeg(es),
@@ -137,12 +137,13 @@ export function tryAddRoad(map, polyline, attrs = {}, opts = {}) {
         es[0].x, es[0].z, es[1].x, es[1].z
       );
       if (d < minSeparation) {
+        if (isSharedEndpointThroughConnection(ns, es, junctionRadius)) continue;
         violations.push(`parallel to existing road, ${d.toFixed(1)}m apart`);
         violationDetails.push({
           type: 'parallel',
-          roadId: existing.roadId,
-          roadSource: existing.source,
-          roadHierarchy: existing.hierarchy,
+          wayId: existing.wayId,
+          waySource: existing.source,
+          wayHierarchy: existing.hierarchy,
           distance: d,
           angleDiff,
           midpoint: nsMid,
@@ -156,11 +157,11 @@ export function tryAddRoad(map, polyline, attrs = {}, opts = {}) {
 
   // 5. Accept or roll back
   if (violations.length > 0) {
-    map.roadNetwork.remove(road.id);
-    return { accepted: false, road: null, violations, violationDetails };
+    map.roadNetwork.remove(way.id);
+    return { accepted: false, way: null, violations, violationDetails };
   }
 
-  return { accepted: true, road, violations: [], violationDetails: [] };
+  return { accepted: true, way, violations: [], violationDetails: [] };
 }
 
 // === Geometry helpers ===
@@ -238,4 +239,43 @@ function cloneSeg(seg) {
     { x: seg[0].x, z: seg[0].z },
     { x: seg[1].x, z: seg[1].z },
   ];
+}
+
+function isSharedEndpointThroughConnection(segA, segB, tolerance) {
+  const shared = findSharedEndpoint(segA, segB, tolerance);
+  if (!shared) return false;
+
+  const otherA = shared.aIndex === 0 ? segA[1] : segA[0];
+  const otherB = shared.bIndex === 0 ? segB[1] : segB[0];
+  const ax = otherA.x - shared.point.x;
+  const az = otherA.z - shared.point.z;
+  const bx = otherB.x - shared.point.x;
+  const bz = otherB.z - shared.point.z;
+  const lenA = Math.hypot(ax, az);
+  const lenB = Math.hypot(bx, bz);
+  if (lenA < 1e-6 || lenB < 1e-6) return false;
+
+  // Opposing rays from a shared node are a valid through connection, not a
+  // duplicate parallel neighbor. Same-direction rays still count as overlap.
+  const dot = (ax / lenA) * (bx / lenB) + (az / lenA) * (bz / lenB);
+  return dot <= -0.5;
+}
+
+function findSharedEndpoint(segA, segB, tolerance) {
+  const endpointsA = [segA[0], segA[1]];
+  const endpointsB = [segB[0], segB[1]];
+  for (let aIndex = 0; aIndex < endpointsA.length; aIndex++) {
+    for (let bIndex = 0; bIndex < endpointsB.length; bIndex++) {
+      const a = endpointsA[aIndex];
+      const b = endpointsB[bIndex];
+      if (Math.hypot(a.x - b.x, a.z - b.z) <= tolerance) {
+        return {
+          point: { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 },
+          aIndex,
+          bIndex,
+        };
+      }
+    }
+  }
+  return null;
 }

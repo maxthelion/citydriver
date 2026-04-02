@@ -239,7 +239,7 @@ function runK3OnZone(zone, map) {
   // Clip at existing roads
   const existingRoads = [];
   if (roadGrid) {
-    for (const road of (map.roads || [])) {
+    for (const road of (map.ways || [])) {
       const pts = road.polyline || road.points || [];
       for (let i = 0; i < pts.length - 1; i++) {
         existingRoads.push([{ x: pts[i].x, z: pts[i].z }, { x: pts[i+1].x, z: pts[i+1].z }]);

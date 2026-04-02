@@ -31,9 +31,9 @@ describe('buildSkeleton', { timeout: 30000 }, () => {
     const map = makeCity();
     if (!map) return;
 
-    const roadsBefore = map.roads.length;
+    const roadsBefore = map.ways.length;
     buildSkeleton(map);
-    expect(map.roads.length).toBeGreaterThan(roadsBefore);
+    expect(map.ways.length).toBeGreaterThan(roadsBefore);
   });
 
   it('populates the PlanarGraph', () => {
@@ -63,7 +63,7 @@ describe('buildSkeleton', { timeout: 30000 }, () => {
 
       buildSkeleton(map);
       expect(map.nuclei.length).toBeGreaterThan(0);
-      expect(map.roads.length).toBeGreaterThan(0);
+      expect(map.ways.length).toBeGreaterThan(0);
     }
   });
 });

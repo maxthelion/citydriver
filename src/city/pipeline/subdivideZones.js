@@ -35,7 +35,7 @@ export function subdivideLargeZones(map, options = {}) {
   const ox = map.originX, oz = map.originZ;
 
   const costFn = map.createPathCost ? map.createPathCost('growth') : null;
-  const roadsBefore = map.roads.length;
+  const roadsBefore = map.ways.length;
 
   let cutsPlaced = 0;
 

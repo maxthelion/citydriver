@@ -20,10 +20,10 @@ describe('compactRoads', () => {
     addRoad(map, [{ x: 0, z: 0 }, { x: 50, z: 0 }, { x: 100, z: 0 }], 'arterial');
     addRoad(map, [{ x: 0, z: 0 }, { x: 50, z: 5 }, { x: 100, z: 0 }], 'collector');
 
-    expect(map.roads.length).toBe(2);
+    expect(map.ways.length).toBe(2);
     compactRoads(map, 15);
-    expect(map.roads.length).toBe(1);
-    expect(map.roads[0].hierarchy).toBe('arterial');
+    expect(map.ways.length).toBe(1);
+    expect(map.ways[0].hierarchy).toBe('arterial');
   });
 
   it('removes duplicate roads whose endpoints become identical after snapping', () => {
@@ -31,9 +31,9 @@ describe('compactRoads', () => {
     addRoad(map, [{ x: 0, z: 0 }, { x: 200, z: 0 }], 'arterial');
     addRoad(map, [{ x: 10, z: 0 }, { x: 200, z: 10 }], 'collector');
 
-    expect(map.roads.length).toBe(2);
+    expect(map.ways.length).toBe(2);
     compactRoads(map, 15);
-    expect(map.roads.length).toBe(1);
+    expect(map.ways.length).toBe(1);
   });
 
   it('snaps nearby endpoints to shared positions', () => {
@@ -43,8 +43,8 @@ describe('compactRoads', () => {
 
     compactRoads(map, 15);
 
-    const road1end = map.roads[0].polyline[map.roads[0].polyline.length - 1];
-    const road2start = map.roads[1].polyline[0];
+    const road1end = map.ways[0].polyline[map.ways[0].polyline.length - 1];
+    const road2start = map.ways[1].polyline[0];
     expect(road2start.x).toBe(road1end.x);
     expect(road2start.z).toBe(road1end.z);
   });
@@ -55,7 +55,17 @@ describe('compactRoads', () => {
     addRoad(map, [{ x: 0, z: 0 }, { x: 100, z: 10 }], 'collector');
 
     compactRoads(map, 15);
-    expect(map.roads.length).toBe(1);
+    expect(map.ways.length).toBe(1);
+  });
+
+  it('removes fan duplicates that share one snapped endpoint and near-opposite endpoints', () => {
+    const map = makeMap();
+    addRoad(map, [{ x: 0, z: 0 }, { x: 0, z: 20 }], 'arterial');
+    addRoad(map, [{ x: 5, z: 0 }, { x: 0, z: 20 }], 'collector');
+
+    compactRoads(map, 15);
+    expect(map.ways.length).toBe(1);
+    expect(map.ways[0].hierarchy).toBe('arterial');
   });
 
   it('does not merge distant roads', () => {
@@ -64,6 +74,6 @@ describe('compactRoads', () => {
     addRoad(map, [{ x: 0, z: 100 }, { x: 100, z: 100 }], 'collector');
 
     compactRoads(map, 15);
-    expect(map.roads.length).toBe(2);
+    expect(map.ways.length).toBe(2);
   });
 });

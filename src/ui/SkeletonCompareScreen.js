@@ -321,7 +321,7 @@ export class SkeletonCompareScreen {
 
     // Draw road polylines in detail
     ctx.lineWidth = 1.5;
-    for (const road of map.roads) {
+    for (const road of map.ways) {
       if (!road.polyline || road.polyline.length < 2) continue;
 
       // Color by hierarchy; bridges get a distinct cyan
@@ -373,7 +373,7 @@ export class SkeletonCompareScreen {
 
       let totalLength = 0;
       let totalPoints = 0;
-      for (const road of m.roads) {
+      for (const road of m.ways) {
         if (!road.polyline) continue;
         totalPoints += road.polyline.length;
         for (let j = 0; j < road.polyline.length - 1; j++) {
@@ -390,7 +390,7 @@ export class SkeletonCompareScreen {
       }
 
       lines.push(`<b style="color:#ffaa88">${SKELETON_NAMES[i]}</b>`);
-      lines.push(`  ${m.roads.length} roads, ${Math.round(totalLength)}m`);
+      lines.push(`  ${m.ways.length} roads, ${Math.round(totalLength)}m`);
       lines.push(`  ${totalPoints} polyline pts`);
       lines.push(`  ${m.graph.nodes.size} nodes, ${m.graph.edges.size} edges`);
       lines.push(`  dead ends: ${degrees[1] || 0}`);

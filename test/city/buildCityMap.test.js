@@ -19,7 +19,7 @@ describe('buildCityMap', { timeout: 120000 }, () => {
     });
 
     expect(map).toBeDefined();
-    expect(map.roads.length).toBeGreaterThan(0);
+    expect(map.ways.length).toBeGreaterThan(0);
     expect(archetype).toBeDefined();
     expect(archetype.name).toBeTruthy();
   });
@@ -75,7 +75,7 @@ describe('buildCityMap', { timeout: 120000 }, () => {
       step: 'skeleton',
     });
 
-    expect(map.roads.length).toBeGreaterThan(0);
+    expect(map.ways.length).toBeGreaterThan(0);
     // Should NOT have development zones (those come later)
     expect(map.developmentZones?.length || 0).toBe(0);
   });

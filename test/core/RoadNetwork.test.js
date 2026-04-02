@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { RoadNetwork } from '../../src/core/RoadNetwork.js';
-import { Road, _resetRoadIds } from '../../src/core/Road.js';
+import { RoadWay, _resetRoadWayIds } from '../../src/core/RoadWay.js';
+import { _resetRoadNodeIds } from '../../src/core/RoadNode.js';
 
-// Small 20x20 grid with cellSize=10 for tests
 const W = 20;
 const H = 20;
 const CS = 10;
@@ -13,374 +13,147 @@ function makeNetwork() {
   return new RoadNetwork(W, H, CS, OX, OZ);
 }
 
-// A simple horizontal road from (0,0) to (100,0)
-const POLY_HORIZONTAL = [{ x: 0, z: 0 }, { x: 100, z: 0 }];
-
-// A simple vertical road from (0,0) to (0,100)
-const POLY_VERTICAL = [{ x: 0, z: 0 }, { x: 0, z: 100 }];
-
 beforeEach(() => {
-  _resetRoadIds();
+  _resetRoadWayIds();
+  _resetRoadNodeIds();
 });
 
-// ────────────────────────────────────────────────────────────────────────────
-// add()
-// ────────────────────────────────────────────────────────────────────────────
-
-describe('add() — returns a Road with an id; increments roadCount', () => {
-  it('returns a Road instance', () => {
+describe('RoadNetwork add()', () => {
+  it('returns a RoadWay and increments wayCount', () => {
     const net = makeNetwork();
-    const road = net.add(POLY_HORIZONTAL);
-    expect(road).toBeInstanceOf(Road);
+    const way = net.add([{ x: 0, z: 0 }, { x: 100, z: 0 }]);
+    expect(way).toBeInstanceOf(RoadWay);
+    expect(net.wayCount).toBe(1);
   });
 
-  it('returned road has a numeric id', () => {
-    const net = makeNetwork();
-    const road = net.add(POLY_HORIZONTAL);
-    expect(typeof road.id).toBe('number');
-  });
-
-  it('roadCount starts at 0', () => {
-    const net = makeNetwork();
-    expect(net.roadCount).toBe(0);
-  });
-
-  it('increments roadCount after add()', () => {
-    const net = makeNetwork();
-    net.add(POLY_HORIZONTAL);
-    expect(net.roadCount).toBe(1);
-    net.add(POLY_VERTICAL);
-    expect(net.roadCount).toBe(2);
-  });
-});
-
-describe('add() — stamps roadGrid cells along polyline', () => {
-  it('stamps at least one cell on the roadGrid', () => {
-    const net = makeNetwork();
-    net.add(POLY_HORIZONTAL);
-    let stamped = 0;
-    for (let gz = 0; gz < H; gz++) {
-      for (let gx = 0; gx < W; gx++) {
-        if (net.roadGrid.get(gx, gz) > 0) stamped++;
-      }
-    }
-    expect(stamped).toBeGreaterThan(0);
-  });
-
-  it('stamps the center cell for a short horizontal road', () => {
-    const net = makeNetwork();
-    // Road from (50,50) to (90,50) — center at gx=7 gz=5 roughly
-    net.add([{ x: 50, z: 50 }, { x: 90, z: 50 }]);
-    // Cell (5,5) is at world (50,50)
-    expect(net.roadGrid.get(5, 5)).toBe(1);
-  });
-
-  it('leaves unstamped cells at 0', () => {
-    const net = makeNetwork();
-    // Road along x-axis only, should leave top-right corner clear
-    net.add([{ x: 0, z: 0 }, { x: 30, z: 0 }]);
-    // Cell (19, 19) is far from the road
-    expect(net.roadGrid.get(19, 19)).toBe(0);
-  });
-});
-
-describe('add() — adds edge to graph (1 edge, 2 nodes)', () => {
-  it('adds exactly 2 nodes to the graph for a simple two-point road', () => {
+  it('stamps roadGrid and derives a simple graph edge', () => {
     const net = makeNetwork();
     net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
+    expect(net.roadGrid.get(0, 0)).toBe(1);
     expect(net.graph.nodes.size).toBe(2);
-  });
-
-  it('adds exactly 1 edge to the graph for a simple two-point road', () => {
-    const net = makeNetwork();
-    net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
     expect(net.graph.edges.size).toBe(1);
   });
 
-  it('two non-overlapping roads produce 4 nodes and 2 edges', () => {
+  it('reuses a nearby endpoint node across ways', () => {
     const net = makeNetwork();
-    net.add([{ x: 0, z: 0 }, { x: 40, z: 0 }]);
-    net.add([{ x: 0, z: 50 }, { x: 40, z: 50 }]);
-    expect(net.graph.nodes.size).toBe(4);
-    expect(net.graph.edges.size).toBe(2);
-  });
-});
+    const a = net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
+    const b = net.add([{ x: 52, z: 0 }, { x: 100, z: 0 }]);
 
-describe('add() — snaps graph nodes within cellSize * 3', () => {
-  it('reuses a node when a new road starts within snapDist of existing node', () => {
+    expect(net.nodes.length).toBe(3);
+    expect(a.nodes[a.nodes.length - 1].id).toBe(b.nodes[0].id);
+  });
+
+  it('preserves the roadGrid object identity while rebuilding derived state', () => {
     const net = makeNetwork();
-    // First road ends at (50,0)
+    const roadGrid = net.roadGrid;
+
     net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
-    // Second road starts at (52,0) — within cellSize*3=30 of (50,0)
-    net.add([{ x: 52, z: 0 }, { x: 100, z: 0 }]);
-    // Should share a node — so only 3 unique nodes total
-    expect(net.graph.nodes.size).toBe(3);
-  });
 
-  it('does NOT snap when the road start is beyond snapDist', () => {
-    const net = makeNetwork();
-    // First road ends at (50,0)
-    net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
-    // Second road starts at (90,0) — well beyond cellSize*3=30 from (50,0)
-    net.add([{ x: 90, z: 0 }, { x: 150, z: 0 }]);
-    // No snapping — should have 4 distinct nodes
-    expect(net.graph.nodes.size).toBe(4);
+    expect(net.roadGrid).toBe(roadGrid);
+    expect(roadGrid.get(0, 0)).toBe(1);
   });
 });
 
-// ────────────────────────────────────────────────────────────────────────────
-// roads accessor + getRoad()
-// ────────────────────────────────────────────────────────────────────────────
-
-describe('roads accessor returns all roads', () => {
-  it('returns empty array when no roads added', () => {
+describe('RoadNetwork remove()', () => {
+  it('removes a way and rebuilds derived state', () => {
     const net = makeNetwork();
-    expect(net.roads).toEqual([]);
-  });
+    const way = net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
+    net.remove(way.id);
 
-  it('returns all added roads', () => {
-    const net = makeNetwork();
-    const r1 = net.add(POLY_HORIZONTAL);
-    const r2 = net.add(POLY_VERTICAL);
-    const roads = net.roads;
-    expect(roads).toHaveLength(2);
-    expect(roads.map(r => r.id)).toContain(r1.id);
-    expect(roads.map(r => r.id)).toContain(r2.id);
-  });
-
-  it('roads accessor returns a Road[] (instances of Road)', () => {
-    const net = makeNetwork();
-    net.add(POLY_HORIZONTAL);
-    expect(net.roads[0]).toBeInstanceOf(Road);
-  });
-});
-
-describe('getRoad(id) retrieves by id', () => {
-  it('returns the correct Road for a valid id', () => {
-    const net = makeNetwork();
-    const road = net.add(POLY_HORIZONTAL);
-    expect(net.getRoad(road.id)).toBe(road);
-  });
-
-  it('returns undefined for an unknown id', () => {
-    const net = makeNetwork();
-    expect(net.getRoad(9999)).toBeUndefined();
-  });
-});
-
-// ────────────────────────────────────────────────────────────────────────────
-// remove()
-// ────────────────────────────────────────────────────────────────────────────
-
-describe('remove() — removes road from collection', () => {
-  it('reduces roadCount by 1', () => {
-    const net = makeNetwork();
-    const road = net.add(POLY_HORIZONTAL);
-    net.remove(road.id);
-    expect(net.roadCount).toBe(0);
-  });
-
-  it('road is no longer in roads array after remove', () => {
-    const net = makeNetwork();
-    const road = net.add(POLY_HORIZONTAL);
-    net.remove(road.id);
-    expect(net.roads.find(r => r.id === road.id)).toBeUndefined();
-  });
-
-  it('getRoad returns undefined after remove', () => {
-    const net = makeNetwork();
-    const road = net.add(POLY_HORIZONTAL);
-    net.remove(road.id);
-    expect(net.getRoad(road.id)).toBeUndefined();
-  });
-});
-
-describe('remove() — clears roadGrid when ref count reaches 0', () => {
-  it('previously stamped cells become 0 after sole road is removed', () => {
-    const net = makeNetwork();
-    // Road at z=0 — cells along gx=0..5 gz=0 should be stamped
-    const road = net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
-    // Verify stamped
-    expect(net.roadGrid.get(0, 0)).toBe(1);
-    net.remove(road.id);
-    // Now should be cleared
+    expect(net.wayCount).toBe(0);
+    expect(net.graph.nodes.size).toBe(0);
+    expect(net.graph.edges.size).toBe(0);
     expect(net.roadGrid.get(0, 0)).toBe(0);
   });
-});
 
-describe('remove() — preserves roadGrid for shared cells (two overlapping roads, remove one)', () => {
-  it('shared cells remain stamped after one road removed', () => {
+  it('preserves shared coverage when removing one overlapping way', () => {
     const net = makeNetwork();
-    // Both roads pass through (0,0)
-    const r1 = net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
-    const r2 = net.add([{ x: 0, z: 0 }, { x: 0, z: 50 }]);
-    expect(net.roadGrid.get(0, 0)).toBe(1);
-    net.remove(r1.id);
-    // r2 still covers (0,0) so cell should remain stamped
+    const a = net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
+    net.add([{ x: 0, z: 0 }, { x: 0, z: 50 }]);
+
+    net.remove(a.id);
     expect(net.roadGrid.get(0, 0)).toBe(1);
   });
 });
 
-describe('remove() — removes graph edge', () => {
-  it('graph has 0 edges after adding and removing one road', () => {
+describe('RoadNetwork addFromCells()', () => {
+  it('converts cells to world points', () => {
     const net = makeNetwork();
-    const road = net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
-    net.remove(road.id);
-    expect(net.graph.edges.size).toBe(0);
+    const way = net.addFromCells([{ gx: 2, gz: 3 }, { gx: 7, gz: 3 }]);
+
+    expect(way.start).toEqual({ x: 20, z: 30 });
+    expect(way.end).toEqual({ x: 70, z: 30 });
   });
 
-  it('orphaned nodes are cleaned up after remove', () => {
-    const net = makeNetwork();
-    const road = net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
-    net.remove(road.id);
-    expect(net.graph.nodes.size).toBe(0);
-  });
-});
-
-describe('remove() — is no-op for unknown id', () => {
-  it('does not throw for unknown id', () => {
-    const net = makeNetwork();
-    expect(() => net.remove(9999)).not.toThrow();
-  });
-
-  it('roadCount unchanged after no-op remove', () => {
-    const net = makeNetwork();
-    net.add(POLY_HORIZONTAL);
-    net.remove(9999);
-    expect(net.roadCount).toBe(1);
-  });
-});
-
-// ────────────────────────────────────────────────────────────────────────────
-// addFromCells()
-// ────────────────────────────────────────────────────────────────────────────
-
-describe('addFromCells() — converts cells to world polyline, adds road', () => {
-  it('returns a Road', () => {
-    const net = makeNetwork();
-    const road = net.addFromCells([{ gx: 0, gz: 0 }, { gx: 5, gz: 0 }]);
-    expect(road).toBeInstanceOf(Road);
-  });
-
-  it('converts grid coords to world coords correctly', () => {
-    const net = makeNetwork();
-    const road = net.addFromCells([{ gx: 2, gz: 3 }, { gx: 7, gz: 3 }]);
-    // World: x = OX + gx * CS = 0 + 2*10 = 20, z = 0 + 3*10 = 30
-    expect(road.start).toEqual({ x: 20, z: 30 });
-    expect(road.end).toEqual({ x: 70, z: 30 });
-  });
-});
-
-describe('addFromCells() — returns null for < 2 cells', () => {
-  it('returns null for empty cells array', () => {
-    const net = makeNetwork();
-    expect(net.addFromCells([])).toBeNull();
-  });
-
-  it('returns null for single cell', () => {
+  it('returns null for fewer than two cells', () => {
     const net = makeNetwork();
     expect(net.addFromCells([{ gx: 0, gz: 0 }])).toBeNull();
   });
 });
 
-describe('addFromCells() — stamps grid and adds graph edge', () => {
-  it('stamps roadGrid after addFromCells', () => {
+describe('RoadNetwork addBridge()', () => {
+  it('records the bridge on the way and stamps bridgeGrid', () => {
     const net = makeNetwork();
-    net.addFromCells([{ gx: 0, gz: 0 }, { gx: 5, gz: 0 }]);
-    expect(net.roadGrid.get(0, 0)).toBe(1);
-  });
+    const way = net.add([{ x: 0, z: 0 }, { x: 100, z: 0 }]);
 
-  it('adds a graph edge after addFromCells', () => {
-    const net = makeNetwork();
-    net.addFromCells([{ gx: 0, gz: 0 }, { gx: 5, gz: 0 }]);
-    expect(net.graph.edges.size).toBe(1);
-  });
-});
+    net.addBridge(way.id, { x: 30, z: 0 }, { x: 50, z: 0 }, 0.3, 0.5);
 
-// ────────────────────────────────────────────────────────────────────────────
-// addBridge()
-// ────────────────────────────────────────────────────────────────────────────
-
-describe('addBridge() — records bridge on road', () => {
-  it('bridge is stored on the road', () => {
-    const net = makeNetwork();
-    const road = net.add([{ x: 0, z: 0 }, { x: 100, z: 0 }]);
-    net.addBridge(road.id, { x: 30, z: -5 }, { x: 50, z: 5 }, 0.3, 0.5);
-    expect(road.bridges).toHaveLength(1);
-    expect(road.bridges[0].entryT).toBe(0.3);
-    expect(road.bridges[0].exitT).toBe(0.5);
-  });
-
-  it('stamps bridgeGrid between bankA and bankB', () => {
-    const net = makeNetwork();
-    const road = net.add([{ x: 0, z: 0 }, { x: 100, z: 0 }]);
-    // bankA at (30,0), bankB at (50,0) — bridge along x-axis
-    net.addBridge(road.id, { x: 30, z: 0 }, { x: 50, z: 0 }, 0.3, 0.5);
-    // Cell at gx=4 gz=0 (x=40,z=0) should be stamped in bridgeGrid
+    expect(net.getWay(way.id).bridges).toHaveLength(1);
     expect(net.bridgeGrid.get(4, 0)).toBe(1);
   });
 });
 
-describe('addBridge() — is no-op for unknown roadId', () => {
-  it('does not throw for unknown roadId', () => {
+describe('RoadNetwork replaceWayPolyline()', () => {
+  it('replaces geometry and clears stale roadGrid stamps', () => {
     const net = makeNetwork();
-    expect(() => net.addBridge(9999, { x: 0, z: 0 }, { x: 10, z: 0 }, 0, 1)).not.toThrow();
-  });
-});
+    const way = net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
 
-// ────────────────────────────────────────────────────────────────────────────
-// updatePolyline()
-// ────────────────────────────────────────────────────────────────────────────
-
-describe('updatePolyline() — changes road polyline and re-stamps grid', () => {
-  it("road's polyline is updated", () => {
-    const net = makeNetwork();
-    const road = net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
-    const newPoly = [{ x: 0, z: 0 }, { x: 50, z: 50 }];
-    net.updatePolyline(road.id, newPoly);
-    expect(road.end).toEqual({ x: 50, z: 50 });
-  });
-
-  it('old cells are cleared and new cells are stamped', () => {
-    const net = makeNetwork();
-    // Road along z=0 axis
-    const road = net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
-    // gx=3 gz=0 should be stamped by horizontal road
     expect(net.roadGrid.get(3, 0)).toBe(1);
-    // Update to a vertical road that doesn't cover z=0 beyond origin
-    net.updatePolyline(road.id, [{ x: 0, z: 10 }, { x: 0, z: 100 }]);
-    // gx=3 gz=0 should now be cleared (no other road covers it)
+
+    net.replaceWayPolyline(way.id, [{ x: 0, z: 10 }, { x: 0, z: 100 }]);
+
+    expect(net.getWay(way.id).end).toEqual({ x: 0, z: 100 });
     expect(net.roadGrid.get(3, 0)).toBe(0);
-    // gx=0 gz=5 should now be stamped (z=50 world = gz=5)
     expect(net.roadGrid.get(0, 5)).toBe(1);
   });
-
-  it('graph edge reflects updated endpoints', () => {
-    const net = makeNetwork();
-    const road = net.add([{ x: 0, z: 0 }, { x: 50, z: 0 }]);
-    net.updatePolyline(road.id, [{ x: 10, z: 10 }, { x: 80, z: 80 }]);
-    expect(net.graph.edges.size).toBe(1);
-  });
 });
 
-describe('connectRoadsAtPoint() — creates a real graph junction at a mid-edge hit', () => {
-  it('splits both roads and merges the split nodes into one junction', () => {
+describe('RoadNetwork connectWaysAtPoint()', () => {
+  it('inserts a shared node on both ways and rebuilds graph topology', () => {
     const net = makeNetwork();
     const horizontal = net.add([{ x: 0, z: 50 }, { x: 100, z: 50 }]);
     const vertical = net.add([{ x: 50, z: 0 }, { x: 50, z: 100 }]);
 
-    expect(net.graph.nodes.size).toBe(4);
-    expect(net.graph.edges.size).toBe(2);
+    const nodeId = net.connectWaysAtPoint(horizontal.id, vertical.id, 50, 50);
 
-    const junctionId = net.connectRoadsAtPoint(horizontal.id, vertical.id, 50, 50);
-
-    expect(junctionId).not.toBeNull();
+    expect(nodeId).not.toBeNull();
     expect(net.graph.nodes.size).toBe(5);
     expect(net.graph.edges.size).toBe(4);
+    expect(net.graph.degree(nodeId)).toBe(4);
 
-    const junction = net.graph.getNode(junctionId);
-    expect(junction.x).toBe(50);
-    expect(junction.z).toBe(50);
-    expect(net.graph.degree(junctionId)).toBe(4);
+    const horizontalNodeIds = net.getWay(horizontal.id).nodes.map(node => node.id);
+    const verticalNodeIds = net.getWay(vertical.id).nodes.map(node => node.id);
+    expect(horizontalNodeIds).toContain(nodeId);
+    expect(verticalNodeIds).toContain(nodeId);
+  });
+});
+
+describe('RoadNetwork mergeNodes()', () => {
+  it('rewrites way references onto a kept shared node and rebuilds topology', () => {
+    const net = makeNetwork();
+    const spine = net.add([{ x: 0, z: 50 }, { x: 100, z: 50 }]);
+    const branch = net.add([{ x: 45, z: 0 }, { x: 45, z: 52 }]);
+
+    const splitNodeId = net.ensureNodeOnWay(spine.id, 50, 50);
+    const branchEndId = branch.nodes[branch.nodes.length - 1].id;
+
+    expect(splitNodeId).not.toBe(branchEndId);
+
+    const mergedId = net.mergeNodes(splitNodeId, branchEndId);
+
+    expect(mergedId).toBe(splitNodeId);
+    expect(net.getWay(branch.id).nodes[net.getWay(branch.id).nodes.length - 1].id).toBe(splitNodeId);
+    expect(net.graph.degree(splitNodeId)).toBe(3);
+    expect(net.nodes.some(node => node.id === branchEndId)).toBe(false);
   });
 });

@@ -92,10 +92,10 @@ describe('growRoads', () => {
       maxCrossStreetLength: 10, pathClosingDistance: 10, roadNetwork });
 
     // At least one road should have been created
-    expect(roadNetwork.roadCount).toBeGreaterThan(0);
+    expect(roadNetwork.wayCount).toBeGreaterThan(0);
 
     // Road should have the correct source attribute
-    const road = roadNetwork.roads[0];
+    const road = roadNetwork.ways[0];
     expect(road.source).toBe('growth-ribbon');
 
     // Grid cells should be stamped (via RoadNetwork's internal stamping)
@@ -121,9 +121,9 @@ describe('growRoads', () => {
     growRoads({ roadGrid, ribbonGaps: [], ribbonEndpoints, w, h,
       maxCrossStreetLength: 10, pathClosingDistance: 10, roadNetwork });
 
-    expect(roadNetwork.roadCount).toBeGreaterThan(0);
+    expect(roadNetwork.wayCount).toBeGreaterThan(0);
 
-    const sources = roadNetwork.roads.map(r => r.source);
+    const sources = roadNetwork.ways.map(r => r.source);
     expect(sources).toContain('growth-cross');
   });
 
@@ -143,7 +143,7 @@ describe('growRoads', () => {
     growRoads({ roadGrid, ribbonGaps: [], ribbonEndpoints: [], w, h,
       maxCrossStreetLength: 5, pathClosingDistance: 15, roadNetwork });
 
-    const closingRoads = roadNetwork.roads.filter(r => r.source === 'growth-closing');
+    const closingRoads = roadNetwork.ways.filter(r => r.source === 'growth-closing');
     expect(closingRoads.length).toBeGreaterThan(0);
   });
 

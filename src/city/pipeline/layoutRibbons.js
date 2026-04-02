@@ -61,23 +61,23 @@ export function layoutRibbons(map) {
       clippedCross.push(...segments);
     }
 
-    // Add parallel streets and track their graph edge IDs for T-junction splitting.
-    const parallelEdgesBeforeAdd = new Set(map.graph ? [...map.graph.edges.keys()] : []);
+    // Add parallel streets and track their way IDs for T-junction stitching.
+    const parallelWayIds = [];
     for (const st of clippedParallel) {
       if (st.length < 2) continue;
-      _addRoad(map, st, 'local', 6);
+      const way = _addRoad(map, st, 'local', 6);
+      if (way) parallelWayIds.push(way.id);
     }
-    const parallelEdgeIds = map.graph
-      ? [...map.graph.edges.keys()].filter(id => !parallelEdgesBeforeAdd.has(id))
-      : [];
+    const crossWayIds = [];
 
     for (const st of clippedCross) {
       if (st.length < 2) continue;
-      _addRoad(map, st, 'local', 6);
+      const way = _addRoad(map, st, 'local', 6);
+      if (way) crossWayIds.push(way.id);
     }
 
     // Step 4a: T-junction splitting (scoped to this face's parallel edges).
-    _splitTJunctions(map, clippedCross, parallelEdgeIds);
+    _splitTJunctions(map, clippedCross, crossWayIds, parallelWayIds);
 
     // Store the first face's spine on the zone for connectToNetwork
     if (!zone._spine && streets.spine) zone._spine = streets.spine;
@@ -105,64 +105,66 @@ export function layoutRibbons(map) {
  * @param {Array<Array<{x:number,z:number}>>} crossStreets - clipped cross street polylines
  */
 /**
- * T-junction fix: for each cross street endpoint, split any parallel edge that
- * the endpoint lies on. Only scans the `parallelEdgeIds` list (edges added for
- * this zone's parallel streets) — not the full graph — keeping the scan O(parallels)
- * rather than O(all_graph_edges).
+ * T-junction fix: for each cross street endpoint, connect the cross-street way
+ * to any nearby parallel way through RoadNetwork's shared-node model. This
+ * replaces the old graph-only edge split path.
  *
  * @param {object} map
  * @param {Array} crossStreets
- * @param {number[]} parallelEdgeIds - graph edge IDs for this zone's parallel streets
+ * @param {number[]} crossWayIds - way IDs for this face's cross streets
+ * @param {number[]} parallelWayIds - way IDs for this face's parallel streets
  */
-function _splitTJunctions(map, crossStreets, parallelEdgeIds = []) {
-  const graph = map.graph;
-  if (!graph || parallelEdgeIds.length === 0 || crossStreets.length === 0) return;
+function _splitTJunctions(map, crossStreets, crossWayIds = [], parallelWayIds = []) {
+  if (!map.roadNetwork || parallelWayIds.length === 0 || crossWayIds.length === 0 || crossStreets.length === 0) return;
 
   const snapDistSq = (map.cellSize * 5) ** 2; // 25m²
+  const crossCount = Math.min(crossStreets.length, crossWayIds.length);
 
-  // parallelEdgeIds is already a snapshot (collected before adding cross streets).
-  // No need to re-snapshot — these IDs won't be iterated back to us.
-  const edgeSnapshot = parallelEdgeIds;
+  map.roadNetwork.mutate(() => {
+    for (let crossIdx = 0; crossIdx < crossCount; crossIdx++) {
+      const cs = crossStreets[crossIdx];
+      if (cs.length < 2) continue;
+      const crossWayId = crossWayIds[crossIdx];
+      const endpoints = [cs[0], cs[cs.length - 1]];
 
-  for (const cs of crossStreets) {
-    if (cs.length < 2) continue;
-    const endpoints = [cs[0], cs[cs.length - 1]];
+      for (const pt of endpoints) {
+        for (const parallelWayId of parallelWayIds) {
+          const parallelWay = map.roadNetwork.getWay(parallelWayId);
+          if (!parallelWay) continue;
+          const poly = parallelWay.polyline;
+          let best = null;
 
-    for (const pt of endpoints) {
-      // Scan the snapshot to find an edge that this endpoint lies on
-      for (const edgeId of edgeSnapshot) {
-        const edge = graph.edges.get(edgeId);
-        if (!edge) continue; // already split in an earlier pass
+          for (let i = 0; i < poly.length - 1; i++) {
+            const from = poly[i];
+            const to = poly[i + 1];
+            const dx = to.x - from.x;
+            const dz = to.z - from.z;
+            const lenSq = dx * dx + dz * dz;
+            if (lenSq < 1) continue;
 
-        const from = graph.nodes.get(edge.from);
-        const to   = graph.nodes.get(edge.to);
-        if (!from || !to) continue;
+            const t = ((pt.x - from.x) * dx + (pt.z - from.z) * dz) / lenSq;
+            if (t <= 0.1 || t >= 0.9) continue;
 
-        const dx = to.x - from.x;
-        const dz = to.z - from.z;
-        const lenSq = dx * dx + dz * dz;
-        if (lenSq < 1) continue;
+            const projX = from.x + t * dx;
+            const projZ = from.z + t * dz;
+            const distSq = (pt.x - projX) ** 2 + (pt.z - projZ) ** 2;
+            if (!best || distSq < best.distSq) {
+              best = { x: projX, z: projZ, distSq };
+            }
+          }
 
-        // Project pt onto the edge segment
-        const t = ((pt.x - from.x) * dx + (pt.z - from.z) * dz) / lenSq;
-        if (t <= 0.1 || t >= 0.9) continue; // too close to endpoint nodes
-
-        const projX = from.x + t * dx;
-        const projZ = from.z + t * dz;
-
-        const distSq = (pt.x - projX) ** 2 + (pt.z - projZ) ** 2;
-        if (distSq < snapDistSq) {
-          // Split this edge at the projection point to create a T-junction node
-          graph.splitEdge(edgeId, projX, projZ);
-          break; // one split per endpoint is enough
+          if (best && best.distSq < snapDistSq) {
+            map.roadNetwork.connectWaysAtPoint(crossWayId, parallelWayId, pt.x, pt.z);
+            break;
+          }
         }
       }
     }
-  }
+  });
 }
 
 function _addRoad(map, polyline, hierarchy, width) {
-  map.roadNetwork.add(polyline, {
+  return map.roadNetwork.add(polyline, {
     width,
     hierarchy,
     importance: hierarchy === 'collector' ? 0.5 : 0.2,

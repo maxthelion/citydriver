@@ -43,7 +43,7 @@ describe('FeatureMap', () => {
       { width: 10, hierarchy: 'collector', source: 'skeleton' }
     );
 
-    expect(map.roads.length).toBe(1);
+    expect(map.ways.length).toBe(1);
     let roadCells = 0;
     for (let gz = 0; gz < map.height; gz++) {
       for (let gx = 0; gx < map.width; gx++) {
@@ -211,7 +211,7 @@ describe('FeatureMap.clone', () => {
     expect(clone.cellSize).toBe(10);
     expect(clone.originX).toBe(50);
     expect(clone.elevation.get(5, 5)).toBe(100);
-    expect(clone.roads.length).toBe(1);
+    expect(clone.ways.length).toBe(1);
     expect(clone.nuclei.length).toBe(1);
     expect(clone.nuclei[0].type).toBe('market');
 
@@ -220,8 +220,8 @@ describe('FeatureMap.clone', () => {
       [{ x: 50, z: 100 }, { x: 250, z: 100 }],
       { width: 6, hierarchy: 'local', source: 'skeleton' }
     );
-    expect(clone.roads.length).toBe(2);
-    expect(map.roads.length).toBe(1);
+    expect(clone.ways.length).toBe(2);
+    expect(map.ways.length).toBe(1);
 
     // Nuclei are independent
     clone.nuclei.push({ gx: 5, gz: 5, type: 'suburban', tier: 3, index: 1 });

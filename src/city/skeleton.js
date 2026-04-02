@@ -425,7 +425,7 @@ const HIER_RANK = { arterial: 1, collector: 2, local: 3, track: 4 };
  */
 export function compactRoads(map, snapDist) {
   const network = map.roadNetwork;
-  const roads = network.roads.filter(r => r.source === 'skeleton');
+  const roads = network.ways.filter(r => r.source === 'skeleton');
   if (roads.length === 0) return;
 
   // --- Pass 1: Snap polyline ENDPOINTS to nearest representative ---
@@ -475,12 +475,12 @@ export function compactRoads(map, snapDist) {
     if (poly.length < 2) {
       network.remove(id);
     } else {
-      network.updatePolyline(id, poly);
+      network.replaceWayPolyline(id, poly);
     }
   }
 
   // --- Pass 2: Remove duplicate roads (same snapped endpoints, keep best hierarchy) ---
-  const remaining = network.roads.filter(r => r.source === 'skeleton');
+  const remaining = network.ways.filter(r => r.source === 'skeleton');
   const toRemove = new Set();
 
   function endpointKey(road) {
@@ -507,6 +507,33 @@ export function compactRoads(map, snapDist) {
     }
   }
 
+  // --- Pass 3: Remove fan duplicates that share one snapped endpoint and
+  // have the opposite endpoint still within the snap radius. Keep the better
+  // hierarchy, breaking ties by keeping the longer road.
+  const dedupedRemaining = network.ways.filter(r => r.source === 'skeleton' && !toRemove.has(r.id));
+  for (let i = 0; i < dedupedRemaining.length; i++) {
+    for (let j = i + 1; j < dedupedRemaining.length; j++) {
+      const a = dedupedRemaining[i];
+      const b = dedupedRemaining[j];
+      if (toRemove.has(a.id) || toRemove.has(b.id)) continue;
+      if (!isFanDuplicatePair(a, b, snapDistSq)) continue;
+
+      const rankA = HIER_RANK[a.hierarchy] || 9;
+      const rankB = HIER_RANK[b.hierarchy] || 9;
+      const lenA = polylineLength(a.polyline);
+      const lenB = polylineLength(b.polyline);
+      if (rankA < rankB) {
+        toRemove.add(b.id);
+      } else if (rankB < rankA) {
+        toRemove.add(a.id);
+      } else if (lenA >= lenB) {
+        toRemove.add(b.id);
+      } else {
+        toRemove.add(a.id);
+      }
+    }
+  }
+
   for (const id of toRemove) {
     network.remove(id);
   }
@@ -514,16 +541,45 @@ export function compactRoads(map, snapDist) {
   // roadNetwork.remove() already handles cleanup internally
 }
 
+function isFanDuplicatePair(a, b, snapDistSq) {
+  const aStart = a.start;
+  const aEnd = a.end;
+  const bStart = b.start;
+  const bEnd = b.end;
+
+  if (samePoint(aStart, bStart)) return pointDistSq(aEnd, bEnd) <= snapDistSq;
+  if (samePoint(aEnd, bEnd)) return pointDistSq(aStart, bStart) <= snapDistSq;
+  if (samePoint(aStart, bEnd)) return pointDistSq(aEnd, bStart) <= snapDistSq;
+  if (samePoint(aEnd, bStart)) return pointDistSq(aStart, bEnd) <= snapDistSq;
+  return false;
+}
+
+function samePoint(a, b) {
+  return !!a && !!b && a.x === b.x && a.z === b.z;
+}
+
+function pointDistSq(a, b) {
+  const dx = a.x - b.x;
+  const dz = a.z - b.z;
+  return dx * dx + dz * dz;
+}
+
+function polylineLength(polyline) {
+  let total = 0;
+  for (let i = 1; i < polyline.length; i++) {
+    total += Math.hypot(polyline[i].x - polyline[i - 1].x, polyline[i].z - polyline[i - 1].z);
+  }
+  return total;
+}
+
 /**
- * Rebuild the PlanarGraph from current map.roads.
+ * Rebuild the PlanarGraph from current map.ways.
  * Clears the graph and re-adds all road polylines.
  *
  * @param {import('../core/FeatureMap.js').FeatureMap} map
  */
 export function rebuildGraphFromRoads(map) {
-  // With RoadNetwork, the graph is already in sync with roads.
-  // Just compact graph nodes to merge nearby nodes.
-  map.graph.compact(map.cellSize * 1.5);
+  map.roadNetwork.rebuildDerived();
 }
 
 // ============================================================

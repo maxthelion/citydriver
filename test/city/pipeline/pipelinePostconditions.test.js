@@ -37,7 +37,7 @@ function runToZonesRefine(seed) {
     onAfter(stepId) {
       if (stepId === 'skeleton') {
         snapshots.skeleton = {
-          roadCount: map.roads?.length || 0,
+          wayCount: map.ways?.length || 0,
           graphNodes: map.graph?.nodes?.size || 0,
           graphEdges: map.graph?.edges?.size || 0,
         };
@@ -77,7 +77,7 @@ function runToZonesRefine(seed) {
       if (stepId === 'zones-refine') {
         const zones = map.developmentZones || [];
         // Road length stats
-        const roadLengths = (map.roads || []).map(r => {
+        const roadLengths = (map.ways || []).map(r => {
           const pts = r.polyline || r.points || [];
           let len = 0;
           for (let i = 1; i < pts.length; i++) {
@@ -119,7 +119,7 @@ for (const seed of SEEDS) {
 
     it('skeleton produces roads', () => {
       if (!result) return;
-      expect(result.snapshots.skeleton.roadCount).toBeGreaterThan(0);
+      expect(result.snapshots.skeleton.wayCount).toBeGreaterThan(0);
     });
 
     // ── Zones (initial) ──

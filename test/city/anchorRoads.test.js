@@ -147,7 +147,7 @@ describe('anchor roads integration', { timeout: 30000 }, () => {
 
       buildSkeletonRoads(map);
 
-      if (map.roads.length === 0) continue;
+      if (map.ways.length === 0) continue;
 
       // Check if any road endpoint is near the boundary (within 2 cells worth of world coords)
       const margin = 2 * map.cellSize;
@@ -156,7 +156,7 @@ describe('anchor roads integration', { timeout: 30000 }, () => {
       const maxX = map.originX + map.width * map.cellSize;
       const maxZ = map.originZ + map.height * map.cellSize;
 
-      for (const road of map.roads) {
+      for (const road of map.ways) {
         if (!road.polyline || road.polyline.length < 2) continue;
 
         for (const endpoint of [road.polyline[0], road.polyline[road.polyline.length - 1]]) {

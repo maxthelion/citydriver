@@ -726,14 +726,28 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
         }
       }
       if (result.accepted) {
+        const committedPoints = result.way?.polyline?.map(point => ({ x: point.x, z: point.z })) || attemptPoints;
+        const startShift = Math.hypot(
+          (committedPoints[0]?.x ?? 0) - (attemptPoints[0]?.x ?? 0),
+          (committedPoints[0]?.z ?? 0) - (attemptPoints[0]?.z ?? 0),
+        );
+        const endShift = Math.hypot(
+          (committedPoints[committedPoints.length - 1]?.x ?? 0) - (attemptPoints[attemptPoints.length - 1]?.x ?? 0),
+          (committedPoints[committedPoints.length - 1]?.z ?? 0) - (attemptPoints[attemptPoints.length - 1]?.z ?? 0),
+        );
+        const networkJoined = startShift > 1e-3 || endShift > 1e-3;
         const committedStreet = {
           ...cs2,
-          points: attemptPoints,
-          roadId: result.road.id,
+          points: committedPoints,
+          length: arcLength(committedPoints),
+          roadId: result.way.id,
           preJoined: commitMeta.preJoined,
           connectedRetry: commitMeta.connectedRetry,
           conflictRoadIds: commitMeta.conflictRoadIds,
           conflictPoints: commitMeta.conflictPoints,
+          networkJoined,
+          networkStartShift: startShift,
+          networkEndShift: endShift,
         };
         committedCrossStreets.push(committedStreet);
         emitZoneEvent(zoneEventSink, 'cross-streets', {
@@ -744,7 +758,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
           faceIdx: sector.faceIdx,
         }, 'cross-street-committed', {
           streetKey: streetEventKey(committedStreet),
-          roadId: result.road.id,
+          roadId: result.way.id,
           ctOff: roundEventNumber(committedStreet.ctOff),
           length: roundEventNumber(committedStreet.length),
           startPoint: roundEventPoint(committedStreet.points[0]),
@@ -753,6 +767,11 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
           snapPoint: roundEventPoint(committedStreet.snapPoint),
           preJoined: committedStreet.preJoined || undefined,
           connectedRetry: committedStreet.connectedRetry || undefined,
+          networkJoined: committedStreet.networkJoined || undefined,
+          attemptStartPoint: committedStreet.networkJoined ? roundEventPoint(attemptPoints[0]) : undefined,
+          attemptEndPoint: committedStreet.networkJoined ? roundEventPoint(attemptPoints[attemptPoints.length - 1]) : undefined,
+          networkStartShift: committedStreet.networkJoined ? roundEventNumber(committedStreet.networkStartShift) : undefined,
+          networkEndShift: committedStreet.networkJoined ? roundEventNumber(committedStreet.networkEndShift) : undefined,
           conflictRoadIds: committedStreet.conflictRoadIds?.length ? committedStreet.conflictRoadIds : undefined,
         });
       } else {
@@ -837,7 +856,9 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       for (const ribbon of ribbons) {
         const result = tryAddRoad(map, ribbon.points, { hierarchy: 'residential', source: 'ribbon' });
         if (result.accepted) {
-          const junctions = splitRibbonHitJunctions(map, result.road.id, ribbon, committedCrossStreets);
+          const junctions = splitRibbonHitJunctions(map, result.way.id, ribbon, committedCrossStreets);
+          const committedRibbonWay = map.roadNetwork.getWay(result.way.id);
+          const committedRibbonPoints = committedRibbonWay?.polyline?.map(point => ({ x: point.x, z: point.z })) || ribbon.points;
           allRibbonJunctions.push(...junctions.map(junction => ({
             ...junction,
             zoneIdx: zi,
@@ -848,7 +869,8 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
           })));
           committedRibbons.push({
             ...ribbon,
-            roadId: result.road.id,
+            points: committedRibbonPoints,
+            roadId: result.way.id,
             junctions,
             zoneIdx: zi,
             sectorIdx: si,
@@ -1604,7 +1626,7 @@ function splitRibbonHitJunctions(map, ribbonRoadId, ribbon, crossStreets) {
     if (!entry || !entry.pt || !Number.isInteger(entry.streetIdx)) continue;
     const crossStreet = crossStreets[entry.streetIdx];
     if (!crossStreet || crossStreet.roadId === null || crossStreet.roadId === undefined) continue;
-    const junctionId = map.roadNetwork.connectRoadsAtPoint(
+    const junctionId = map.roadNetwork.connectWaysAtPoint(
       ribbonRoadId,
       crossStreet.roadId,
       entry.pt.x,
@@ -2616,10 +2638,10 @@ function describeTransactionConflict(map, violationDetails = []) {
   const seenPoints = new Set();
 
   for (const detail of violationDetails || []) {
-    if (Number.isInteger(detail?.roadId) && !seenRoadIds.has(detail.roadId)) {
-      seenRoadIds.add(detail.roadId);
-      roadIds.push(detail.roadId);
-      const road = map?.roadNetwork?.getRoad ? map.roadNetwork.getRoad(detail.roadId) : null;
+    if (Number.isInteger(detail?.wayId) && !seenRoadIds.has(detail.wayId)) {
+      seenRoadIds.add(detail.wayId);
+      roadIds.push(detail.wayId);
+      const road = map?.roadNetwork?.getWay ? map.roadNetwork.getWay(detail.wayId) : null;
       if (road?.polyline?.length >= 2) {
         roads.push({
           id: road.id,
@@ -2685,8 +2707,8 @@ function reconnectCrossStreetToConflictRoad(map, points, violationDetails = [], 
 
   let best = null;
   for (const detail of violationDetails || []) {
-    if (detail?.type !== 'parallel' || !Number.isInteger(detail.roadId)) continue;
-    const road = map?.roadNetwork?.getRoad ? map.roadNetwork.getRoad(detail.roadId) : null;
+    if (detail?.type !== 'parallel' || !Number.isInteger(detail.wayId)) continue;
+    const road = map?.roadNetwork?.getWay ? map.roadNetwork.getWay(detail.wayId) : null;
     if (!road?.polyline?.length) continue;
     const roadEndpoints = [road.polyline[0], road.polyline[road.polyline.length - 1]];
     const candidateEndpoints = [

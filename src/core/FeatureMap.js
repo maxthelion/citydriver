@@ -71,7 +71,7 @@ export class FeatureMap {
 
   // ── Road network delegation ────────────────────────────────────────────────
 
-  get roads() { return this.roadNetwork.roads; }
+  get ways() { return this.roadNetwork.ways; }
   get graph() { return this.roadNetwork.graph; }
   get roadGrid() { return this.roadNetwork.roadGrid; }
   get bridgeGrid() { return this.roadNetwork.bridgeGrid; }
@@ -523,13 +523,13 @@ export class FeatureMap {
     copy.landValue = this.landValue.clone();
 
     // Road network
-    for (const road of this.roadNetwork.roads) {
-      const r = copy.roadNetwork.add(road.polyline, {
-        width: road.width, hierarchy: road.hierarchy,
-        importance: road.importance, source: road.source,
+    for (const way of this.roadNetwork.ways) {
+      const w = copy.roadNetwork.add(way.polyline, {
+        width: way.width, hierarchy: way.hierarchy,
+        importance: way.importance, source: way.source,
       });
-      for (const b of road.bridges) {
-        copy.roadNetwork.addBridge(r.id, b.bankA, b.bankB, b.entryT, b.exitT);
+      for (const b of way.bridges) {
+        copy.roadNetwork.addBridge(w.id, b.bankA, b.bankB, b.entryT, b.exitT);
       }
     }
 

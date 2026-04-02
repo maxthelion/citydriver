@@ -7,7 +7,7 @@ import { PlanarGraph } from '../../../src/core/PlanarGraph.js';
  * Build a minimal mock FeatureMap with a roadNetwork stub backed by
  * a real PlanarGraph. The map is 100x100 cells, cellSize=1, origin at (0,0).
  */
-function makeMockMap(graph, roads = []) {
+function makeMockMap(graph, ways = []) {
   return {
     width: 100,
     height: 100,
@@ -16,7 +16,7 @@ function makeMockMap(graph, roads = []) {
     originZ: 0,
     roadNetwork: {
       graph,
-      roads,
+      ways,
       count: undefined, // not used for these checks
     },
     hasLayer() { return false; },

@@ -18,7 +18,6 @@
 const ARTERIAL_SNAP_DIST_M = 25;  // metres — max distance to snap to arterial
 const MIN_ZONE_CELLS = 1000;       // skip tiny zones
 const MIN_ROAD_LENGTH_M = 60;      // metres — skip very short segments
-const SNAP_TO_ROAD_DIST_M = 15;   // metres — snap endpoints to nearby roads
 const CLIP_SAMPLE_STEP = 2;        // metres — densify step for clipping
 const ROAD_HALF_WIDTH = 8;         // metres — buffer around existing roads (wide to prevent parallel duplicates)
 
@@ -68,11 +67,13 @@ export function createZoneBoundaryRoads(map) {
 
   if (candidateBoundaries.length === 0) return { segmentsAdded: 0, cellsAdded: 0 };
 
-  // Capture skeleton node IDs before adding zone boundary roads
-  const skeletonNodeIds = new Set(map.graph ? [...map.graph.nodes.keys()] : []);
+  // Capture existing network state before adding zone boundary roads.
+  const existingWayIds = new Set(map.ways.map(way => way.id));
+  const existingNodeIds = new Set(map.roadNetwork.nodes.map(node => node.id));
 
   // Step 2: Simplify, clip (wide buffer prevents duplicates), and add as roads
-  const roadsBefore = map.roads.length;
+  const roadsBefore = map.ways.length;
+  const addedWayIds = [];
 
   for (const boundary of candidateBoundaries) {
     let pts = [...boundary];
@@ -85,127 +86,77 @@ export function createZoneBoundaryRoads(map) {
       // onto arterials, causing zone boundary roads to overlap arterials.
       // The graph's node snapping (snapDist = cellSize * 3) in addRoad
       // handles junction connection at the topology level instead.
-      addRoad(map, seg, 'collector', 6);
+      const way = addRoad(map, seg, 'collector', 6);
+      if (way) addedWayIds.push(way.id);
     }
   }
 
-  // Walk skeleton roads and merge nearby zone boundary nodes onto them.
-  // For each skeleton edge, sample points along it. If a zone boundary
-  // node is nearby, split the skeleton edge at that point and merge the
-  // zone boundary node into the split node.
-  if (map.graph) {
+  // Walk pre-existing roads and merge nearby zone-boundary nodes onto them
+  // through RoadNetwork's shared-node model instead of mutating PlanarGraph
+  // directly. This keeps the ways, derived graph, and stamped grids aligned.
+  if (addedWayIds.length > 0 && existingWayIds.size > 0) {
     const mergeDist = map.cellSize * 6; // ~30m search radius
     const mergeDistSq = mergeDist * mergeDist;
-
-    // Collect zone boundary node IDs (the ones we just added)
-    const zbNodes = new Set();
-    for (const id of map.graph.nodes.keys()) {
-      if (!skeletonNodeIds.has(id)) zbNodes.add(id);
-    }
-
-    // Walk each skeleton edge
-    const skeletonEdgeIds = [...map.graph.edges.keys()].filter(eid => {
-      const e = map.graph.edges.get(eid);
-      return e && (e.hierarchy === 'arterial' || e.hierarchy === 'collector' || e.source === 'skeleton');
-    });
-
-    let mergeCount = 0;
-    for (const edgeId of skeletonEdgeIds) {
-      if (!map.graph.edges.has(edgeId)) continue; // may have been removed by a previous split
-      const poly = map.graph.edgePolyline(edgeId);
-
-      // For each zone boundary node, check distance to this edge
-      for (const zbId of [...zbNodes]) {
-        if (!map.graph.nodes.has(zbId)) { zbNodes.delete(zbId); continue; }
-        const zbNode = map.graph.nodes.get(zbId);
-
-        // Find closest point on this skeleton edge to the zb node
-        let bestDistSq = Infinity, bestProjX = 0, bestProjZ = 0;
-        for (let i = 0; i < poly.length - 1; i++) {
-          const ax = poly[i].x, az = poly[i].z;
-          const bx = poly[i+1].x, bz = poly[i+1].z;
-          const dx = bx - ax, dz = bz - az;
-          const lenSq = dx * dx + dz * dz;
-          if (lenSq < 0.001) continue;
-          const t = Math.max(0, Math.min(1, ((zbNode.x - ax) * dx + (zbNode.z - az) * dz) / lenSq));
-          const px = ax + t * dx, pz = az + t * dz;
-          const d = (zbNode.x - px) * (zbNode.x - px) + (zbNode.z - pz) * (zbNode.z - pz);
-          if (d < bestDistSq) { bestDistSq = d; bestProjX = px; bestProjZ = pz; }
-        }
-
-        if (bestDistSq < mergeDistSq) {
-          // Split the skeleton edge at the projected point
-          const splitNodeId = map.graph.splitEdge(edgeId, bestProjX, bestProjZ);
-          // Merge the zone boundary node into the split node
-          map.graph.mergeNodes(zbId, splitNodeId);
-          zbNodes.delete(zbId);
-          mergeCount++;
-          break; // edge was split, move to next edge iteration
-        }
+    const addedNodeIds = new Set();
+    for (const wayId of addedWayIds) {
+      const way = map.roadNetwork.getWay(wayId);
+      if (!way) continue;
+      for (const node of way.nodes) {
+        if (!existingNodeIds.has(node.id)) addedNodeIds.add(node.id);
       }
     }
+    const skeletonWays = map.ways.filter(way => existingWayIds.has(way.id));
+
+    let mergeCount = 0;
+    map.roadNetwork.mutate(() => {
+      for (const zbNodeId of addedNodeIds) {
+        const nodeById = new Map(map.roadNetwork.nodes.map(node => [node.id, node]));
+        const zbNode = nodeById.get(zbNodeId);
+        if (!zbNode) continue; // already merged
+
+        let best = null;
+        for (const skeletonWay of skeletonWays) {
+          const poly = skeletonWay.polyline;
+          for (let i = 0; i < poly.length - 1; i++) {
+            const ax = poly[i].x, az = poly[i].z;
+            const bx = poly[i + 1].x, bz = poly[i + 1].z;
+            const dx = bx - ax, dz = bz - az;
+            const lenSq = dx * dx + dz * dz;
+            if (lenSq < 0.001) continue;
+            const t = Math.max(0, Math.min(1, ((zbNode.x - ax) * dx + (zbNode.z - az) * dz) / lenSq));
+            const px = ax + t * dx;
+            const pz = az + t * dz;
+            const d = (zbNode.x - px) * (zbNode.x - px) + (zbNode.z - pz) * (zbNode.z - pz);
+            if (!best || d < best.distSq) {
+              best = { wayId: skeletonWay.id, x: px, z: pz, distSq: d };
+            }
+          }
+        }
+
+        if (!best || best.distSq >= mergeDistSq) continue;
+
+        const splitNodeId = map.roadNetwork.ensureNodeOnWay(best.wayId, best.x, best.z);
+        if (splitNodeId === null || splitNodeId === zbNodeId) continue;
+
+        const mergedId = map.roadNetwork.mergeNodes(splitNodeId, zbNodeId);
+        if (mergedId !== null) {
+          mergeCount++;
+        }
+      }
+    });
 
     console.log(`[zoneBoundaryRoads] skeleton-walk merge: ${mergeCount} zone boundary nodes merged onto skeleton`);
   }
 
-  // Clean up any degree-0 nodes left by split+merge operations.
-  if (map.graph) {
-    for (const [id] of [...map.graph.nodes]) {
-      if (map.graph.degree(id) === 0) {
-        map.graph.nodes.delete(id);
-        map.graph._adjacency.delete(id);
-      }
-    }
-  }
-
-  const segmentsAdded = map.roads.length - roadsBefore;
+  const segmentsAdded = map.ways.length - roadsBefore;
   console.log(`[zoneBoundaryRoads] ${candidateBoundaries.length} boundaries → ${segmentsAdded} road segments`);
   return { segmentsAdded };
-}
-
-/**
- * Snap a polyline endpoint to the nearest existing road cell.
- * If the endpoint is within SNAP_TO_ROAD_DIST_M of a road cell,
- * move it to that cell's world position so the road connects.
- */
-function snapEndpointToRoad(polyline, idx, map) {
-  const pt = polyline[idx];
-  const cs = map.cellSize;
-  const gx = Math.round((pt.x - map.originX) / cs);
-  const gz = Math.round((pt.z - map.originZ) / cs);
-  const searchR = Math.ceil(SNAP_TO_ROAD_DIST_M / cs);
-  const roadGrid = map.hasLayer('roadGrid') ? map.getLayer('roadGrid') : null;
-  if (!roadGrid) return;
-
-  let bestDist = Infinity;
-  let bestX = gx, bestZ = gz;
-
-  for (let dz = -searchR; dz <= searchR; dz++) {
-    for (let dx = -searchR; dx <= searchR; dx++) {
-      const nx = gx + dx, nz = gz + dz;
-      if (nx < 0 || nx >= map.width || nz < 0 || nz >= map.height) continue;
-      if (roadGrid.get(nx, nz) === 0) continue;
-      const d = dx * dx + dz * dz;
-      if (d < bestDist) {
-        bestDist = d;
-        bestX = nx;
-        bestZ = nz;
-      }
-    }
-  }
-
-  if (bestDist < searchR * searchR && bestDist > 0) {
-    polyline[idx] = {
-      x: map.originX + bestX * cs,
-      z: map.originZ + bestZ * cs,
-    };
-  }
 }
 
 // ── Shared road utilities (same as layoutRibbons.js) ──────────────
 
 function addRoad(map, polyline, hierarchy, width) {
-  map.roadNetwork.add(polyline, {
+  return map.roadNetwork.add(polyline, {
     width,
     hierarchy,
     importance: hierarchy === 'collector' ? 0.5 : 0.2,

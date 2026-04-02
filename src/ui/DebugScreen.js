@@ -575,7 +575,7 @@ export class DebugScreen {
     });
 
     // Draw road polylines
-    for (const road of map.roads) {
+    for (const road of map.ways) {
       if (!road.polyline || road.polyline.length < 2) continue;
 
       let inView = false;
@@ -768,7 +768,7 @@ export class DebugScreen {
     const info = [];
     info.push(`Grid: ${this.map.width} x ${this.map.height}`);
     info.push(`Cell: ${this.map.cellSize}m`);
-    info.push(`Roads: ${this.map.roads.length}`);
+    info.push(`Roads: ${this.map.ways.length}`);
     info.push(`Rivers: ${this.map.rivers.length}`);
     info.push(`Nuclei: ${this.map.nuclei.length}`);
     info.push(`Graph: ${this.map.graph.nodes.size} nodes, ${this.map.graph.edges.size} edges`);
