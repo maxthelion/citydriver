@@ -22,13 +22,20 @@ import { layRibbons } from '../src/city/incremental/ribbons.js';
 import { segmentTerrainV2 } from '../src/city/incremental/ridgeSegmentationV2.js';
 import { tryAddRoad } from '../src/city/incremental/roadTransaction.js';
 import { NdjsonEventSink, FanoutEventSink, FilteredEventSink } from '../src/core/EventSink.js';
+import { loadMapFixture } from '../src/core/featureMapFixture.js';
 
 // === CLI ===
-const seed = parseInt(process.argv[2]) || 42;
-const gx = parseInt(process.argv[3]) || 27;
-const gz = parseInt(process.argv[4]) || 95;
-const outDir = process.argv[5] || 'experiments/022-output';
-const experimentNum = process.argv[6] || null;
+const cliArgs = process.argv.slice(2);
+const getArg = (name, def = null) => {
+  const idx = cliArgs.indexOf(`--${name}`);
+  return idx >= 0 && idx + 1 < cliArgs.length ? cliArgs[idx + 1] : def;
+};
+const fixturePath = getArg('fixture', null);
+const seed = fixturePath ? NaN : (parseInt(process.argv[2]) || 42);
+const gx = fixturePath ? NaN : (parseInt(process.argv[3]) || 27);
+const gz = fixturePath ? NaN : (parseInt(process.argv[4]) || 95);
+const outDir = fixturePath ? (getArg('out', 'experiments/022-output')) : (process.argv[5] || 'experiments/022-output');
+const experimentNum = fixturePath ? getArg('experiment', null) : (process.argv[6] || null);
 if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
 function ribbonParamsForExperiment(num) {
@@ -473,13 +480,27 @@ const crossStreetParams = crossStreetParamsForExperiment(experimentNum);
 
 // === Pipeline setup ===
 const t0 = performance.now();
-const { layers, settlement } = generateRegionFromSeed(seed, gx, gz);
-if (!settlement) { console.error('No settlement'); process.exit(1); }
+let map;
+let runSeed = seed;
+let runGx = gx;
+let runGz = gz;
 
-const rng = new SeededRandom(seed);
-const map = setupCity(layers, settlement, rng.fork('city'));
-const strategy = new LandFirstDevelopment(map, { archetype: ARCHETYPES.marketTown });
-runToStep(strategy, 'spatial');
+if (fixturePath) {
+  map = await loadMapFixture(fixturePath);
+  runSeed = map.fixtureMeta?.seed ?? 42;
+  runGx = map.fixtureMeta?.gx ?? null;
+  runGz = map.fixtureMeta?.gz ?? null;
+  console.log(`Loaded fixture: ${fixturePath}`);
+  console.log(`Fixture step: ${map.fixtureMeta?.afterStep ?? 'unknown'}`);
+} else {
+  const { layers, settlement } = generateRegionFromSeed(seed, gx, gz);
+  if (!settlement) { console.error('No settlement'); process.exit(1); }
+
+  const rng = new SeededRandom(seed);
+  map = setupCity(layers, settlement, rng.fork('city'));
+  const strategy = new LandFirstDevelopment(map, { archetype: ARCHETYPES.marketTown });
+  runToStep(strategy, 'spatial');
+}
 
 const zones = map.developmentZones;
 const W = map.width, H = map.height;
@@ -547,13 +568,13 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
   const zone = selectedZones[zi];
   console.log(`\n=== Zone ${zi} ===`);
   console.log(`  ${zone.cells.length} cells, avgSlope=${zone.avgSlope.toFixed(3)}`);
-  const combinedEventSink = new NdjsonEventSink(`${outDir}/events-zone${zi}-seed${seed}.ndjson`);
+  const combinedEventSink = new NdjsonEventSink(`${outDir}/events-zone${zi}-seed${runSeed}.ndjson`);
   const crossEventSink = new FilteredEventSink(
-    new NdjsonEventSink(`${outDir}/cross-events-zone${zi}-seed${seed}.ndjson`),
+    new NdjsonEventSink(`${outDir}/cross-events-zone${zi}-seed${runSeed}.ndjson`),
     event => event.stepId === 'cross-streets',
   );
   const ribbonEventSink = new FilteredEventSink(
-    new NdjsonEventSink(`${outDir}/ribbon-events-zone${zi}-seed${seed}.ndjson`),
+    new NdjsonEventSink(`${outDir}/ribbon-events-zone${zi}-seed${runSeed}.ndjson`),
     event => event.stepId === 'ribbons',
   );
   const zoneEventSink = new FanoutEventSink([combinedEventSink, crossEventSink, ribbonEventSink]);
@@ -644,7 +665,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       eventStepId: 'cross-streets',
       eventContext: {
         experiment: experimentNum,
-        seed,
+        seed: runSeed,
         zoneIdx: zi,
         sectorIdx: si,
         faceIdx: sector.faceIdx,
@@ -677,7 +698,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
         if (preJoin) {
           emitZoneEvent(zoneEventSink, 'cross-streets', {
             experiment: experimentNum,
-            seed,
+            seed: runSeed,
             zoneIdx: zi,
             sectorIdx: si,
             faceIdx: sector.faceIdx,
@@ -705,7 +726,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
           if (retry) {
             emitZoneEvent(zoneEventSink, 'cross-streets', {
               experiment: experimentNum,
-              seed,
+              seed: runSeed,
               zoneIdx: zi,
               sectorIdx: si,
               faceIdx: sector.faceIdx,
@@ -752,7 +773,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
         committedCrossStreets.push(committedStreet);
         emitZoneEvent(zoneEventSink, 'cross-streets', {
           experiment: experimentNum,
-          seed,
+          seed: runSeed,
           zoneIdx: zi,
           sectorIdx: si,
           faceIdx: sector.faceIdx,
@@ -791,7 +812,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
         });
         emitZoneEvent(zoneEventSink, 'cross-streets', {
           experiment: experimentNum,
-          seed,
+          seed: runSeed,
           zoneIdx: zi,
           sectorIdx: si,
           faceIdx: sector.faceIdx,
@@ -829,7 +850,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
         eventStepId: 'ribbons',
         eventContext: {
           experiment: experimentNum,
-          seed,
+          seed: runSeed,
           zoneIdx: zi,
           sectorIdx: si,
           faceIdx: sector.faceIdx,
@@ -1109,10 +1130,10 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
     drawAnchorCircle(failurePixels, anchor.point, cropW, cropH, cs, ox, oz, minGx, minGz, anchor.accepted);
   }
 
-  writeRaster(`${outDir}/ribbons-zone${zi}-seed${seed}`, cropW, cropH, pixels);
-  console.log(`  Written to ${outDir}/ribbons-zone${zi}-seed${seed}.png (${cropW}x${cropH})`);
+  writeRaster(`${outDir}/ribbons-zone${zi}-seed${runSeed}`, cropW, cropH, pixels);
+  console.log(`  Written to ${outDir}/ribbons-zone${zi}-seed${runSeed}.png (${cropW}x${cropH})`);
   writeDebugSvg(
-    `${outDir}/ribbons-zone${zi}-seed${seed}.svg`,
+    `${outDir}/ribbons-zone${zi}-seed${runSeed}.svg`,
     {
       cropW,
       cropH,
@@ -1134,13 +1155,13 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       showFailures: false,
     },
   );
-  console.log(`  Written to ${outDir}/ribbons-zone${zi}-seed${seed}.svg (${cropW}x${cropH})`);
+  console.log(`  Written to ${outDir}/ribbons-zone${zi}-seed${runSeed}.svg (${cropW}x${cropH})`);
 
   if (allFailedRibbons.length > 0) {
-    writeRaster(`${outDir}/ribbon-failures-zone${zi}-seed${seed}`, cropW, cropH, failurePixels);
-    console.log(`  Written to ${outDir}/ribbon-failures-zone${zi}-seed${seed}.png (${cropW}x${cropH})`);
+    writeRaster(`${outDir}/ribbon-failures-zone${zi}-seed${runSeed}`, cropW, cropH, failurePixels);
+    console.log(`  Written to ${outDir}/ribbon-failures-zone${zi}-seed${runSeed}.png (${cropW}x${cropH})`);
     writeDebugSvg(
-      `${outDir}/ribbon-failures-zone${zi}-seed${seed}.svg`,
+      `${outDir}/ribbon-failures-zone${zi}-seed${runSeed}.svg`,
       {
         cropW,
         cropH,
@@ -1162,7 +1183,7 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
         showFailures: true,
       },
     );
-    console.log(`  Written to ${outDir}/ribbon-failures-zone${zi}-seed${seed}.svg (${cropW}x${cropH})`);
+    console.log(`  Written to ${outDir}/ribbon-failures-zone${zi}-seed${runSeed}.svg (${cropW}x${cropH})`);
   }
 
   const crossFailurePixels = basePixels.slice();
@@ -1197,10 +1218,10 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
   }
 
   if (allRejectedCrossStreets.length > 0 || allPrunedCrossStreets.length > 0 || allMissingCrossStreetScanlines.length > 0 || allCommitRejectedCrossStreets.length > 0) {
-    writeRaster(`${outDir}/cross-failures-zone${zi}-seed${seed}`, cropW, cropH, crossFailurePixels);
-    console.log(`  Written to ${outDir}/cross-failures-zone${zi}-seed${seed}.png (${cropW}x${cropH})`);
+    writeRaster(`${outDir}/cross-failures-zone${zi}-seed${runSeed}`, cropW, cropH, crossFailurePixels);
+    console.log(`  Written to ${outDir}/cross-failures-zone${zi}-seed${runSeed}.png (${cropW}x${cropH})`);
     writeDebugSvg(
-      `${outDir}/cross-failures-zone${zi}-seed${seed}.svg`,
+      `${outDir}/cross-failures-zone${zi}-seed${runSeed}.svg`,
       {
         cropW,
         cropH,
@@ -1222,15 +1243,15 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
         showFailures: true,
       },
     );
-    console.log(`  Written to ${outDir}/cross-failures-zone${zi}-seed${seed}.svg (${cropW}x${cropH})`);
+    console.log(`  Written to ${outDir}/cross-failures-zone${zi}-seed${runSeed}.svg (${cropW}x${cropH})`);
   }
   writeDebugJson(
-    `${outDir}/ribbon-debug-zone${zi}-seed${seed}.json`,
+    `${outDir}/ribbon-debug-zone${zi}-seed${runSeed}.json`,
     {
       experiment: experimentNum,
-      seed,
-      gx,
-      gz,
+      seed: runSeed,
+      gx: runGx,
+      gz: runGz,
       zoneIdx: zi,
       crop: { minGx, minGz, cropW, cropH, cellSize: cs, originX: ox, originZ: oz },
       ribbonParams,
@@ -1246,11 +1267,11 @@ for (let zi = 0; zi < selectedZones.length; zi++) {
       failures: allFailedRibbons,
     },
   );
-  console.log(`  Written to ${outDir}/ribbon-debug-zone${zi}-seed${seed}.json`);
+  console.log(`  Written to ${outDir}/ribbon-debug-zone${zi}-seed${runSeed}.json`);
   zoneEventSink.close();
-  console.log(`  Written to ${outDir}/events-zone${zi}-seed${seed}.ndjson`);
-  console.log(`  Written to ${outDir}/cross-events-zone${zi}-seed${seed}.ndjson`);
-  console.log(`  Written to ${outDir}/ribbon-events-zone${zi}-seed${seed}.ndjson`);
+  console.log(`  Written to ${outDir}/events-zone${zi}-seed${runSeed}.ndjson`);
+  console.log(`  Written to ${outDir}/cross-events-zone${zi}-seed${runSeed}.ndjson`);
+  console.log(`  Written to ${outDir}/ribbon-events-zone${zi}-seed${runSeed}.ndjson`);
 }
 
 console.log(`\nTotal time: ${((performance.now() - t0) / 1000).toFixed(1)}s`);

@@ -6,6 +6,12 @@ export function _resetRoadWayIds() {
   _nextRoadWayId = 0;
 }
 
+export function _ensureRoadWayIdAtLeast(id) {
+  if (typeof id === 'number' && id >= _nextRoadWayId) {
+    _nextRoadWayId = id + 1;
+  }
+}
+
 export class RoadWay {
   #bridges;
 
@@ -163,9 +169,7 @@ export class RoadWay {
       source: data.source,
     });
     way.id = data.id;
-    if (typeof data.id === 'number' && data.id >= _nextRoadWayId) {
-      _nextRoadWayId = data.id + 1;
-    }
+    _ensureRoadWayIdAtLeast(data.id);
     for (const bridge of data.bridges || []) {
       way.addBridge(bridge.bankA, bridge.bankB, bridge.entryT, bridge.exitT);
     }

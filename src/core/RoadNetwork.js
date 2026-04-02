@@ -12,7 +12,7 @@
  */
 
 import { RoadNode } from './RoadNode.js';
-import { RoadWay } from './RoadWay.js';
+import { RoadWay, _ensureRoadWayIdAtLeast } from './RoadWay.js';
 import { PlanarGraph } from './PlanarGraph.js';
 import { Grid2D } from './Grid2D.js';
 
@@ -84,6 +84,62 @@ export class RoadNetwork {
    */
   getWay(id) {
     return this._ways.get(id);
+  }
+
+  toJSON() {
+    return {
+      nodes: this.nodes.map(node => node.toJSON()),
+      ways: this.ways.map(way => ({
+        id: way.id,
+        nodeIds: way.nodes.map(node => node.id),
+        width: way.width,
+        hierarchy: way.hierarchy,
+        importance: way.importance,
+        source: way.source,
+        bridges: way.bridges,
+      })),
+    };
+  }
+
+  /**
+   * @param {object} snapshot
+   * @param {number} width
+   * @param {number} height
+   * @param {number} cellSize
+   * @param {number} [originX=0]
+   * @param {number} [originZ=0]
+   * @returns {RoadNetwork}
+   */
+  static fromJSON(snapshot, width, height, cellSize, originX = 0, originZ = 0) {
+    const net = new RoadNetwork(width, height, cellSize, originX, originZ);
+    const nodesById = new Map();
+
+    for (const nodeData of snapshot?.nodes || []) {
+      const node = RoadNode.fromJSON(nodeData);
+      net._nodes.set(node.id, node);
+      nodesById.set(node.id, node);
+    }
+
+    for (const wayData of snapshot?.ways || []) {
+      const nodes = (wayData.nodeIds || []).map(id => nodesById.get(id)).filter(Boolean);
+      const way = new RoadWay(nodes, {
+        width: wayData.width,
+        hierarchy: wayData.hierarchy,
+        importance: wayData.importance,
+        source: wayData.source,
+      });
+      way.id = wayData.id;
+      _ensureRoadWayIdAtLeast(way.id);
+      for (const bridge of wayData.bridges || []) {
+        way.addBridge(bridge.bankA, bridge.bankB, bridge.entryT, bridge.exitT);
+      }
+      net._ways.set(way.id, way);
+    }
+
+    net.#pruneDegenerateWays();
+    net.#pruneOrphanNodes();
+    net.rebuildDerived();
+    return net;
   }
 
   /**
