@@ -90,7 +90,7 @@ console.log(`Zone: ${zone.cells.length} cells, avgSlope=${zone.avgSlope.toFixed(
 console.log(`Crop: ${cropW}x${cropH} at (${minGx},${minGz})`);
 
 // ===== Collect anchor roads (arterial + collector) =====
-const anchorRoads = (map.roads || []).filter(r =>
+const anchorRoads = (map.ways || []).filter(r =>
   r.hierarchy === 'arterial' || r.hierarchy === 'collector'
 );
 console.log(`Anchor roads: ${anchorRoads.length} (arterial/collector)`);

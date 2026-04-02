@@ -318,12 +318,12 @@ for (const s of faceStats) {
 
 // ===== s2: Find two anchor roads near zone boundary =====
 //
-// Use map.roads directly — find arterial/collector roads near the zone that
+// Use map.ways directly — find arterial/collector roads near the zone that
 // are reasonably straight. Prefer skeleton roads (real roads) over zone-boundary
 // derived roads.
 
 const nearbyRoads = [];
-for (const road of map.roads) {
+for (const road of map.ways) {
   if (!road.polyline || road.polyline.length < 2) continue;
 
   // Compute total length and chord length (straightness)

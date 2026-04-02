@@ -89,7 +89,7 @@ console.log(`Zone: ${zone.cells.length} cells, avgSlope=${zone.avgSlope.toFixed(
 console.log(`Crop: ${cropW}x${cropH} at (${minGx},${minGz})`);
 
 // ===== Anchor roads: arterial + collector =====
-const anchorRoads = map.roads.filter(r =>
+const anchorRoads = map.ways.filter(r =>
   (r.hierarchy === 'arterial' || r.hierarchy === 'collector') &&
   r.polyline && r.polyline.length >= 2
 );

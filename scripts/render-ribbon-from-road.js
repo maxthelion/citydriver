@@ -6,7 +6,7 @@
  * This experiment replicates that pattern:
  *
  * For each terrain face:
- *  1. Find nearby arterial/collector road segments from map.roads.
+ *  1. Find nearby arterial/collector road segments from map.ways.
  *  2. Sample starting points along those segments at CROSS_SPACING (90m) intervals.
  *  3. From each starting point, walk into the face:
  *       - Direction at start = perpendicular to the road segment.
@@ -146,7 +146,7 @@ for (const c of zone.cells) {
 console.log(`${faces.length} terrain faces`);
 
 // ===== Identify anchor roads (arterial or collector) =====
-const anchorRoads = (map.roads || []).filter(r =>
+const anchorRoads = (map.ways || []).filter(r =>
   r.polyline && r.polyline.length >= 2 &&
   (r.hierarchy === 'arterial' || r.hierarchy === 'collector')
 );
