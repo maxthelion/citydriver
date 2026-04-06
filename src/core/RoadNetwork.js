@@ -152,7 +152,9 @@ export class RoadNetwork {
    * @returns {RoadWay}
    */
   add(polyline, attrs = {}) {
-    const nodes = this.#buildWayNodesFromPolyline(polyline);
+    const nodes = this.#buildWayNodesFromPolyline(polyline, null, {
+      snapEndpoints: attrs.snapEndpoints !== false,
+    });
     const way = new RoadWay(nodes, attrs);
     this._ways.set(way.id, way);
     this.#pruneDegenerateWays();
@@ -406,9 +408,10 @@ export class RoadNetwork {
     }
   }
 
-  #buildWayNodesFromPolyline(polyline, replacingWayId = null) {
+  #buildWayNodesFromPolyline(polyline, replacingWayId = null, opts = {}) {
     const pts = (polyline || []).map(p => ({ x: p.x, z: p.z }));
     if (pts.length < 2) return [];
+    const { snapEndpoints = true } = opts;
 
     const nextNodes = [];
     const snapDist = this._cellSize * 3;
@@ -420,7 +423,7 @@ export class RoadNetwork {
       const pt = pts[i];
       let node;
       const isEndpoint = i === 0 || i === pts.length - 1;
-      if (isEndpoint) {
+      if (isEndpoint && snapEndpoints) {
         node = this.#findNearbyNode(pt.x, pt.z, snapDist, replacementNodeIds);
       }
       if (!node) {
