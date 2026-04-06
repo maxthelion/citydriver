@@ -5195,5 +5195,951 @@
         "tick": null
       }
     ]
+  },
+  {
+    "num": "040",
+    "slug": "sector-frontage-half-depth",
+    "md": "040-sector-frontage-half-depth.md",
+    "images": [
+      {
+        "path": "040-output/micro-allocation-zone1-seed884469.svg",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "040-output/micro-allocation-zone0-seed884469.svg",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "040-output/micro-allocation-zone2-seed884469.png",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "040-output/micro-allocation-zone2-seed884469.svg",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "040-output/micro-allocation-zone0-seed884469.png",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "040-output/micro-allocation-zone1-seed884469.png",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "041",
+    "slug": "residual-sector-street-fill",
+    "md": "041-residual-sector-street-fill.md",
+    "images": [
+      {
+        "path": "041-output/micro-allocation-zone1-seed884469.svg",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "041-output/micro-allocation-zone0-seed884469.svg",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "041-output/micro-allocation-zone2-seed884469.png",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "041-output/micro-allocation-zone2-seed884469.svg",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "041-output/micro-allocation-zone0-seed884469.png",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "041-output/micro-allocation-zone1-seed884469.png",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "042",
+    "slug": "gap-cadence-phase-only",
+    "md": "042-gap-cadence-phase-only.md",
+    "images": [
+      {
+        "path": "042-output/micro-allocation-zone1-seed884469.svg",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "042-output/micro-allocation-zone0-seed884469.svg",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "042-output/micro-allocation-zone2-seed884469.png",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "042-output/micro-allocation-zone2-seed884469.svg",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "042-output/micro-allocation-zone0-seed884469.png",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "042-output/micro-allocation-zone1-seed884469.png",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "043",
+    "slug": "central-park-with-ring-road",
+    "md": "043-central-park-with-ring-road.md",
+    "images": [
+      {
+        "path": "043-output/micro-allocation-zone1-seed884469.svg",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "043-output/micro-allocation-zone0-seed884469.svg",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "043-output/micro-allocation-zone2-seed884469.png",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "043-output/micro-allocation-zone2-seed884469.svg",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "043-output/micro-allocation-zone0-seed884469.png",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "043-output/micro-allocation-zone1-seed884469.png",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "044",
+    "slug": "declarative-buyer-families",
+    "md": "044-declarative-buyer-families.md",
+    "images": [
+      {
+        "path": "044-output/micro-allocation-zone1-seed884469.svg",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "044-output/micro-allocation-zone0-seed884469.svg",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "044-output/micro-allocation-zone2-seed884469.png",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "044-output/micro-allocation-zone2-seed884469.svg",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "044-output/micro-allocation-zone0-seed884469.png",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "044-output/micro-allocation-zone1-seed884469.png",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "045",
+    "slug": "view-villas-and-corner-reconciliation",
+    "md": "045-view-villas-and-corner-reconciliation.md",
+    "images": [
+      {
+        "path": "045-output/micro-allocation-zone1-seed884469.svg",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "045-output/micro-allocation-zone0-seed884469.svg",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "045-output/micro-allocation-zone2-seed884469.png",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "045-output/micro-allocation-zone2-seed884469.svg",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "045-output/micro-allocation-zone0-seed884469.png",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "045-output/micro-allocation-zone1-seed884469.png",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "046",
+    "slug": "park-edge-terraces",
+    "md": "046-park-edge-terraces.md",
+    "images": [
+      {
+        "path": "046-output/micro-allocation-zone1-seed884469.svg",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "046-output/micro-allocation-zone0-seed884469.svg",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "046-output/micro-allocation-zone2-seed884469.png",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "046-output/micro-allocation-zone2-seed884469.svg",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "046-output/micro-allocation-zone0-seed884469.png",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "046-output/micro-allocation-zone1-seed884469.png",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "047",
+    "slug": "terrace-breaks-and-true-residual-fill",
+    "md": "047-terrace-breaks-and-true-residual-fill.md",
+    "images": [
+      {
+        "path": "047-output/micro-allocation-zone1-seed884469.svg",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "047-output/micro-allocation-zone0-seed884469.svg",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "047-output/micro-allocation-zone2-seed884469.png",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "047-output/micro-allocation-zone2-seed884469.svg",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "047-output/micro-allocation-zone0-seed884469.png",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "047-output/micro-allocation-zone1-seed884469.png",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "048",
+    "slug": "real-buyer-roads-and-residual-blocks",
+    "md": "048-real-buyer-roads-and-residual-blocks.md",
+    "images": [
+      {
+        "path": "048-output/micro-allocation-zone1-seed884469.svg",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "048-output/micro-allocation-zone0-seed884469.svg",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "048-output/micro-allocation-zone2-seed884469.png",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "048-output/micro-allocation-zone2-seed884469.svg",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "048-output/micro-allocation-zone0-seed884469.png",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "048-output/micro-allocation-zone1-seed884469.png",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "049",
+    "slug": "fill-only-meaningful-residual-blocks",
+    "md": "049-fill-only-meaningful-residual-blocks.md",
+    "images": [
+      {
+        "path": "049-output/micro-allocation-zone1-seed884469.svg",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "049-output/micro-allocation-zone0-seed884469.svg",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "049-output/micro-allocation-zone2-seed884469.png",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "049-output/micro-allocation-zone2-seed884469.svg",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "049-output/micro-allocation-zone0-seed884469.png",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "049-output/micro-allocation-zone1-seed884469.png",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "050",
+    "slug": "vector-frontage-parcels",
+    "md": "050-vector-frontage-parcels.md",
+    "images": [
+      {
+        "path": "050-output/micro-allocation-zone1-seed884469.svg",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "050-output/micro-allocation-zone0-seed884469.svg",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "050-output/micro-allocation-zone2-seed884469.png",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "050-output/micro-allocation-zone2-seed884469.svg",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "050-output/micro-allocation-zone0-seed884469.png",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "050-output/micro-allocation-zone1-seed884469.png",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "051",
+    "slug": "perpendicular-frontage-cuts",
+    "md": "051-perpendicular-frontage-cuts.md",
+    "images": [
+      {
+        "path": "051-output/micro-allocation-zone1-seed884469.svg",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "051-output/micro-allocation-zone0-seed884469.svg",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "051-output/micro-allocation-zone2-seed884469.png",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "051-output/micro-allocation-zone2-seed884469.svg",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "051-output/micro-allocation-zone0-seed884469.png",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "051-output/micro-allocation-zone1-seed884469.png",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "052",
+    "slug": "hierarchical-frontage-access",
+    "md": "052-hierarchical-frontage-access.md",
+    "images": [
+      {
+        "path": "052-output/micro-allocation-zone1-seed884469.svg",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "052-output/micro-allocation-zone0-seed884469.svg",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "052-output/micro-allocation-zone2-seed884469.png",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "052-output/micro-allocation-zone2-seed884469.svg",
+        "layer": "micro-allocation-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "052-output/micro-allocation-zone0-seed884469.png",
+        "layer": "micro-allocation-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "052-output/micro-allocation-zone1-seed884469.png",
+        "layer": "micro-allocation-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "053",
+    "slug": "clean-vector-frontage-baseline",
+    "md": "053-clean-vector-frontage-baseline.md",
+    "images": [
+      {
+        "path": "053-output/clean-frontage-zone1-seed884469.svg",
+        "layer": "clean-frontage-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "053-output/clean-frontage-zone0-seed884469.svg",
+        "layer": "clean-frontage-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "053-output/clean-frontage-zone2-seed884469.png",
+        "layer": "clean-frontage-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "053-output/clean-frontage-zone2-seed884469.svg",
+        "layer": "clean-frontage-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "053-output/clean-frontage-zone0-seed884469.png",
+        "layer": "clean-frontage-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "053-output/clean-frontage-zone1-seed884469.png",
+        "layer": "clean-frontage-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "054",
+    "slug": "vector-frontage-with-civic-park",
+    "md": "054-vector-frontage-with-civic-park.md",
+    "images": [
+      {
+        "path": "054-output/clean-frontage-park-zone2-seed884469.png",
+        "layer": "clean-frontage-park-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "054-output/clean-frontage-park-zone0-seed884469.svg",
+        "layer": "clean-frontage-park-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "054-output/clean-frontage-park-zone1-seed884469.svg",
+        "layer": "clean-frontage-park-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "054-output/clean-frontage-park-zone1-seed884469.png",
+        "layer": "clean-frontage-park-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "054-output/clean-frontage-park-zone0-seed884469.png",
+        "layer": "clean-frontage-park-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "054-output/clean-frontage-park-zone2-seed884469.svg",
+        "layer": "clean-frontage-park-zone2",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "055",
+    "slug": "boundary-attached-park",
+    "md": "055-boundary-attached-park.md",
+    "images": [
+      {
+        "path": "055-output/boundary-park-zone0-seed884469.svg",
+        "layer": "boundary-park-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "055-output/boundary-park-zone2-seed884469.png",
+        "layer": "boundary-park-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "055-output/boundary-park-zone1-seed884469.svg",
+        "layer": "boundary-park-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "055-output/boundary-park-zone1-seed884469.png",
+        "layer": "boundary-park-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "055-output/boundary-park-zone2-seed884469.svg",
+        "layer": "boundary-park-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "055-output/boundary-park-zone0-seed884469.png",
+        "layer": "boundary-park-zone0",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "056",
+    "slug": "regularized-boundary-park",
+    "md": "056-regularized-boundary-park.md",
+    "images": [
+      {
+        "path": "056-output/boundary-park-regularized-zone1-seed884469.svg",
+        "layer": "boundary-park-regularized-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "056-output/boundary-park-regularized-zone2-seed884469.png",
+        "layer": "boundary-park-regularized-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "056-output/boundary-park-regularized-zone0-seed884469.svg",
+        "layer": "boundary-park-regularized-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "056-output/boundary-park-regularized-zone0-seed884469.png",
+        "layer": "boundary-park-regularized-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "056-output/boundary-park-regularized-zone2-seed884469.svg",
+        "layer": "boundary-park-regularized-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "056-output/boundary-park-regularized-zone1-seed884469.png",
+        "layer": "boundary-park-regularized-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "057",
+    "slug": "boundary-park-residual-areas",
+    "md": "057-boundary-park-residual-areas.md",
+    "images": [
+      {
+        "path": "057-output/boundary-park-residual-zone1-seed884469.svg",
+        "layer": "boundary-park-residual-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "057-output/boundary-park-residual-zone2-seed884469.png",
+        "layer": "boundary-park-residual-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "057-output/boundary-park-residual-zone0-seed884469.svg",
+        "layer": "boundary-park-residual-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "057-output/boundary-park-residual-zone0-seed884469.png",
+        "layer": "boundary-park-residual-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "057-output/boundary-park-residual-zone2-seed884469.svg",
+        "layer": "boundary-park-residual-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "057-output/boundary-park-residual-zone1-seed884469.png",
+        "layer": "boundary-park-residual-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "058",
+    "slug": "boundary-park-with-commercial-edges",
+    "md": "058-boundary-park-with-commercial-edges.md",
+    "images": [
+      {
+        "path": "058-output/boundary-park-commercial-residual-zone0-seed884469.png",
+        "layer": "boundary-park-commercial-residual-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "058-output/boundary-park-commercial-residual-zone2-seed884469.svg",
+        "layer": "boundary-park-commercial-residual-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "058-output/boundary-park-commercial-residual-zone1-seed884469.png",
+        "layer": "boundary-park-commercial-residual-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "058-output/boundary-park-commercial-residual-zone1-seed884469.svg",
+        "layer": "boundary-park-commercial-residual-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "058-output/boundary-park-commercial-residual-zone2-seed884469.png",
+        "layer": "boundary-park-commercial-residual-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "058-output/boundary-park-commercial-residual-zone0-seed884469.svg",
+        "layer": "boundary-park-commercial-residual-zone0",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "059",
+    "slug": "boundary-park-single-commercial-plus-terraces",
+    "md": "059-boundary-park-single-commercial-plus-terraces.md",
+    "images": [
+      {
+        "path": "059-output/boundary-park-commercial-terraces-zone1-seed884469.svg",
+        "layer": "boundary-park-commercial-terraces-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "059-output/boundary-park-commercial-terraces-zone2-seed884469.png",
+        "layer": "boundary-park-commercial-terraces-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "059-output/boundary-park-commercial-terraces-zone0-seed884469.svg",
+        "layer": "boundary-park-commercial-terraces-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "059-output/boundary-park-commercial-terraces-zone0-seed884469.png",
+        "layer": "boundary-park-commercial-terraces-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "059-output/boundary-park-commercial-terraces-zone2-seed884469.svg",
+        "layer": "boundary-park-commercial-terraces-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "059-output/boundary-park-commercial-terraces-zone1-seed884469.png",
+        "layer": "boundary-park-commercial-terraces-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "060",
+    "slug": "boundary-park-commercial-terraces-ribbons",
+    "md": "060-boundary-park-commercial-terraces-ribbons.md",
+    "images": [
+      {
+        "path": "060-output/boundary-park-commercial-terraces-ribbons-zone1-seed884469.svg",
+        "layer": "boundary-park-commercial-terraces-ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "060-output/boundary-park-commercial-terraces-ribbons-zone2-seed884469.png",
+        "layer": "boundary-park-commercial-terraces-ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "060-output/boundary-park-commercial-terraces-ribbons-zone0-seed884469.svg",
+        "layer": "boundary-park-commercial-terraces-ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "060-output/boundary-park-commercial-terraces-ribbons-zone0-seed884469.png",
+        "layer": "boundary-park-commercial-terraces-ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "060-output/boundary-park-commercial-terraces-ribbons-zone2-seed884469.svg",
+        "layer": "boundary-park-commercial-terraces-ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "060-output/boundary-park-commercial-terraces-ribbons-zone1-seed884469.png",
+        "layer": "boundary-park-commercial-terraces-ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
+  },
+  {
+    "num": "061",
+    "slug": "guide-aligned-claims-and-ribbons",
+    "md": "061-guide-aligned-claims-and-ribbons.md",
+    "images": [
+      {
+        "path": "061-output/boundary-park-commercial-terraces-guided-ribbons-zone1-seed884469.png",
+        "layer": "boundary-park-commercial-terraces-guided-ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "061-output/boundary-park-commercial-terraces-guided-ribbons-zone0-seed884469.png",
+        "layer": "boundary-park-commercial-terraces-guided-ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "061-output/boundary-park-commercial-terraces-guided-ribbons-zone2-seed884469.svg",
+        "layer": "boundary-park-commercial-terraces-guided-ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "061-output/boundary-park-commercial-terraces-guided-ribbons-zone2-seed884469.png",
+        "layer": "boundary-park-commercial-terraces-guided-ribbons-zone2",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "061-output/boundary-park-commercial-terraces-guided-ribbons-zone0-seed884469.svg",
+        "layer": "boundary-park-commercial-terraces-guided-ribbons-zone0",
+        "seed": "884469",
+        "tick": null
+      },
+      {
+        "path": "061-output/boundary-park-commercial-terraces-guided-ribbons-zone1-seed884469.svg",
+        "layer": "boundary-park-commercial-terraces-guided-ribbons-zone1",
+        "seed": "884469",
+        "tick": null
+      }
+    ]
   }
 ]

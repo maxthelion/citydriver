@@ -405,6 +405,7 @@
       const groups = groupVisualsByZone(exp.visuals);
       const links = [];
       const ribbonView = isRibbonVisual(exp, selectedVisual);
+      const assetBust = exp?.meta?.generated ? Date.parse(exp.meta.generated) : Date.now();
       if (selectedVisual?.paths.svg) links.push(`<a href="${resolveAssetPath(selectedVisual.paths.svg)}" target="_blank" rel="noopener">Open SVG</a>`);
       if (selectedVisual?.paths.png) links.push(`<a href="${resolveAssetPath(selectedVisual.paths.png)}" target="_blank" rel="noopener">Open PNG</a>`);
       const eventPath = eventLogPathForVisual(exp, selectedVisual);
@@ -440,7 +441,7 @@
                 <div class="thumb-list">
                   ${group.items.map(item => `
                     <button class="thumb ${item.key === selectedVisual?.key ? 'active' : ''}" data-key="${item.key}">
-                      <img src="${resolveAssetPath(item.paths.png || item.paths.svg)}" alt="${item.displayLabel}" class="${item.paths.png ? 'pixelated' : ''}">
+                      <img src="${resolveAssetPath(item.paths.svg || item.paths.png)}?t=${assetBust}" alt="${item.displayLabel}" class="${item.paths.svg ? '' : 'pixelated'}">
                       <span class="thumb-text">
                         <span class="thumb-label">${item.displayLabel}</span>
                         <span class="thumb-meta">${item.detailLabel}</span>
@@ -711,6 +712,7 @@
       return [
         `${exp.num}-output/events-zone${selectedVisual.zone}-seed${selectedVisual.seed}.ndjson`,
         `${exp.num}-output/ribbon-events-zone${selectedVisual.zone}-seed${selectedVisual.seed}.ndjson`,
+        `${exp.num}-output/cross-events-zone${selectedVisual.zone}-seed${selectedVisual.seed}.ndjson`,
       ];
     }
 
@@ -977,7 +979,14 @@
     }
 
     function findTooltipTarget(node) {
-      return node && node.closest ? node.closest('[data-tooltip]') : null;
+      let current = node;
+      while (current && current !== document) {
+        if (current.matches?.('[data-tooltip]')) return current;
+        const hasDirectTitle = Array.from(current.children || []).some(child => child.tagName?.toLowerCase?.() === 'title');
+        if (hasDirectTitle) return current;
+        current = current.parentNode;
+      }
+      return null;
     }
 
     function showTooltipForTarget(target, clientX, clientY, pinned) {
