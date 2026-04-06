@@ -2,439 +2,473 @@
 
 ## Context
 
-Experiments 040–061 proved a set of micro-claim primitives on a single sector:
+Experiments 040–061 proved a set of micro-claim geometric primitives on a
+single sector:
+
 - Commercial frontage strip with service road and access gaps ✓
 - Boundary-attached park polygon with perimeter road ✓
 - Terrace band around civic space ✓
 - Guide-aligned street layout ✓
 - Residual ribbon fill ✓
 
-The next phase moves systematically from individual micro operations for each
-land use type, through composite sector layouts, to full city layouts per
-archetype. The goal is to build up a complete picture of how a city gets divided
-before committing to a pipeline integration.
+These functions (`analyzeVectorFrontageSector`, `analyzeVectorBoundaryParkSector`
+etc.) are the **micro claim layer** — they define how a buyer shapes land within
+a sector it has already been given.
+
+What is missing is everything above them: the **buyer tick** — the mechanism
+that decides which sector each buyer targets (macro search), runs claims in
+priority order, tracks what has been claimed, and distributes uses across the
+whole city.
+
+The experiments from 062 onwards build that layer, incrementally, so that by
+the end there is a working buyer tick that can lay out a whole city under
+different archetypes.
 
 ---
 
-## Structure
+## The Buyer Tick Model
 
-**Tier 1 — Individual primitives (062–073)**
-One experiment per unimplemented land use type or micro operation. Single
-sector, single operation, controlled fixture. Proves the geometric primitive
-exists and works.
+A buyer tick for a single sector:
 
-**Tier 2 — Composite sector layouts (074–080)**
-Combine two or three primitives in one sector. Proves they can coexist and
-that the ordering and adjacency logic works.
+```
+For each buyer variant in archetype priority order:
+  1. Macro search — score all available sectors, pick best candidate
+  2. Micro claim  — run the geometric primitive on the winning sector
+  3. Record       — add ReservationLayout to city state, mark sector (partially) consumed
+  4. Repeat until variant's budget is exhausted or no eligible sectors remain
+```
 
-**Tier 3 — Multi-sector coordination (081–086)**
-Test how the same operation distributes across multiple sectors — commercial
-spine, park spacing, civic programme. First steps toward city-scale allocation.
+What differentiates most land use types is **not** the polygon shape — it is
+the macro search scoring. A church and a small park use nearly the same polygon
+primitive. What makes them different is where they go:
 
-**Tier 4 — Full archetype city layouts (087–092)**
-Run a complete city layout for each archetype on a fixture. Proves the macro
-ordering model works end to end.
+- Church: high centrality, near road junction, prominent position
+- Park: distributed, waterfront or hilltop, minimum spacing from other parks
+
+The micro claim geometry is mostly shared or parameterised. The scoring is
+what separates them.
+
+A buyer variant therefore looks like:
+
+```js
+{
+  key:         'civic/park',
+  macroSearch: {
+    score: (sector, spatialLayers, existingClaims) => number,
+    minSpacing: 300,          // metres from other parks
+    maxPerCity: 4,
+  },
+  microClaim:  analyzeVectorBoundaryParkSector,   // existing function
+  params:      createVectorFrontageParams(cellSize, { parkMinLengthMeters: ... }),
+  budget:      { shareOfZoneCells: 0.05 },
+}
+```
+
+The buyer registry maps variant keys to these objects. The archetype program
+is a priority-ordered list of variant keys. The buyer tick runner iterates the
+list and executes macro search then micro claim for each.
 
 ---
 
-## Tier 1 — Individual Primitives
+## Experiment Tiers
 
-### 062 Church and Churchyard
+**Tier 1 (062–067) — Buyer tick infrastructure**
+Build the macro search layer and the tick runner. Use existing micro claim
+functions. Prove that two buyers running in sequence pick the right sectors.
 
-**Tests:** Placing a small civic polygon at a prominent location — near a road
-junction, on high-value land, with a road on at least one side.
+**Tier 2 (068–074) — Additional buyer variants**
+Add new buyer variants by defining macro search scoring for each land use type.
+Most share existing geometric primitives; a few need small extensions.
 
-**Geometry:** Roughly 30×40m polygon. One straight road face. Compact, regular
-shape. Internal area is the churchyard; the church building is a landmark within
-it (not detailed at this stage — just the lot).
+**Tier 3 (075–080) — Budget, ordering, and distribution**
+Multiple buyers across the whole city. Budget limits, minimum spacing, priority
+ordering effects. Prove that the sequence produces coherent districts.
+
+**Tier 4 (081–086) — Full archetype programs**
+Run complete buyer programs for each archetype. Output is a whole-city
+reservation map. Proves the model end to end.
+
+---
+
+## Tier 1 — Buyer Tick Infrastructure
+
+### 062 Macro Search: Scoring Sectors for One Buyer
+
+**Goal:** Given a city fixture (post-spatial), score all available sectors for
+the `commercial/frontage-strip` variant using the spatial layers already
+computed (centrality, roadFrontage, landValue). Render the scored sector map —
+colour sectors by score, highlight the top candidate.
+
+**No micro claim runs yet.** This is purely about validating that the scoring
+function picks the right sector.
+
+**Success:** The highest-scoring sector is visually obviously a good commercial
+location — high road frontage, central, near arterials. A bad result (scoring
+picks a peripheral flat zone with no road exposure) reveals missing weight
+terms.
+
+**Output:** Coloured sector score map. Top-N candidates highlighted.
+
+---
+
+### 063 Macro Search: Two Competing Buyers
+
+**Goal:** Score sectors simultaneously for `commercial/frontage-strip` and
+`civic/park`. Render both score maps side by side. Confirm they prefer
+different sectors.
+
+**Success:** Commercial scores road-facing central sectors highest. Park scores
+waterfront, hilltop, or interior high-value sectors highest. The two maps
+should not have the same winner.
+
+**Also test:** What happens when commercial runs first and claims a sector —
+does park's scoring correctly avoid claimed land?
+
+---
+
+### 064 First Buyer Tick: Two Variants in Sequence
+
+**Goal:** Run a minimal buyer tick loop with two variants:
+1. `commercial/frontage-strip` claims its top sector
+2. `civic/park` claims its top unclaimed sector
+
+Commit both claims, render the result.
 
 **New code needed:**
-- `analyzeVectorChurchSector` or a `civic/church` variant in vectorFrontageLayout
-- Placement scoring: high centrality, near road junction, not adjacent to industrial
+- `src/city/land/buyerTick.js` — minimal tick runner:
+  - accepts an ordered list of buyer variants
+  - for each: runs macroSearch, picks top sector, runs microClaim, records
+    ReservationLayout, marks sector consumed
+  - returns the full set of layouts
 
-**Success:** A compact civic polygon appears at a naturally prominent position
-in the sector, with a road on its primary face. Surrounding residual area is
-cleanly separated.
+**Success:** Two sectors in the city are claimed — one clearly commercial, one
+clearly a park. The claims don't overlap. Residual areas from both are clearly
+defined.
 
 ---
 
-### 063 Market Square
+### 065 Buyer Tick: Claimed State Propagates
 
-**Tests:** An open civic space at or near a road confluence — the kind of
-space that forms where multiple approach roads meet at the town centre.
+**Goal:** Add `residential/edge-terrace` as a third variant. It must score
+sectors adjacent to already-claimed civic space (the park from 064).
 
-**Geometry:** Irregular open polygon, 40–80m across. Paved, no internal
-buildings at this stage. Roads on multiple sides (2–3). Different from a park:
-urban, paved, central, defined by the roads around it rather than by terrain.
+**Tests:** Does macro search correctly boost sectors that neighbour the park
+claim? Does the terrace band correctly wrap around the park polygon boundary?
 
 **New code needed:**
-- `analyzeVectorMarketSquareSector` — identify road confluence point in sector,
-  build polygon around it
-- Distinct from park: no perimeter road (roads already bound it), no terrace
-  (commercial directly faces the square)
+- Macro search scoring for `residential/edge-terrace`:
+  - adjacentToClaim (civic/park) → high score
+  - adjacentToClaim (commercial) → medium score
+  - no adjacency → low score
 
-**Success:** An open polygon appears at the natural meeting point of roads in
-the sector. Commercial frontage runs along at least one face.
+**Success:** The terrace claim appears immediately adjacent to the park, not in
+a random sector. The terrace band geometry wraps the correct face.
 
 ---
 
-### 064 Town Hall / Civic Building Plot
+### 066 Buyer Tick: Residual Fill as Final Variant
 
-**Tests:** A single prominent institutional plot at a road junction end — the
-kind of position where a town hall or cathedral closes a vista down a main
-street.
+**Goal:** Add `residential/residual-fill` as the last variant. It fills
+whatever is left in each sector after commercial, civic, and terrace claims
+have run.
 
-**Geometry:** Single rectangular plot, 25–60m wide, 20–40m deep. Positioned at
-the head of a primary road or at a major junction. Not a polygon reservation —
-a single large lot with specific orientation.
+**Tests:** Does residual fill correctly use the residual areas left by earlier
+claims? Does it skip sectors that are fully claimed?
+
+**Success:** Every sector has ribbon streets filling the unclaimed area. The
+boundary between commercial/park/terrace and residual fill is clean —
+streets don't cross into reserved polygons.
+
+---
+
+### 067 Buyer Tick: Serialised Claim State
+
+**Goal:** Serialise the full set of ReservationLayouts from a buyer tick run
+to JSON alongside the fixture. Load and re-render without re-running the tick.
+
+**Why:** If claims are deterministic but expensive, being able to save and
+replay them makes experiments faster and more comparable.
 
 **New code needed:**
-- `buildVistaTerminusPlot` — find road-end or prominent junction, place oriented
-  rectangle facing down the primary road axis
+- `ReservationLayout.toJSON()` already exists on each layout
+- A thin wrapper that saves/loads the array of layouts alongside the fixture
 
-**Success:** A single large civic plot appears at the natural visual terminus of
-a main road. Surrounding area treats it as an anchor.
-
----
-
-### 065 Warehouse Yard
-
-**Tests:** A large flat rectangle near road and/or rail, with a loading access
-road along one face.
-
-**Geometry:** 60–150m × 40–80m rectangle. Must be on flat land. Must have road
-access on at least one long face. No frontage parcels — the whole thing is
-industrial floor space.
-
-**New code needed:**
-- `analyzeVectorWarehouseYardSector` — score flat road-adjacent areas, place
-  rectangular lot, emit access road on primary face
-- Scoring: high flatness weight, road proximity, downwind, near rail if available
-
-**Success:** A large rectangular industrial lot appears on the flattest,
-most transport-accessible part of the sector. Access road runs along the
-building face.
+**Success:** The rendered output from a loaded claim state is identical to the
+output from re-running the tick.
 
 ---
 
-### 066 View Villa Cluster
+## Tier 2 — Additional Buyer Variants
 
-**Tests:** Low-density residential on premium amenity land — hilltop, sea view,
-park edge, quiet fringe.
+Each experiment adds one new buyer variant — primarily by defining its macro
+search scoring. The micro claim reuses or lightly parameterises an existing
+primitive.
 
-**Geometry:** Loose cluster of larger plots (15–25m wide, 25–40m deep). Lower
-density than terrace. Plots oriented toward the view or amenity rather than
-strictly parallel to the road.
+### 068 Church / Churchyard
 
-**New code needed:**
-- `analyzeVectorViewVillaSector` — find highest-amenity land in sector (high
-  land value, slope, water proximity), place loose plot cluster with view
-  orientation
-- Plot generation distinct from terrace: wider plots, larger setbacks, may
-  skip some positions
+**Macro search:** High centrality, near road junction (two or more roads
+meeting), not adjacent to industrial. Scoring uses centrality + roadFrontage
+at junction points.
 
-**Success:** A recognisably lower-density residential area appears on the
-highest-value terrain. Plot sizes and spacing are visibly different from terrace
-housing.
+**Micro claim:** Small polygon (~30×40m). Reuses the park polygon primitive
+with smaller target dimensions and no perimeter road (road already bounds it).
+
+**Budget:** 1–2 per city.
 
 ---
 
-### 067 Quayside Strip
+### 069 Market Square
 
-**Tests:** Linear industrial/commercial strip perpendicular to a waterfront —
-the geometry of a working harbour.
+**Macro search:** Road confluence — sectors where two or more roads meet near
+the sector centroid. High centrality. This is the commercial anchor, so it
+should run before or alongside commercial.
 
-**Geometry:** Deep plots (15–30m) running back from the water edge. A quay road
-runs parallel to the water. Crane positions or loading access along the water
-face. Similar to commercial frontage but deeper, facing water not road.
+**Micro claim:** Open polygon at the road convergence point. Roads bound it on
+multiple sides. Reuses the civic polygon primitive; no internal parcels.
 
-**New code needed:**
-- `analyzeVectorQuaysideSector` — detect water edge in sector, build perpendicular
-  plots running back from it, emit quay road parallel to water
-- Scoring: high waterfrontness, flat, road/rail access
-
-**Success:** A strip of deep plots faces the water with their backs toward the
-land. A quay road runs between the water edge and the plot fronts.
+**Budget:** 1 per city (possibly 2 for larger cities).
 
 ---
 
-### 068 Promenade
+### 070 Industrial Yard
 
-**Tests:** A pedestrian path along a waterfront with no built plots — pure open
-space with amenity value.
+**Macro search:** Flat terrain (low slope), downwind, near road or rail, low
+centrality (edgeness). Avoids residential and civic adjacency.
 
-**Geometry:** A narrow linear polygon (10–20m wide) running along the water edge.
-No buildings. A path along the water face.
+**Micro claim:** Large rectangle (60–150m × 40–80m). Access road on primary
+face. Reuses park polygon primitive with larger target dimensions and access
+road emission rather than perimeter road.
 
-**New code needed:**
-- `buildPromenadeStrip` — find water edge polyline in sector, offset a narrow
-  polygon, emit a path road along the inner edge
-- No parcels produced — the promenade is the reservation
-
-**Success:** A narrow linear open strip runs along the water edge. It acts as a
-barrier for subsequent landward reservations (commercial or residential facing
-the promenade).
+**Budget:** Share of flat edge zone cells (varies by archetype — large for
+industrial town, small for market town).
 
 ---
 
-### 069 Cemetery
+### 071 Quayside
 
-**Tests:** A large irregular polygon at the edge of the settlement — distinct
-from a park in that it has no perimeter road, no frontage, and is placed at
-the fringe rather than the centre.
+**Macro search:** Sectors with a water edge. Maximum waterfrontness score.
+Flat land. Near rail if available.
 
-**Geometry:** Irregular, 1–4 hectares. At the edge of buildable land, near
-terrain limits or settlement boundary. A single access road or gate at one
-corner.
+**Micro claim:** Strip of deep plots running perpendicular to the water edge.
+A quay road parallel to the water. The frontage faces the water, not a road.
+Adapts `analyzeVectorFrontageSector` to use the water edge as the anchor
+rather than a road edge.
 
-**New code needed:**
-- `analyzeVectorCemeterySector` — score edge/low-centrality areas, place
-  irregular polygon clipped to zone boundary
-- Placement scoring: edgeness, low centrality, never adjacent to commercial
-
-**Success:** An irregular boundary-edge polygon appears at the fringe of
-buildable land. It acts as a hard barrier for ribbon street fill.
+**Budget:** Linear proportion of waterfront length.
 
 ---
 
-### 070 Station Precinct
+### 072 View Villa Cluster
 
-**Tests:** The area around a railway station — platform approach road,
-forecourt, taxi/bus space.
+**Macro search:** High land value + slope + water proximity or high elevation.
+Specifically: sectors that score high on at least two of — hilltop, sea view,
+park adjacency, quiet fringe. Low centrality acceptable.
 
-**Geometry:** A roughly rectangular cleared area adjacent to the railway.
-A station road approaches from the nearest arterial. A forecourt polygon in
-front of the station.
+**Micro claim:** Loose cluster of wider, deeper plots. Parameterises the
+existing terrace claim with larger plot dimensions and lower density. Does not
+require road frontage on both sides.
 
-**New code needed:**
-- `buildStationPrecinct` — find nearest railway cell to sector, build approach
-  road from arterial, place forecourt polygon
-- Depends on `map.railwayGrid` and `map.station`
-
-**Success:** A cleared station precinct appears where the railway crosses or
-runs near the sector. An access road connects to the arterial.
+**Budget:** Small share of high-amenity zone cells.
 
 ---
 
-### 071 Back-to-Back / Dense Terrace
+### 073 Railside Industrial Strip
 
-**Tests:** High-density residential without rear gardens — plots on both sides
-of a narrow street, backs meeting in the middle. Industrial-era workers' housing.
+**Macro search:** Sectors adjacent to railway. Downwind. Flat.
 
-**Geometry:** Plots 5–7m wide, 8–12m deep. Street width narrower than standard
-terrace. No rear access. High coverage.
+**Micro claim:** Long narrow rectangle parallel to the railway corridor.
+Road access on the landward face, railway on the other. Parameterised version
+of the industrial yard with a forced linear orientation.
 
-**New code needed:**
-- Variant of the terrace claim with narrower plots and reduced depth parameter
-- Could be a `microClaim` parameter variant rather than a new function
-
-**Success:** Noticeably denser and narrower housing appears compared to standard
-terrace. Street width is visibly narrower.
+**Budget:** Proportion of railway-adjacent zone cells.
 
 ---
 
-### 072 Industrial Railside Strip
+### 074 Promenade
 
-**Tests:** Linear industrial allocation running parallel to a railway line —
-the classic mill town pattern.
+**Macro search:** Sectors with direct water frontage. Preferably not already
+claimed by quayside.
 
-**Geometry:** A long narrow rectangle parallel to the railway, 20–40m wide,
-up to 200m long. Plots have rail access on one face, road access on the other.
+**Micro claim:** Narrow strip (10–20m) along the water edge. No built parcels.
+A path road along the inner edge. Acts as a barrier — commercial or residential
+facing it treat it as their frontage.
 
-**New code needed:**
-- `analyzeVectorRailsideSector` — detect railway corridor in sector, build
-  parallel strip, emit access roads on both faces
-- Scoring: adjacency to railway, flat, downwind
-
-**Success:** A linear industrial strip runs parallel to the railway. Road
-access and rail access faces are clearly distinct.
+**Budget:** Thin linear claim along water edge; low cell count.
 
 ---
 
-### 073 Civic Square with Commercial Surround
+## Tier 3 — Budget, Ordering, and Distribution
 
-**Tests:** A market square (from 063) with commercial frontage running along
-its road-facing edges — the typical market town centre pattern.
+### 075 Commercial Budget Across Multiple Sectors
 
-**Geometry:** Central open space + commercial strips on 2–3 faces, residential
-or civic behind. The commercial strips face the square rather than an arterial.
+Run `commercial/frontage-strip` with a city-level budget (e.g. 10% of zone
+cells). Watch it claim multiple sectors in sequence — top-scored first, then
+next-best, until budget exhausted.
 
-**New code needed:**
-- Composite of `analyzeVectorMarketSquareSector` + `analyzeVectorFrontageSector`
-  where the frontage edges face the square rather than an external road
-
-**Success:** A coherent town centre: open square at the convergence of roads,
-commercial facing it on multiple sides, residential behind.
+**Key question:** Does the commercial budget distribute across naturally good
+locations, or does it concentrate in one sector?
 
 ---
 
-## Tier 2 — Composite Sector Layouts
+### 076 Distributed Civic: Minimum Spacing
 
-These experiments combine multiple primitives to test that they coexist cleanly.
+Run `civic/park` with a budget of 3–4 parks and a minimum spacing of 300m.
+Each successive park claim must be at least 300m from all previous ones.
 
-### 074 Church + Residential Ring
-
-Church/churchyard as the anchor, residential terrace band around it (from 046),
-residual fill behind.
-
-### 075 Warehouse + Workers' Housing
-
-Warehouse yard (065) on flat land, back-to-back housing (071) immediately
-adjacent, separated by a service road.
-
-### 076 Quayside + Commercial + Residential
-
-Quayside strip (067) at the water, commercial frontage strip (053) set back one
-block, residential terrace fill behind.
-
-### 077 Station + Commercial Spine
-
-Station precinct (070) as anchor. Commercial spine running from station toward
-the town centre. Residential filling behind the commercial.
-
-### 078 Full Civic Quarter
-
-Park (054–057) + market square (063) + church (062) + town hall (064) in
-adjacent sectors. Tests that the civic cluster feels coherent and that the
-minimum-spacing rules keep each element distributed sensibly.
+**Key question:** Does minimum spacing correctly distribute parks across the
+city? Does the spacing interact well with the scoring — or does the best
+unclaimed sector always neighbour the last claimed one?
 
 ---
 
-## Tier 3 — Multi-Sector Coordination
+### 077 Priority Order Effects
 
-### 079 Commercial Spine Across Multiple Sectors
+Run the same set of buyers in two different orderings:
+- A: commercial → civic → industrial → residential
+- B: civic → commercial → industrial → residential
 
-A commercial strip running through 3–4 connected sectors along a primary road.
-Tests that the frontage geometry reads as a continuous high street rather than
-disconnected sector-local strips.
+Compare the outputs. Civic-first should produce a city where commercial wraps
+around a pre-existing civic core. Commercial-first should produce a city where
+civic is pushed to secondary locations.
 
-**Key question:** How do sector boundaries affect the continuity of the
-commercial frontage? Does the service road break at sector boundaries or
-continue through?
-
-### 080 Distributed Parks
-
-Place 3–4 parks across a real city fixture, respecting minimum spacing. Tests
-the macro search logic for distributed civic uses.
-
-**Key question:** Does the scoring naturally distribute parks to different
-parts of the city? Or do they cluster on the highest-value land?
-
-### 081 Civic Programme Pass
-
-Run the full civic programme for a market town archetype: church, market
-square, park, town hall. Each placed in sequence, each with minimum spacing
-from the others and from competing uses.
-
-**Key question:** Does the sequential placement leave coherent spatial gaps for
-residential? Does the civic programme feel like a town centre rather than a
-collection of isolated polygons?
-
-### 082 Industrial District
-
-Warehouse yards + railside strips + back-to-back housing forming a coherent
-industrial quarter on flat/downwind land. Tests multi-element industrial
-district formation.
-
-### 083 Commercial Hierarchy
-
-Primary commercial (along arterials), secondary commercial (along collectors),
-none on ribbon streets. Tests that commercial scales with road importance.
+**Key question:** Does priority order produce visually distinct city layouts?
+This validates that the ordering mechanism is doing real work.
 
 ---
 
-## Tier 4 — Full Archetype City Layouts
+### 078 Industrial + Residential Adjacency
 
-Each experiment runs the full reservation pass for one archetype on a real
-fixture. The output is a coloured reservation map showing the whole city
-divided by land use.
+Run `industrial/yard` and `residential/residual-fill` in sequence. Industrial
+claims flat edge land. Residential fills around it.
 
-At this stage no street layout runs inside the reservations. The experiment
-answers: does the distribution look like the intended archetype?
+**Key question:** Does residential correctly avoid claiming land adjacent to
+industrial (downwind penalty)? Does a buffer zone appear naturally from the
+scoring, or does it need an explicit forbidden-adjacency rule?
 
-### 087 Market Town Full Layout
+---
 
-Priority order: civic (church + square + park) → commercial (high street
-frontage) → industrial (downwind) → residential (everywhere else).
+### 079 Full Civic Programme
 
-Expected pattern: civic core near centre, commercial along main approach roads,
-small industrial area downwind, residential filling the rest.
+Run the full civic variant set for a market town:
+- `civic/market-square` (1, central)
+- `civic/park` (2, distributed)
+- `civic/church` (2, near junctions)
 
-### 088 Harbour / Port Layout
+All with minimum spacing. Render the full city with civic claims only.
 
-Priority order: quayside industrial → commercial near harbour → civic near
-waterfront → residential behind.
+**Key question:** Does the civic programme produce something that reads like a
+real market town civic structure — square at the centre, parks distributed,
+churches at prominent crossroads?
 
-Expected pattern: deep quayside plots at the water, commercial strip one block
-back, civic open space along the embankment, residential filling inland.
+---
 
-### 089 Industrial City Layout
+### 080 Residential Hierarchy
 
-Priority order: industrial (large central/edge yards) → workers' housing near
-industry → commercial (single main street) → civic (minimal).
+Run three residential variants in sequence:
+1. `residential/view-villa` (claims premium terrain first)
+2. `residential/edge-terrace` (wraps civic space)
+3. `residential/residual-fill` (fills everything else)
 
-Expected pattern: large industrial blocks dominating the flat land, housing
-packed around it, one commercial spine.
+**Key question:** Is the hierarchy visible? Does premium housing clearly occupy
+the best terrain? Does the terrace band appear around civic space? Does residual
+fill cleanly handle what's left?
 
-### 090 Civic Centre Layout
+---
 
-Priority order: civic (cathedral close, college grounds, parks) → commercial
-ring around civic core → residential outside.
+## Tier 4 — Full Archetype Programs
 
-Expected pattern: large institutional grounds at centre, civic open space,
-commercial ring serving the institutions, residential around the edge.
+Each experiment runs the complete buyer tick loop for one archetype on a real
+city fixture (post-spatial). Output is a full-city reservation map coloured by
+land use type. No internal street layout yet — just the reservation polygons.
 
-### 091 Grid Town Layout
+### 081 Market Town
 
-Priority order: civic square at grid centre → commercial on main cross streets
-→ residential filling regular blocks → industrial at grid edge.
+Program order: market-square → parks → churches → commercial-frontage →
+industrial-yard → view-villa → edge-terrace → residual-fill
 
-Expected pattern: clearly regular, all land uses aligned to the grid, civic at
-crossing of main axes.
+Expected: civic core at centre, commercial along main approach roads, small
+industrial area downwind, residential filling the rest, premium housing on
+best terrain.
+
+---
+
+### 082 Harbour / Port
+
+Program order: quayside → promenade → commercial-near-harbour →
+civic-waterfront → industrial-railside → residual-fill
+
+Expected: working harbour at the water, commercial strip landward of it,
+promenade along the non-industrial waterfront, residential filling inland.
+
+---
+
+### 083 Industrial City
+
+Program order: industrial-yard (large budget) → railside-strip →
+commercial-spine (small) → civic (minimal) → residential-dense → residual-fill
+
+Expected: large industrial blocks dominating flat land, housing packed around
+them, one modest commercial spine.
+
+---
+
+### 084 Civic Centre
+
+Program order: civic-campus (large, central) → parks (generous budget) →
+commercial-ring → residential → residual-fill
+
+Expected: large institutional grounds at centre, generous open space, commercial
+ring serving the campus, residential around the edge.
+
+---
+
+### 085 Grid Town
+
+Program order: civic-square (at grid centre) → commercial (on primary axes) →
+industrial (at grid edge) → residential-block → residual-fill
+
+Expected: clearly regular, all uses aligned to the grid, civic at the crossing
+of main axes.
 
 ---
 
 ## What New Code Is Required
 
-Most Tier 1 experiments need a new `analyzeVector*` function or a simple
-geometric helper. Tier 2 is composition of existing functions. Tier 3–4 needs
-the macro search layer.
+| Tier | What | Where |
+|---|---|---|
+| 1 | `buyerTick.js` — macro search runner + tick loop | `src/city/land/buyerTick.js` |
+| 1 | Macro search scoring for `commercial/frontage-strip` and `civic/park` | Same file or buyer registry |
+| 1 | Buyer registry — maps variant keys to macroSearch + microClaim + params | `src/city/land/buyerRegistry.js` |
+| 2 | Macro search scoring per variant (068–074) | Buyer registry entries |
+| 2 | Water-edge anchor for quayside (extends analyzeVectorFrontageSector) | vectorFrontageLayout.js |
+| 3 | Minimum spacing enforcement in macro search | buyerTick.js |
+| 3 | Budget tracking across multiple sector claims | buyerTick.js |
+| 4 | Archetype programs as declarative buyer lists | `src/city/archetypes.js` or separate files |
 
-| Experiments | New code |
-|---|---|
-| 062 church | `analyzeVectorChurchSector` or civic/church variant |
-| 063 market square | `analyzeVectorMarketSquareSector` |
-| 064 town hall plot | `buildVistaTerminusPlot` |
-| 065 warehouse yard | `analyzeVectorWarehouseYardSector` |
-| 066 view villas | `analyzeVectorViewVillaSector` |
-| 067 quayside | `analyzeVectorQuaysideSector` |
-| 068 promenade | `buildPromenadeStrip` |
-| 069 cemetery | `analyzeVectorCemeterySector` |
-| 070 station precinct | `buildStationPrecinct` |
-| 071 back-to-back | Parameter variant of terrace claim |
-| 072 railside strip | `analyzeVectorRailsideSector` |
-| 073 square + commercial | Composite of existing functions |
-| 074–078 | Composition only |
-| 079–083 | Macro search: sector scoring, minimum spacing, budget distribution |
-| 087–091 | Archetype programs as declarative buyer configs |
+The micro claim functions (`analyzeVector*`, `fillResidualAreasWithRibbons`)
+are already built. Almost all new code is in the macro search and tick
+orchestration layer.
 
 ---
 
-## Key Questions to Answer Before Tier 4
+## Key Questions Each Tier Must Answer
 
-Before running full archetype layouts, three open questions need answers from
-Tier 1–3:
+**After Tier 1:**
+- Does scoring reliably pick the right sector for each buyer?
+- Does the claim state correctly propagate — do later buyers see what earlier
+  buyers claimed?
 
-**1. How do sector boundaries affect continuity?**
-Do commercial strips and streets read as continuous across sector boundaries?
-This affects whether sectors are the right granularity for allocation.
+**After Tier 2:**
+- Do most land use types share micro claim primitives with different scoring?
+- Which types genuinely need new geometric operations vs new scoring only?
 
-**2. How do civic uses distribute themselves?**
-Does placement-by-score naturally produce the right spacing, or does it always
-cluster on the highest-value land? This determines whether minimum-spacing rules
-are needed, and if so how strict.
+**After Tier 3:**
+- Does priority order visibly change the city layout?
+- Does minimum spacing produce distributed civic uses without explicit
+  placement rules?
+- Does residential naturally avoid industrial without a hardcoded penalty?
 
-**3. What is the right budget granularity?**
-If commercial gets 12% of city cells, does placing that budget in one sector
-produce a realistic high street, or does it need to be split across multiple
-sectors proportionally? The Tier 3 spine and distribution experiments answer this.
+**After Tier 4:**
+- Do the five archetype programs produce visually distinct city layouts?
+- Does the reservation map look like the intended archetype before any street
+  layout runs?
