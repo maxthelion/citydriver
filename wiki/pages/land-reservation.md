@@ -2,11 +2,17 @@
 title: "Land Reservation"
 category: "algorithms"
 tags: [land-use, archetypes, zoning, spatial-layers, pipeline]
-summary: "How the land reservation system allocates non-residential land using a seed-and-grow algorithm, and how each archetype shapes the result."
+summary: "How the land reservation system allocates non-residential land. Covers the legacy BFS seed-and-grow algorithm and the newer vector frontage approach being developed in experiments."
 last-modified-by: user
 ---
 
-## What Problem It Solves
+## Two Approaches
+
+Land reservation has been implemented two ways. The first (BFS seed-and-grow) is what currently runs in the main pipeline. The second (vector frontage) is the approach being developed in experiments 040–061 and described in [[micro-reservation-model]]. The vector approach is expected to replace the BFS approach for frontage-based uses once it matures.
+
+## Legacy Approach: BFS Seed-and-Grow
+
+### What Problem It Solves
 
 Before residential infill runs, the city needs coherent commercial, industrial, civic, and open space zones. The land reservation system carves these out of development zones so that later pipeline steps (ribbon layout, building placement) only operate on the unreserved remainder.
 
@@ -125,7 +131,7 @@ This can feel like the system "spends the whole budget in one spot" rather than 
 - **Zone-local reservation** — reserve independently within each development zone rather than pooling all zones
 - **Diminishing returns** — reduce a cell's score as distance from seed increases beyond a threshold, forcing the algorithm to start a new cluster
 
-## Source Files
+## Source Files (Legacy BFS)
 
 | File | Role |
 |------|------|
@@ -133,3 +139,14 @@ This can feel like the system "spends the whole budget in one spot" rather than 
 | `src/city/archetypes.js` | Archetype definitions (shares, order, placement, growthMode) |
 | `src/city/pipeline/computeSpatialLayers.js` | Spatial layer computation (centrality, waterfrontness, etc.) |
 | `src/city/zoneExtraction.js` | Zone identification (upstream input) |
+
+## New Approach: Vector Frontage
+
+See [[micro-reservation-model]] for the vector-based approach being developed in experiments 040–061. It replaces BFS cell claiming with polygon-level reservations:
+
+- Commercial claims a shallow frontage strip along anchor road edges
+- Parks are placed as explicit polygons with perimeter roads
+- Residential terrace bands wrap around civic space before generic fill
+- Residual areas are filled with ribbon streets using `residualRibbonFill`
+
+The new approach separates **macro search** (which sector does a buyer target?) from **micro claim** (what shape does it reserve within that sector?). See [[micro-reservation-model]] for the full model.

@@ -73,4 +73,11 @@ value bitmap → allocator picks location → stamps shape → influence recompu
 
 ## Current State
 
-The current system (on the `incremental-zoning` branch) uses BFS spread from seeds, which produces roughly blob-shaped zones. This works as a first pass but doesn't produce the ribbon streets, typed civic plots, or polygon-based estates described here. The ribbon mechanism from the existing pipeline (layoutRibbons) should be integrated into the residential allocator rather than running as a separate post-processing step.
+The main pipeline still uses BFS seed-and-grow for non-residential reservation (see [[land-reservation]]). However experiments 040–061 have built a substantially more capable vector-based approach in `src/city/land/`:
+
+- **Commercial frontage** — a shallow strip reserved along anchor road edges, with regular access gaps and a service road one block behind. Produces realistic commercial high street geometry.
+- **Parks** — placed as explicit boundary-attached polygons with perimeter roads. Several placement strategies: rectangular, regularised quad, boundary-attached.
+- **Terrace bands** — shallow residential strips reserved around civic space (park, square) before generic residential fill.
+- **Residual fill** — after reservations are placed, remaining zone area is filled with cross streets and ribbon streets using the incremental street machinery.
+
+This is the approach described in [[micro-reservation-model]]. The allocation strategies in this page — frontage strips for commercial, polygon parks, typed civic plots, ribbon residential — are now substantially implemented in `vectorFrontageLayout.js` for the single-sector case.

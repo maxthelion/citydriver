@@ -88,6 +88,26 @@ For archetypes without a growth config, three steps run instead:
 
 Connects zone spines to the skeleton road network via A* pathfinding. Also runs full-connectivity checking: disconnected local-road components are connected to the nearest skeleton node (up to 20 connectors).
 
+### parcels
+
+Collects parcels from ribbon streets laid during the growth phase. Each parcel is the strip of buildable land between two adjacent ribbon streets within a zone.
+
+### plots
+
+Subdivides each parcel into individual plots by walking along ribbon streets at regular intervals and cutting perpendicular to the street. Produces rectangular lots with guaranteed frontage. See [[plots]].
+
+### edge-lookups
+
+Builds bidirectional lookups between road edges and the zones and parcels that front onto them. Used by building placement and rendering.
+
+### smooth-roads
+
+Applies two passes of Chaikin smoothing to all road polylines, rounding sharp corners. The smoothed geometry is written back through `roadNetwork.replaceWayPolyline()` so the grid stamps remain consistent.
+
+## Road Model
+
+Roads are represented as `RoadWay` objects holding shared `RoadNode` references. Junctions are implicit — a shared node referenced by more than one way is an intersection. `PlanarGraph`, `roadGrid`, and `bridgeGrid` are derived from the ways via `rebuildDerived()` and are never mutated directly. See [[planar-graph]].
+
 ## Source Files
 
 | File | Role |
@@ -103,8 +123,13 @@ Connects zone spines to the skeleton road network via A* pathfinding. Also runs 
 | `src/city/pipeline/computeSpatialLayers.js` | `spatial` step |
 | `src/city/pipeline/growthTick.js` | `growth-N:*` phase functions + `runGrowthTick` wrapper |
 | `src/city/pipeline/layoutRibbons.js` | `growth-N:ribbons` / `ribbons` step |
-| `src/city/pipeline/segmentTerrainFaces.js` | Terrain face segmentation for per-face ribbon layout |
+| `src/city/pipeline/collectParcels.js` | `parcels` step |
+| `src/city/pipeline/subdividePlots.js` | `plots` step |
+| `src/city/pipeline/buildEdgeLookups.js` | `edge-lookups` step |
 | `src/city/pipeline/connectToNetwork.js` | `connect` step |
+| `src/core/RoadWay.js` | Road way — ordered shared-node polyline with bridge support |
+| `src/core/RoadNode.js` | Road node — shared point in the road network |
+| `src/core/RoadNetwork.js` | Single mutation point: manages ways, nodes, graph, grids |
 | `src/city/archetypes.js` | Archetype definitions |
 | `src/city/archetypeScoring.js` | Archetype auto-selection |
 
