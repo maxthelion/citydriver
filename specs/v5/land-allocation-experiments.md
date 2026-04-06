@@ -56,6 +56,16 @@ The residential case is the most important: after commercial strips the anchor
 road frontage, the residual polygon is irregular. Ribbon streets fill that
 shape, not the original zone boundary.
 
+Residential should not always be treated as one final generic fill step. Some
+reservations, especially civic ones, may want a shallow residential edge claim
+first — for example terraced housing facing a park or square — with the
+generic residual ribbons only filling what remains after that edge treatment.
+
+Residential should also not be treated as socially uniform. Some residential
+buyers may seek premium amenity land such as sea views, hilltops, park edges,
+or quieter high-value fringe positions, and may claim those places at lower
+density before generic residential fill is applied.
+
 ---
 
 ## Ribbon Streets in Residual Polygons
@@ -123,6 +133,29 @@ reserved before surrounding streets were laid.
 The park polygon is treated as an obstacle. Ribbon streets that would cross the
 park boundary are clipped. This is the same clipping that currently handles
 water and existing roads — the park just registers as another barrier type.
+
+### Residential around parks and civic space
+
+A park may want built frontage on some or all sides. In those cases the order is
+not:
+
+1. reserve park
+2. fill everything else with generic residential ribbons
+
+Instead it is:
+
+1. reserve park
+2. reserve a shallow residential terrace/frontage band along some or all park
+   edges
+3. then fill the remaining residual with generic residential ribbons
+
+This means the reservation phase must support residential as both:
+
+- a special edge-claim buyer
+- and a residual-fill buyer
+
+It may also need to support premium residential buyers that claim special
+amenity land before ordinary residential residual fill.
 
 ---
 
@@ -219,6 +252,7 @@ commercial in one corner, parks clustered, industrial everywhere).
 |---|---|
 | `experiment-acceleration-plan.md` | Fixture infrastructure required before any of this |
 | `functionality-overview.md` | The ideas being tested here |
+| `land-buyer-model.md` | Declarative buyer families/variants for reservation and road consequences |
 | `pipeline-step-contracts.md` | Reservation phase would be a named pipeline step with a declared contract |
 | `pipeline-event-log.md` | Reservation decisions (why cell X was claimed by commercial) are a natural event stream |
 | `city-archetypes.md` | Archetype config determines agent priority order and budgets |
